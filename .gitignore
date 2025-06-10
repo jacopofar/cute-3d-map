@@ -1,5 +1,7 @@
 # Screenshots
 Screenshot*.png
+# secrets
+.env
 # Logs
 logs
 *.log

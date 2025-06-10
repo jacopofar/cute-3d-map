@@ -12,15 +12,12 @@ import "./style.css";
 
 import "./map_style.css";
 
-
-
 const map = new MapLibreMap({
   container: "central-map",
   center: [9.2015, 45.5089],
   zoom: 17,
   pitch: 50,
-  style:
-    "https://api.maptiler.com/maps/basic-v2/style.json?key={KEY HERE}",
+  style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
 });
 
 // parameters to ensure the model is georeferenced correctly on the map
