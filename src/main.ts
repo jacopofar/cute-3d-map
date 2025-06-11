@@ -1,10 +1,12 @@
-import { Map as MapLibreMap, MercatorCoordinate } from "maplibre-gl";
+import { Map as MapLibreMap, MercatorCoordinate} from "maplibre-gl";
+import type {CustomLayerInterface} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 import {renderMe} from "./geojson_data.ts";
+
 
 import "./style.css";
 // Import our custom CSS
@@ -45,16 +47,22 @@ const modelTransform = {
     scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
 };
 
+interface ThreeJSLayerInterface extends CustomLayerInterface {
+    camera: THREE.Camera;
+    scene: THREE.Scene;
+    renderer?: THREE.WebGLRenderer;
+    map: MapLibreMap;
+}
 
 // configuration of the custom layer for a 3D model per the CustomLayerInterface
-const customLayer = {
+const customLayer: ThreeJSLayerInterface = {
     id: '3d-model',
     type: 'custom',
     renderingMode: '3d',
+    map: map,
+    camera: new THREE.Camera(),
+    scene:  new THREE.Scene(),
     onAdd(map, gl) {
-        this.camera = new THREE.Camera();
-        this.scene = new THREE.Scene();
-
         // create two three.js lights to illuminate the model
         const directionalLight = new THREE.DirectionalLight(0xffffff);
         directionalLight.position.set(0, -70, 100).normalize();
@@ -129,8 +137,15 @@ const customLayer = {
         // const l = new THREE.Matrix4().fromArray(modelMatrix);
 
         this.camera.projectionMatrix = m.multiply(l);
-        this.renderer.resetState();
-        this.renderer.render(this.scene, this.camera);
+        if(this.renderer){
+            this.renderer.resetState();
+            this.renderer.render(this.scene, this.camera);
+        }
+        else{
+            // this.renderer is set up on onAdd, so it should always be present
+            // but typescript does not know that
+            throw Error("render called when renderer is missing!!")
+        }
         this.map.triggerRepaint();
     }
 };
