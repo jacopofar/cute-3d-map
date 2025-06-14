@@ -1,11 +1,11 @@
-import { Map as MapLibreMap, MercatorCoordinate} from "maplibre-gl";
+import { Map as MapLibreMap, MercatorCoordinate, ScaleControl} from "maplibre-gl";
 import type {CustomLayerInterface} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-import {renderMe} from "./geojson_data.ts";
+import {heartMesh, meshesAt} from "./geojson_data.ts";
 
 
 import "./style.css";
@@ -22,6 +22,13 @@ const map = new MapLibreMap({
   style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
 });
 
+let scale = new ScaleControl({
+    maxWidth: 80,
+    unit: 'metric'
+});
+map.addControl(scale);
+
+
 // parameters to ensure the model is georeferenced correctly on the map
 const modelOrigin = {lng: 9.2015, lat: 45.5089};
 const modelAltitude = 0;
@@ -31,6 +38,7 @@ const modelAsMercatorCoordinate = MercatorCoordinate.fromLngLat(
     modelOrigin,
     modelAltitude
 );
+console.log("MERCATOR: ", modelAsMercatorCoordinate)
 
 // transformation parameters to position, rotate and scale the 3D model onto the map
 const modelTransform = {
@@ -60,7 +68,7 @@ const customLayer: ThreeJSLayerInterface = {
     type: 'custom',
     renderingMode: '3d',
     map: map,
-    camera: new THREE.Camera(),
+    camera: new THREE.PerspectiveCamera(),
     scene:  new THREE.Scene(),
     onAdd(map, gl) {
         // create two three.js lights to illuminate the model
@@ -72,11 +80,21 @@ const customLayer: ThreeJSLayerInterface = {
         directionalLight2.position.set(0, 70, 100).normalize();
         this.scene.add(directionalLight2);
 
-        const geometry = new THREE.BoxGeometry( 10, 10, 10 );
-        const material = new THREE.MeshToonMaterial( {color: 0x00ff00} );
-        const cube = new THREE.Mesh( geometry, material );
+        // add a cube with side 100m as a reference to check that the scale is right
+        const geometry = new THREE.BoxGeometry( 100, 100, 100 );
+        // const material = new THREE.MeshToonMaterial( {color: 0x00ff00} );
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x10ff10,
+            transparent: true,
+            opacity: 0.5
+            // wireframe: true
+        });
+        const cube = new THREE.Mesh(geometry, material );
+        cube.translateZ(50);
         this.scene.add(cube);
-        this.scene.add(renderMe())
+
+        // this.scene.add(heartMesh());
+        meshesAt([modelOrigin.lng, modelOrigin.lat], modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()).forEach(m => this.scene.add(m));
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
         // const loader = new GLTFLoader();
         // loader.load(

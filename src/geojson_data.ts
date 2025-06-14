@@ -1,3 +1,6 @@
+import {MercatorCoordinate} from "maplibre-gl";
+import type {LngLatLike} from "maplibre-gl";
+
 import * as THREE from 'three';
 
 
@@ -151,7 +154,7 @@ const myGeoJSON = {
   ]
 };
 
-export function renderMe(): THREE.Mesh{
+export function heartMesh(): THREE.Mesh{
     const heartShape = new THREE.Shape();
 
     heartShape.moveTo( 25, 25 );
@@ -164,7 +167,7 @@ export function renderMe(): THREE.Mesh{
 
     const extrudeSettings = {
         depth: 6,
-        bevelEnabled: true,
+        bevelEnabled: false,
         bevelSegments: 40,
         steps: 4,
         bevelSize: 1,
@@ -173,6 +176,39 @@ export function renderMe(): THREE.Mesh{
 
     const geometry = new THREE.ExtrudeGeometry( heartShape, extrudeSettings );
 
+    const mesh = new THREE.Mesh( geometry, new THREE.MeshPhongMaterial({wireframe: true}) );
+    return mesh;
+}
+
+
+function toMeters(coord: [number, number], origin: [number, number], scale: number): [number, number] {
+  return [(coord[0] - origin[0]) / scale, (coord[1] - origin[1]) / scale]
+}
+
+export function meshesAt(viewOrigin: [number, number], scale: number): THREE.Mesh[] {
+  let retVal:  THREE.Mesh[] = myGeoJSON.features.map(f => {
+    const coords = f.geometry.coordinates[0];
+    const baseCoord: [number, number] = [coords[0][0], coords[0][1]];
+    const featureBaseShape = new THREE.Shape();
+    const polyPoints: [number, number][] = [];
+    polyPoints.push(toMeters(baseCoord, viewOrigin, scale))
+    for(let c of coords){
+      polyPoints.push(toMeters([c[0], c[1]], viewOrigin, scale))
+    }
+    console.log(polyPoints);
+    for(let p of polyPoints){
+      featureBaseShape.lineTo(p[0], p[1])
+    }
+
+    const extrudeSettings = {
+        depth: 2,
+        bevelEnabled: false,
+    };
+
+    const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+
     const mesh = new THREE.Mesh( geometry, new THREE.MeshPhongMaterial() );
     return mesh;
+  })
+  return retVal;
 }
