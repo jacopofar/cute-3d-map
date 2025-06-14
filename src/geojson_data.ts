@@ -180,9 +180,10 @@ export function heartMesh(): THREE.Mesh{
     return mesh;
 }
 
+const magicFactor = 300;
 
 function toMeters(coord: [number, number], origin: [number, number], scale: number): [number, number] {
-  return [(coord[0] - origin[0]) / scale, (coord[1] - origin[1]) / scale]
+  return [(coord[0] - origin[0]) / (scale * magicFactor), (coord[1] - origin[1]) / (scale * magicFactor)]
 }
 
 export function meshesAt(viewOrigin: [number, number], scale: number): THREE.Mesh[] {
