@@ -13,14 +13,14 @@ import "./style.css";
 
 import "./map_style.css";
 
-const tileCenter: [number, number] = [9.196262, 45.497];
+const tileCenter: [number, number] = [9.186, 45.497];
 
 const map = new MapLibreMap({
-  container: "central-map",
-  center: tileCenter,
-  zoom: 16,
-  pitch: 30,
-  style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
+    container: "central-map",
+    center: tileCenter,
+    zoom: 13,
+    pitch: 30,
+    style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
 });
 
 let scale = new ScaleControl({
@@ -55,6 +55,7 @@ const modelTransform = {
     // in this case is 3.5646655226473536e-8
     scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
 };
+console.log("transform", modelTransform)
 
 interface ThreeJSLayerInterface extends CustomLayerInterface {
     camera: THREE.Camera;
@@ -95,7 +96,7 @@ const customLayer: ThreeJSLayerInterface = {
         this.scene.add(cube);
 
         // this.scene.add(heartMesh());
-        meshesAt(tileCenter, modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()).forEach(m => this.scene.add(m));
+        meshesAt(tileCenter).forEach(m => this.scene.add(m));
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
         // const loader = new GLTFLoader();
         // loader.load(
@@ -131,21 +132,21 @@ const customLayer: ThreeJSLayerInterface = {
 
         const m = new THREE.Matrix4().fromArray(args.defaultProjectionData.mainMatrix);
         const l = new THREE.Matrix4()
-            .makeTranslation(
-                modelTransform.translateX,
-                modelTransform.translateY,
-                modelTransform.translateZ
+        .makeTranslation(
+            modelTransform.translateX,
+            modelTransform.translateY,
+            modelTransform.translateZ
+        )
+        .scale(
+            new THREE.Vector3(
+                modelTransform.scale,
+                -modelTransform.scale,
+                modelTransform.scale
             )
-            .scale(
-                new THREE.Vector3(
-                    modelTransform.scale,
-                    -modelTransform.scale,
-                    modelTransform.scale
-                )
-            )
-            .multiply(rotationX)
-            .multiply(rotationY)
-            .multiply(rotationZ);
+        )
+        .multiply(rotationX)
+        .multiply(rotationY)
+        .multiply(rotationZ);
 
         // Alternatively, you can use this API to get the correct model matrix.
         // It will work regardless of current projection.

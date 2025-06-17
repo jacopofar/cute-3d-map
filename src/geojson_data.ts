@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 
+// square building with an hole, to test this kind of shape and highlight skew
 const myGeoJSON = {
   "type": "FeatureCollection",
   "generator": "overpass-turbo",
@@ -73,42 +74,191 @@ const myGeoJSON = {
   ]
 };
 
-const magicFactor = 300;
+// asymmetrical building, to check overlapping with map and orientation
+const myGeoJSON2 = {
+  "type": "FeatureCollection",
+  "generator": "overpass-turbo",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
+  "timestamp": "2025-06-17T13:10:02Z",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "way/165079765",
+        "building": "apartments",
+        "building:colour": "#bbb6ae",
+        "building:levels": "5",
+        "building:material": "concrete",
+        "roof:colour": "#c5817a",
+        "roof:levels": "0",
+        "roof:shape": "hipped"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.2018389,
+              45.5092296
+            ],
+            [
+              9.2014586,
+              45.5093449
+            ],
+            [
+              9.2014452,
+              45.5093232
+            ],
+            [
+              9.2014169,
+              45.5093317
+            ],
+            [
+              9.2013656,
+              45.5092485
+            ],
+            [
+              9.2015175,
+              45.5092025
+            ],
+            [
+              9.201525,
+              45.5092147
+            ],
+            [
+              9.2016655,
+              45.5091722
+            ],
+            [
+              9.2013634,
+              45.5086815
+            ],
+            [
+              9.2013289,
+              45.508692
+            ],
+            [
+              9.2013175,
+              45.5086744
+            ],
+            [
+              9.201253,
+              45.508694
+            ],
+            [
+              9.2012758,
+              45.5087282
+            ],
+            [
+              9.2012551,
+              45.5087349
+            ],
+            [
+              9.2015112,
+              45.5091355
+            ],
+            [
+              9.2013482,
+              45.5091852
+            ],
+            [
+              9.2011322,
+              45.5088384
+            ],
+            [
+              9.2010758,
+              45.5088558
+            ],
+            [
+              9.2010341,
+              45.5087917
+            ],
+            [
+              9.2009552,
+              45.5088178
+            ],
+            [
+              9.2009054,
+              45.5087441
+            ],
+            [
+              9.2010059,
+              45.5087107
+            ],
+            [
+              9.2010126,
+              45.5087205
+            ],
+            [
+              9.2012271,
+              45.5086521
+            ],
+            [
+              9.2012171,
+              45.5086354
+            ],
+            [
+              9.20128,
+              45.5086145
+            ],
+            [
+              9.2012937,
+              45.5086364
+            ],
+            [
+              9.2014437,
+              45.5085896
+            ],
+            [
+              9.2017759,
+              45.5091275
+            ],
+            [
+              9.2018389,
+              45.5092296
+            ]
+          ]
+        ]
+      },
+      "id": "way/165079765"
+    }]};
 
 
-function toMeters(coord: [number, number], origin: [number, number], scale: number): [number, number] {
-  return [(coord[0] - origin[0]) / (scale * magicFactor), (coord[1] - origin[1]) / (scale * magicFactor)];
-  // this version "works" but the scale is wrong and the skew is still present
-  // see https://github.com/jscastro76/threebox/blob/master/src/utils/utils.js#L103
-  // const EARTH_RADIUS = 6371008.8;
-  // const DEG2RAD = 3.141592 / 180;
-  // const PROJECTION_WORLD_SIZE = 1024000 / (EARTH_RADIUS * Math.PI * 2);
-  // return [
-  // 		-EARTH_RADIUS * DEG2RAD * (coord[0] - origin[0]) * PROJECTION_WORLD_SIZE,
-  // 		-EARTH_RADIUS * Math.log(Math.tan((Math.PI * 0.25) + (0.5 * DEG2RAD * (coord[1] - origin[1])))) * PROJECTION_WORLD_SIZE
-  // 	];
-}
-
-export function meshesAt(viewOrigin: [number, number], scale: number): THREE.Mesh[] {
-  return myGeoJSON.features.map(f => {
-    const coords = f.geometry.coordinates[0];
-    const polyPoints: [number, number][] = coords.map(c => toMeters([c[0], c[1]], viewOrigin, scale))
-    // console.log(polyPoints);
-
-    const featureBaseShape = new THREE.Shape(polyPoints.map(pp => new THREE.Vector2(pp[0], pp[1])));
-    console.log("Outer points:", featureBaseShape.getPoints())
-    // now the holes, if any
-    for(let hi=1; hi < f.geometry.coordinates.length; hi++){
-      const holePoints = f.geometry.coordinates[hi].map(c => toMeters([c[0], c[1]], viewOrigin, scale))
-      featureBaseShape.holes.push(new THREE.Path(holePoints.map(pp => new THREE.Vector2(pp[0], pp[1]))))
+    function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
+      let x = (coordinates[0] * 20037508.34) / 180;
+      let y = Math.log(Math.tan(((90 + coordinates[1]) * Math.PI) / 360)) /
+      (Math.PI / 180);
+      y = (y * 20037508.34) / 180;
+      return [x, y];
     }
-    const extrudeSettings = {
-      depth: 2,
-      bevelEnabled: false,
-    };
 
-    const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+    function toModelCoords(coord: [number, number], origin: [number, number]): [number, number] {
+      const coordMeters = epsg4326toEpsg3857(coord);
+      const originMeters = epsg4326toEpsg3857(origin);
+      // for myGeoJSON2 shou;ld be around [1200, 1300], they are currently around [1700, 1800]
+      return [(coordMeters[0] - originMeters[0]), (coordMeters[1] - originMeters[1])];
+    }
 
-    return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({color: 'red'}) );
-  })
-}
+    export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
+      return myGeoJSON2.features.map(f => {
+        const coords = f.geometry.coordinates[0];
+        const polyPoints: [number, number][] = coords.map(c => toModelCoords([c[0], c[1]], viewOrigin))
+        // console.log(polyPoints);
+
+        const featureBaseShape = new THREE.Shape(polyPoints.map(pp => new THREE.Vector2(pp[0], pp[1])));
+        console.log("Outer points:", [...featureBaseShape.getPoints().map(p => [p.x, p.y])])
+        // now the holes, if any
+        for(let hi=1; hi < f.geometry.coordinates.length; hi++){
+          const holePoints = f.geometry.coordinates[hi].map(c => toModelCoords([c[0], c[1]], viewOrigin))
+          featureBaseShape.holes.push(new THREE.Path(holePoints.map(pp => new THREE.Vector2(pp[0], pp[1]))))
+        }
+        const extrudeSettings = {
+          depth: 2,
+          bevelEnabled: false,
+        };
+
+        const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+
+        return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({color: 'red', transparent: true, opacity: 0.8}) );
+      })
+    }
