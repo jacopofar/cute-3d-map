@@ -9,3 +9,5 @@ from a GeoJSON object.
 It is based on the [MapLibre example](https://maplibre.org/maplibre-gl-js/docs/examples/add-3d-model/)
 but adapted to Typescript and with a model generated from the GeoJSON
 coordinates (epsg:4326) instead of a GLTF.
+
+![A map with a building rendered in red](example.png)
