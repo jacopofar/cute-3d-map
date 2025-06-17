@@ -3,9 +3,8 @@ import type {CustomLayerInterface} from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-import {heartMesh, meshesAt} from "./geojson_data.ts";
+import {meshesAt} from "./geojson_data.ts";
 
 
 import "./style.css";
@@ -14,11 +13,13 @@ import "./style.css";
 
 import "./map_style.css";
 
+const tileCenter: [number, number] = [9.196262, 45.497];
+
 const map = new MapLibreMap({
   container: "central-map",
-  center: [9.2015, 45.5089],
-  zoom: 17,
-  pitch: 50,
+  center: tileCenter,
+  zoom: 16,
+  pitch: 30,
   style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
 });
 
@@ -30,7 +31,7 @@ map.addControl(scale);
 
 
 // parameters to ensure the model is georeferenced correctly on the map
-const modelOrigin = {lng: 9.2015, lat: 45.5089};
+const modelOrigin = tileCenter;
 const modelAltitude = 0;
 const modelRotate = [0, 0, 0];
 
@@ -38,7 +39,7 @@ const modelAsMercatorCoordinate = MercatorCoordinate.fromLngLat(
     modelOrigin,
     modelAltitude
 );
-console.log("MERCATOR: ", modelAsMercatorCoordinate)
+console.log("MERCATOR: ", modelAsMercatorCoordinate, modelAsMercatorCoordinate.toLngLat())
 
 // transformation parameters to position, rotate and scale the 3D model onto the map
 const modelTransform = {
@@ -94,7 +95,7 @@ const customLayer: ThreeJSLayerInterface = {
         this.scene.add(cube);
 
         // this.scene.add(heartMesh());
-        meshesAt([modelOrigin.lng, modelOrigin.lat], modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()).forEach(m => this.scene.add(m));
+        meshesAt(tileCenter, modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()).forEach(m => this.scene.add(m));
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
         // const loader = new GLTFLoader();
         // loader.load(
