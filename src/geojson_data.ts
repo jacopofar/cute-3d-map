@@ -182,8 +182,18 @@ export function heartMesh(): THREE.Mesh{
 
 const magicFactor = 300;
 
+
 function toMeters(coord: [number, number], origin: [number, number], scale: number): [number, number] {
-  return [(coord[0] - origin[0]) / (scale * magicFactor), (coord[1] - origin[1]) / (scale * magicFactor)]
+  return [(coord[0] - origin[0]) / (scale * magicFactor), (coord[1] - origin[1]) / (scale * magicFactor)];
+  // this version "works" but the scale is wrong and the skew is still present
+  // see https://github.com/jscastro76/threebox/blob/master/src/utils/utils.js#L103
+  // const EARTH_RADIUS = 6371008.8;
+  // const DEG2RAD = 3.141592 / 180;
+  // const PROJECTION_WORLD_SIZE = 1024000 / (EARTH_RADIUS * Math.PI * 2);
+  // return [
+	// 		-EARTH_RADIUS * DEG2RAD * (coord[0] - origin[0]) * PROJECTION_WORLD_SIZE,
+	// 		-EARTH_RADIUS * Math.log(Math.tan((Math.PI * 0.25) + (0.5 * DEG2RAD * (coord[1] - origin[1])))) * PROJECTION_WORLD_SIZE
+	// 	];
 }
 
 export function meshesAt(viewOrigin: [number, number], scale: number): THREE.Mesh[] {
