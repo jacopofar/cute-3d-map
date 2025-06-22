@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 
 // square building with an hole, to test this kind of shape and highlight skew
-import myGeoJSON from './bicocca_hole.json';
+// import myGeoJSON from './bicocca_hole.json';
 // in Berlin, east side
 // import myGeoJSON from './lichtenberg.json';
 // reichstag
 // import myGeoJSON from './reichstag.json';
-// import myGeoJSON from './liberty_statue.json';
+import myGeoJSON from './liberty_statue.json';
 // import myGeoJSON from './capetown_lighthouse.json';
 // import myGeoJSON from './montevideo_stadium_part.json';
 // import myGeoJSON from './canada_far_north_building.json';
@@ -42,8 +42,9 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
   const coordMeters = epsg4326toEpsg3857(coord);
   const originMeters = epsg4326toEpsg3857(origin);
   const scaleFactor = Math.cos(2 * Math.PI * coord[1] / 360 );
-  const retVal = [(coordMeters[0] - originMeters[0]) * scaleFactor, (coordMeters[1] - originMeters[1]) * scaleFactor];
-  return retVal;
+  return [
+    (coordMeters[0] - originMeters[0]) * scaleFactor,
+    (coordMeters[1] - originMeters[1]) * scaleFactor];
 }
 
 export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
@@ -60,12 +61,12 @@ export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
       featureBaseShape.holes.push(new THREE.Path(holePoints.map(pp => new THREE.Vector2(pp[0], pp[1]))))
     }
     const extrudeSettings = {
-      depth: 2,
+      depth: 80,
       bevelEnabled: false,
     };
 
     const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
 
-    return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({color: 'red', transparent: true, opacity: 0.6}) );
+    return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({color: 'red', transparent: true, opacity: 0.5}) );
   })
 }
