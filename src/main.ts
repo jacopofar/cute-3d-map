@@ -56,7 +56,7 @@ const modelAsMercatorCoordinate = MercatorCoordinate.fromLngLat(
     modelOrigin,
     modelAltitude
 );
-console.log("MERCATOR: ", modelAsMercatorCoordinate, modelAsMercatorCoordinate.toLngLat())
+// console.log("MERCATOR: ", modelAsMercatorCoordinate, modelAsMercatorCoordinate.toLngLat())
 
 // transformation parameters to position, rotate and scale the 3D model onto the map
 const modelTransform = {
@@ -72,7 +72,7 @@ const modelTransform = {
     // in this case is 3.5646655226473536e-8
     scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()
 };
-console.log("transform", modelTransform)
+// console.log("transform", modelTransform)
 
 interface ThreeJSLayerInterface extends CustomLayerInterface {
     camera: THREE.Camera;

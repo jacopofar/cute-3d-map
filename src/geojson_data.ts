@@ -54,7 +54,7 @@ export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
     // console.log(polyPoints);
 
     const featureBaseShape = new THREE.Shape(polyPoints.map(pp => new THREE.Vector2(pp[0], pp[1])));
-    console.log("Outer points:", [...featureBaseShape.getPoints().map(p => [p.x, p.y])])
+    // console.log("Outer points:", [...featureBaseShape.getPoints().map(p => [p.x, p.y])])
     // now the holes, if any
     for(let hi=1; hi < f.geometry.coordinates.length; hi++){
       const holePoints = f.geometry.coordinates[hi].map(c => toModelCoords([c[0], c[1]], viewOrigin))
