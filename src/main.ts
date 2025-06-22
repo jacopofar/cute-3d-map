@@ -13,12 +13,29 @@ import "./style.css";
 
 import "./map_style.css";
 
+// Milan
 const tileCenter: [number, number] = [9.186, 45.497];
+// Berlin
+// const tileCenter: [number, number] = [13.52222, 52.51051];
+// New York
+// const tileCenter: [number, number] = [-73.908546, 40.609459];
+// Cape Town
+// const tileCenter: [number, number] = [18.446337, -33.979250];
+// Montevideo, Uruguay (latitude copied from Cape Town)
+// const tileCenter: [number, number] = [-56.21316, -33.979250];
+// northern Canada
+// const tileCenter: [number, number] = [-111.23443, 56.68004];
+// Tokyo
+// const tileCenter: [number, number] = [139.8678, 35.6189];
+// santa monica (opposite latitude as cape town)
+// const tileCenter: [number, number] = [-119.018, 33.877];
+// Quito (on equator)
+// const tileCenter: [number, number] = [-78.501, -0.18];
 
 const map = new MapLibreMap({
     container: "central-map",
     center: tileCenter,
-    zoom: 13,
+    zoom: 12,
     pitch: 30,
     style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
 });
@@ -64,6 +81,22 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
     map: MapLibreMap;
 }
 
+function getCube100(x: number, y: number): THREE.Mesh {
+     const geometry = new THREE.BoxGeometry( 100, 100, 100 );
+    // const material = new THREE.MeshToonMaterial( {color: 0x00ff00} );
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x10ff10,
+        transparent: true,
+        opacity: 0.9
+        // wireframe: true
+    });
+    const cube = new THREE.Mesh(geometry, material );
+    cube.translateZ(50);
+    cube.translateX(x);
+    cube.translateY(y);
+    return cube;
+}
+
 // configuration of the custom layer for a 3D model per the CustomLayerInterface
 const customLayer: ThreeJSLayerInterface = {
     id: '3d-model',
@@ -94,6 +127,11 @@ const customLayer: ThreeJSLayerInterface = {
         const cube = new THREE.Mesh(geometry, material );
         cube.translateZ(50);
         this.scene.add(cube);
+        this.scene.add(getCube100(1000, 1000));
+        this.scene.add(getCube100(-1000, -1000));
+        this.scene.add(getCube100(1000, -1000));
+        this.scene.add(getCube100(-1000, 1000));
+
 
         // this.scene.add(heartMesh());
         meshesAt(tileCenter).forEach(m => this.scene.add(m));

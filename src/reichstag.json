@@ -1,0 +1,496 @@
+{
+  "type": "FeatureCollection",
+  "generator": "overpass-turbo",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
+  "timestamp": "2025-06-22T14:01:02Z",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "relation/2201742",
+        "addr:city": "Berlin",
+        "addr:country": "DE",
+        "addr:housename": "Reichstagsgebäude",
+        "addr:housenumber": "1",
+        "addr:postcode": "10557",
+        "addr:street": "Platz der Republik",
+        "addr:suburb": "Tiergarten",
+        "air_conditioning": "yes",
+        "architect": "Paul Wallot",
+        "architect:wikidata": "Q77357",
+        "architect:wikipedia": "de:Paul Wallot",
+        "blind:description:de": "Im Reichstagsgebäude gibt es Führungen für Blinde und Sehgeschädigte, siehe http://www.absv.de/freizeit/reichstag.htm .",
+        "building": "government",
+        "building:colour": "#cfccb9",
+        "building:material": "stone",
+        "construction_date": "1884-06-09..1894",
+        "contact:tripadvisor": "https://www.tripadvisor.com/Attraction_Review-g187323-d190517-Reviews-Reichstag_Building-Berlin.html",
+        "description": "Sitz des Deutschen Bundestages",
+        "fee": "no",
+        "height": "48",
+        "heritage": "4",
+        "heritage:operator": "lda",
+        "image": "http://upload.wikimedia.org/wikipedia/commons/3/36/Berlin_reichstag_west_panorama.jpg",
+        "image:0": "https://photos.app.goo.gl/vHmEzoFEf6Xj13hEA",
+        "internet_access": "wlan",
+        "name": "Reichstagsgebäude",
+        "name:ar": "مبنى الرايشتاغ",
+        "name:be": "Рэйхстаг",
+        "name:cs": "Budova Říšského sněmu",
+        "name:da": "Rigsdagsbygningen",
+        "name:de": "Reichstagsgebäude",
+        "name:el": "Ράιχσταγκ",
+        "name:en": "Reichstag Building",
+        "name:es": "Edificio del Reichstag",
+        "name:fa": "ساختمان رایشستاگ",
+        "name:fi": "Valtiopäivätalo",
+        "name:fr": "Palais du Reichstag",
+        "name:he": "רייכסטאג",
+        "name:is": "Þinghúsið",
+        "name:it": "Palazzo del Reichstag",
+        "name:ja": "国会議事堂",
+        "name:ko": "국가의회(제국의회) 의사당",
+        "name:lt": "Reichstagas",
+        "name:nl": "Rijksdaggebouw",
+        "name:no": "Riksdagsbygningen",
+        "name:pl": "Gmach parlamentu Rzeszy",
+        "name:pt": "Palácio do Reichstag",
+        "name:ro": "Clădirea Parlamentului German",
+        "name:ru": "Рейхстаг",
+        "name:sk": "Budova Ríšskeho snemu",
+        "name:sv": "Riksdagshuset",
+        "name:uk": "Рейхстаг",
+        "name:zh": "德国国会大厦",
+        "opening_hours": "Mo-Sa 08:00-00:00; Su 08:00-24:00",
+        "operator": "Deutscher Bundestag - Verfassungsorgan der Bundesrepublik Deutschland",
+        "ref:vatin": "DE 122119035",
+        "reservation": "required",
+        "roof:colour": "#cfccb9",
+        "roof:shape": "flat",
+        "short_name": "RTG",
+        "smoking": "isolated",
+        "start_date": "1894",
+        "toilets": "yes",
+        "toilets:wheelchair": "yes",
+        "tourism": "attraction",
+        "type": "multipolygon",
+        "wheelchair": "yes",
+        "wikidata": "Q151897",
+        "wikimedia_commons": "Category:Reichstag_(building)",
+        "wikipedia": "de:Reichstagsgebäude"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              13.3767459,
+              52.5184614
+            ],
+            [
+              13.3768491,
+              52.5184614
+            ],
+            [
+              13.3768492,
+              52.5184683
+            ],
+            [
+              13.3768678,
+              52.5184682
+            ],
+            [
+              13.376868,
+              52.5185919
+            ],
+            [
+              13.3768681,
+              52.5187156
+            ],
+            [
+              13.3768508,
+              52.5187157
+            ],
+            [
+              13.3768509,
+              52.5187221
+            ],
+            [
+              13.3767493,
+              52.5187221
+            ],
+            [
+              13.3767494,
+              52.5187671
+            ],
+            [
+              13.3767407,
+              52.5187671
+            ],
+            [
+              13.376741,
+              52.5190249
+            ],
+            [
+              13.3767577,
+              52.5190249
+            ],
+            [
+              13.3767578,
+              52.5190488
+            ],
+            [
+              13.3767995,
+              52.5190488
+            ],
+            [
+              13.3767997,
+              52.51916
+            ],
+            [
+              13.3767604,
+              52.51916
+            ],
+            [
+              13.3767605,
+              52.5191869
+            ],
+            [
+              13.3767178,
+              52.5191869
+            ],
+            [
+              13.3767178,
+              52.519211
+            ],
+            [
+              13.376536,
+              52.5192111
+            ],
+            [
+              13.376536,
+              52.5191871
+            ],
+            [
+              13.3764953,
+              52.5191871
+            ],
+            [
+              13.3764953,
+              52.5191783
+            ],
+            [
+              13.3762419,
+              52.5191784
+            ],
+            [
+              13.3762419,
+              52.5191896
+            ],
+            [
+              13.3761089,
+              52.5191897
+            ],
+            [
+              13.3759758,
+              52.5191898
+            ],
+            [
+              13.3759757,
+              52.51918
+            ],
+            [
+              13.3757228,
+              52.5191801
+            ],
+            [
+              13.3757229,
+              52.5191891
+            ],
+            [
+              13.3756824,
+              52.5191891
+            ],
+            [
+              13.3756825,
+              52.5192147
+            ],
+            [
+              13.3754985,
+              52.5192148
+            ],
+            [
+              13.3754984,
+              52.5191905
+            ],
+            [
+              13.3754577,
+              52.5191905
+            ],
+            [
+              13.3754577,
+              52.5191658
+            ],
+            [
+              13.375417,
+              52.5191658
+            ],
+            [
+              13.3754168,
+              52.5190545
+            ],
+            [
+              13.3754564,
+              52.5190545
+            ],
+            [
+              13.3754564,
+              52.5190291
+            ],
+            [
+              13.3754698,
+              52.5190291
+            ],
+            [
+              13.3754694,
+              52.5187736
+            ],
+            [
+              13.3754368,
+              52.5187736
+            ],
+            [
+              13.3754367,
+              52.5187397
+            ],
+            [
+              13.375362,
+              52.5187397
+            ],
+            [
+              13.3753356,
+              52.5187394
+            ],
+            [
+              13.3753355,
+              52.5187228
+            ],
+            [
+              13.3753345,
+              52.5185909
+            ],
+            [
+              13.3753337,
+              52.5184717
+            ],
+            [
+              13.3753335,
+              52.5184545
+            ],
+            [
+              13.3753546,
+              52.5184547
+            ],
+            [
+              13.3754336,
+              52.5184547
+            ],
+            [
+              13.3754336,
+              52.5184235
+            ],
+            [
+              13.3754632,
+              52.5184235
+            ],
+            [
+              13.3754629,
+              52.5181673
+            ],
+            [
+              13.3754464,
+              52.5181673
+            ],
+            [
+              13.3754464,
+              52.5181416
+            ],
+            [
+              13.3754059,
+              52.5181417
+            ],
+            [
+              13.3754058,
+              52.5180306
+            ],
+            [
+              13.3754462,
+              52.5180306
+            ],
+            [
+              13.3754462,
+              52.518005
+            ],
+            [
+              13.3754879,
+              52.518005
+            ],
+            [
+              13.3754879,
+              52.5179808
+            ],
+            [
+              13.375667,
+              52.5179807
+            ],
+            [
+              13.375667,
+              52.5180044
+            ],
+            [
+              13.3757104,
+              52.5180044
+            ],
+            [
+              13.3757104,
+              52.5180141
+            ],
+            [
+              13.375965,
+              52.518014
+            ],
+            [
+              13.375965,
+              52.518002
+            ],
+            [
+              13.3760968,
+              52.5180019
+            ],
+            [
+              13.3762285,
+              52.5180018
+            ],
+            [
+              13.3762286,
+              52.5180122
+            ],
+            [
+              13.3764827,
+              52.5180121
+            ],
+            [
+              13.3764827,
+              52.5180006
+            ],
+            [
+              13.3765234,
+              52.5180006
+            ],
+            [
+              13.3765234,
+              52.5179768
+            ],
+            [
+              13.3767062,
+              52.5179767
+            ],
+            [
+              13.3767062,
+              52.5180002
+            ],
+            [
+              13.3767482,
+              52.5180002
+            ],
+            [
+              13.3767483,
+              52.5180242
+            ],
+            [
+              13.3767867,
+              52.5180242
+            ],
+            [
+              13.3767868,
+              52.5181356
+            ],
+            [
+              13.3767494,
+              52.5181356
+            ],
+            [
+              13.3767495,
+              52.5181614
+            ],
+            [
+              13.3767336,
+              52.5181614
+            ],
+            [
+              13.3767336,
+              52.5181701
+            ],
+            [
+              13.3767339,
+              52.5184169
+            ],
+            [
+              13.3767458,
+              52.5184169
+            ],
+            [
+              13.3767459,
+              52.5184614
+            ]
+          ],
+          [
+            [
+              13.3758949,
+              52.5188276
+            ],
+            [
+              13.3758951,
+              52.5189672
+            ],
+            [
+              13.3763123,
+              52.5189668
+            ],
+            [
+              13.376312,
+              52.5188273
+            ],
+            [
+              13.3758949,
+              52.5188276
+            ]
+          ],
+          [
+            [
+              13.3763073,
+              52.5183607
+            ],
+            [
+              13.3763076,
+              52.5182215
+            ],
+            [
+              13.3758915,
+              52.5182225
+            ],
+            [
+              13.3758931,
+              52.5183617
+            ],
+            [
+              13.3763073,
+              52.5183607
+            ]
+          ]
+        ]
+      },
+      "id": "relation/2201742"
+    }
+  ]
+}

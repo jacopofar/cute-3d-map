@@ -1,0 +1,72 @@
+{
+  "type": "FeatureCollection",
+  "generator": "overpass-turbo",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
+  "timestamp": "2025-06-17T13:10:02Z",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "relation/6827405",
+        "building": "apartments",
+        "building:levels": "4",
+        "roof:colour": "#c67164",
+        "type": "multipolygon"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              9.1984229,
+              45.4993129
+            ],
+            [
+              9.1985991,
+              45.4996229
+            ],
+            [
+              9.1980964,
+              45.4997633
+            ],
+            [
+              9.1979201,
+              45.4994534
+            ],
+            [
+              9.1981346,
+              45.4993935
+            ],
+            [
+              9.1984229,
+              45.4993129
+            ]
+          ],
+          [
+            [
+              9.1984122,
+              45.4995659
+            ],
+            [
+              9.1983402,
+              45.4994391
+            ],
+            [
+              9.1981002,
+              45.4995061
+            ],
+            [
+              9.1981722,
+              45.4996329
+            ],
+            [
+              9.1984122,
+              45.4995659
+            ]
+          ]
+        ]
+      },
+      "id": "relation/6827405"
+    }
+  ]
+}

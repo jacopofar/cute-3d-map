@@ -1,0 +1,62 @@
+{
+  "type": "FeatureCollection",
+  "generator": "overpass-turbo",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
+  "timestamp": "2025-06-22T14:28:44Z",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "way/344538954",
+        "building": "yes",
+        "image": "https://commons.wikimedia.org/wiki/File:Lighthouse_Cape_Point,_South_Africa.JPG",
+        "man_made": "lighthouse",
+        "name": "Cape Point Lighthouse",
+        "seamark:landmark:height": "30",
+        "seamark:light:1:character": "Fl",
+        "seamark:light:1:colour": "white",
+        "seamark:light:1:group": "2+1",
+        "seamark:light:1:height": "87",
+        "seamark:light:1:period": "30",
+        "seamark:light:1:range": "32",
+        "seamark:light:1:sector_end": "106",
+        "seamark:light:1:sector_start": "153",
+        "seamark:light:1:sequence": "0.6+(3.6),0.6+(12.3),0.6+(12.3)",
+        "seamark:light:reference": "D 6120",
+        "seamark:name": "Cape of Good Hope",
+        "seamark:type": "landmark",
+        "source": "US NGA Pub. 112. 2010-11-10.",
+        "wikimedia_commons": "File:Lighthouse_Cape_Point,_South_Africa.JPG",
+        "wikipedia": "en:Cape Point#Lighthouse"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              18.496855,
+              -34.3569158
+            ],
+            [
+              18.4968785,
+              -34.3569741
+            ],
+            [
+              18.496951,
+              -34.3569542
+            ],
+            [
+              18.4969275,
+              -34.3568959
+            ],
+            [
+              18.496855,
+              -34.3569158
+            ]
+          ]
+        ]
+      },
+      "id": "way/344538954"
+    }
+  ]
+}

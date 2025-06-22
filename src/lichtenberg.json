@@ -1,0 +1,104 @@
+{
+  "type": "FeatureCollection",
+  "generator": "overpass-turbo",
+  "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL.",
+  "timestamp": "2025-06-22T13:54:00Z",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "way/18679194",
+        "architect": "Grisebach & Rehmann",
+        "building": "apartments",
+        "building:levels": "4",
+        "roof:levels": "1",
+        "roof:shape": "gabled",
+        "year_of_construction": "1925"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              13.4999979,
+              52.5165611
+            ],
+            [
+              13.4999956,
+              52.5165523
+            ],
+            [
+              13.4997941,
+              52.5157923
+            ],
+            [
+              13.499008,
+              52.5158695
+            ],
+            [
+              13.4991909,
+              52.5165724
+            ],
+            [
+              13.499204,
+              52.5165712
+            ],
+            [
+              13.4992158,
+              52.5166103
+            ],
+            [
+              13.499202,
+              52.5166122
+            ],
+            [
+              13.4992053,
+              52.5166249
+            ],
+            [
+              13.4992089,
+              52.5166386
+            ],
+            [
+              13.4990271,
+              52.5166566
+            ],
+            [
+              13.4990236,
+              52.5166417
+            ],
+            [
+              13.4988292,
+              52.5158895
+            ],
+            [
+              13.4988005,
+              52.5157783
+            ],
+            [
+              13.4990733,
+              52.5157515
+            ],
+            [
+              13.4999349,
+              52.515667
+            ],
+            [
+              13.5001651,
+              52.5165355
+            ],
+            [
+              13.5001675,
+              52.5165444
+            ],
+            [
+              13.4999979,
+              52.5165611
+            ]
+          ]
+        ]
+      },
+      "id": "way/18679194"
+    }
+  ]
+}
