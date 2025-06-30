@@ -14,11 +14,11 @@ import "./style.css";
 import "./map_style.css";
 
 // Milan
-// const tileCenter: [number, number] = [9.186, 45.497];
+const tileCenter: [number, number] = [9.186, 45.497];
 // Berlin
 // const tileCenter: [number, number] = [13.52222, 52.51051];
 // New York
-const tileCenter: [number, number] = [-73.908546, 40.609459];
+// const tileCenter: [number, number] = [-73.908546, 40.609459];
 // Cape Town
 // const tileCenter: [number, number] = [18.446337, -33.979250];
 // Montevideo, Uruguay (latitude copied from Cape Town)

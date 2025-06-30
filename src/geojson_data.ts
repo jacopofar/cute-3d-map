@@ -6,13 +6,14 @@ import * as THREE from 'three';
 // import myGeoJSON from './lichtenberg.json';
 // reichstag
 // import myGeoJSON from './reichstag.json';
-import myGeoJSON from './liberty_statue.json';
+// import myGeoJSON from './liberty_statue.json';
 // import myGeoJSON from './capetown_lighthouse.json';
 // import myGeoJSON from './montevideo_stadium_part.json';
 // import myGeoJSON from './canada_far_north_building.json';
 // import myGeoJSON from './tokyo_imperial_palace.json';
 // import myGeoJSON from './santa_monica_rand.json';
 // import myGeoJSON from './quito_colegio.json';
+import myGeoJSON from './milano_raw.json';
 
 
 function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
@@ -45,28 +46,61 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
   return [
     (coordMeters[0] - originMeters[0]) * scaleFactor,
     (coordMeters[1] - originMeters[1]) * scaleFactor];
-}
+  }
 
-export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
-  return myGeoJSON.features.map(f => {
-    const coords = f.geometry.coordinates[0];
-    const polyPoints: [number, number][] = coords.map(c => toModelCoords([c[0], c[1]], viewOrigin))
-    // console.log(polyPoints);
+  function coordsToShape(coords: [number, number][][], viewOrigin: [number, number]){
+    const polyPoints: [number, number][] = coords[0].map(c => toModelCoords([c[0], c[1]], viewOrigin));
+    // console.log("polyPoints:", polyPoints);
 
     const featureBaseShape = new THREE.Shape(polyPoints.map(pp => new THREE.Vector2(pp[0], pp[1])));
     // console.log("Outer points:", [...featureBaseShape.getPoints().map(p => [p.x, p.y])])
     // now the holes, if any
-    for(let hi=1; hi < f.geometry.coordinates.length; hi++){
-      const holePoints = f.geometry.coordinates[hi].map(c => toModelCoords([c[0], c[1]], viewOrigin))
+    for(let hi=1; hi < coords.length; hi++){
+      const holePoints = coords[hi].map(c => toModelCoords([c[0], c[1]], viewOrigin))
       featureBaseShape.holes.push(new THREE.Path(holePoints.map(pp => new THREE.Vector2(pp[0], pp[1]))))
     }
+    return featureBaseShape;
+  }
+
+  function geoJSONtoMeshes(f: any, viewOrigin: [number, number]): THREE.Mesh[]{
+    if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon'){
+      return [];
+    }
+    if (!('building' in f.properties)){
+      return [];
+    }
+    // console.log("to render: ", f);
     const extrudeSettings = {
       depth: 80,
       bevelEnabled: false,
     };
+    if (f.geometry.type === 'MultiPolygon') {
+      return f.geometry.coordinates.map((polygon: [number, number][][]) => {
+        const featureBaseShape = coordsToShape(polygon, viewOrigin);
 
-    const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+        const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+        return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({
+          color: 'red',
+          transparent: true, opacity: 0.9
+        }) );
+      })
 
-    return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({color: 'red', transparent: true, opacity: 0.5}) );
-  })
-}
+    }
+    else {
+      if (f.geometry.type === 'Polygon') {
+        const featureBaseShape = coordsToShape(f.geometry.coordinates, viewOrigin);
+        const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
+        return [new THREE.Mesh( geometry, new THREE.MeshToonMaterial({
+          color: 'red',
+          transparent: true, opacity: 0.5
+        }) )];
+
+      }
+    }
+    console.error("Cannot handle feature:", f);
+    return [];
+  }
+
+  export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
+    return myGeoJSON.features.map(f => geoJSONtoMeshes(f, viewOrigin)).filter((m: THREE.Mesh[]) => m.length !== 0).flat(1);
+  }
