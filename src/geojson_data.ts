@@ -73,7 +73,19 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
       }
     }
     return 10;
+  }
 
+    function geoJSONtoMaterial(f: any): THREE.MeshToonMaterial {
+      let color = "grey";
+    if ("building:colour" in f.properties){
+      const facadeColorDesc = f.properties["building:colour"];
+      color = facadeColorDesc;
+      console.log("found color:", f.properties)
+    }
+    return new THREE.MeshToonMaterial({
+          color: color,
+          transparent: true, opacity: 0.9
+        })
   }
 
   function geoJSONtoMeshes(f: any, viewOrigin: [number, number]): THREE.Mesh[]{
@@ -93,10 +105,7 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
         const featureBaseShape = coordsToShape(polygon, viewOrigin);
 
         const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
-        return new THREE.Mesh( geometry, new THREE.MeshToonMaterial({
-          color: 'red',
-          transparent: true, opacity: 0.9
-        }) );
+        return new THREE.Mesh( geometry, geoJSONtoMaterial(f));
       })
 
     }
@@ -104,10 +113,7 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
       if (f.geometry.type === 'Polygon') {
         const featureBaseShape = coordsToShape(f.geometry.coordinates, viewOrigin);
         const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
-        return [new THREE.Mesh( geometry, new THREE.MeshToonMaterial({
-          color: 'red',
-          transparent: true, opacity: 0.5
-        }) )];
+        return [new THREE.Mesh( geometry, geoJSONtoMaterial(f) )];
 
       }
     }
