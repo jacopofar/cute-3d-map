@@ -115,24 +115,6 @@ const customLayer: ThreeJSLayerInterface = {
         directionalLight2.position.set(0, 70, 100).normalize();
         this.scene.add(directionalLight2);
 
-        // add a cube with side 100m as a reference to check that the scale is right
-        const geometry = new THREE.BoxGeometry( 100, 100, 100 );
-        // const material = new THREE.MeshToonMaterial( {color: 0x00ff00} );
-        const material = new THREE.MeshStandardMaterial({
-            color: 0x10ff10,
-            transparent: true,
-            opacity: 0.5
-            // wireframe: true
-        });
-        const cube = new THREE.Mesh(geometry, material );
-        cube.translateZ(50);
-        this.scene.add(cube);
-        this.scene.add(getCube100(1000, 1000));
-        this.scene.add(getCube100(-1000, -1000));
-        this.scene.add(getCube100(1000, -1000));
-        this.scene.add(getCube100(-1000, 1000));
-
-
         // this.scene.add(heartMesh());
         meshesAt(tileCenter).forEach(m => this.scene.add(m));
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
