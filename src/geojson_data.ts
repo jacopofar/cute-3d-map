@@ -62,6 +62,20 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
     return featureBaseShape;
   }
 
+  function geoJSONtoHeight(f: any): number {
+    if ("building:levels" in f.properties){
+      const levelsDesc = f.properties["building:levels"];
+      try {
+        return Number(levelsDesc) * 3;
+      }
+      catch {
+        console.error("Cannot convert building height toa number:", f.properties)
+      }
+    }
+    return 10;
+
+  }
+
   function geoJSONtoMeshes(f: any, viewOrigin: [number, number]): THREE.Mesh[]{
     if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon'){
       return [];
@@ -71,7 +85,7 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
     }
     // console.log("to render: ", f);
     const extrudeSettings = {
-      depth: 80,
+      depth: geoJSONtoHeight(f),
       bevelEnabled: false,
     };
     if (f.geometry.type === 'MultiPolygon') {
