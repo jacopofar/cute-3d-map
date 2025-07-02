@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-
+import type Geojson from 'geojson';
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
 // in Berlin, east side
@@ -13,8 +13,9 @@ import * as THREE from 'three';
 // import myGeoJSON from './tokyo_imperial_palace.json';
 // import myGeoJSON from './santa_monica_rand.json';
 // import myGeoJSON from './quito_colegio.json';
-import myGeoJSON from './milano_raw.json';
+import _myGeoJSON from './milano_raw.json';
 
+let myGeoJSON: Geojson.FeatureCollection = (_myGeoJSON as Geojson.FeatureCollection);
 
 function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
   let x = (coordinates[0] * 20037508.34) / 180;
@@ -48,12 +49,10 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
     (coordMeters[1] - originMeters[1]) * scaleFactor];
   }
 
-  function coordsToShape(coords: [number, number][][], viewOrigin: [number, number]){
+  function coordsToShape(coords: Geojson.Position[][], viewOrigin: [number, number]){
     const polyPoints: [number, number][] = coords[0].map(c => toModelCoords([c[0], c[1]], viewOrigin));
-    // console.log("polyPoints:", polyPoints);
 
     const featureBaseShape = new THREE.Shape(polyPoints.map(pp => new THREE.Vector2(pp[0], pp[1])));
-    // console.log("Outer points:", [...featureBaseShape.getPoints().map(p => [p.x, p.y])])
     // now the holes, if any
     for(let hi=1; hi < coords.length; hi++){
       const holePoints = coords[hi].map(c => toModelCoords([c[0], c[1]], viewOrigin))
@@ -62,25 +61,24 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
     return featureBaseShape;
   }
 
-  function geoJSONtoHeight(f: any): number {
-    if ("building:levels" in f.properties){
+  function geoJSONtoHeight(f: Geojson.Feature): number {
+    if (f.properties && "building:levels" in f.properties){
       const levelsDesc = f.properties["building:levels"];
       try {
         return Number(levelsDesc) * 3;
       }
       catch {
-        console.error("Cannot convert building height toa number:", f.properties)
+        console.error("Cannot convert building height to a number:", f.properties)
       }
     }
     return 10;
   }
 
-    function geoJSONtoMaterial(f: any): THREE.MeshToonMaterial {
-      let color = "grey";
-    if ("building:colour" in f.properties){
+    function geoJSONtoMaterial(f: Geojson.Feature): THREE.MeshToonMaterial {
+      let color = "pink";
+    if (f.properties && "building:colour" in f.properties){
       const facadeColorDesc = f.properties["building:colour"];
       color = facadeColorDesc;
-      console.log("found color:", f.properties)
     }
     return new THREE.MeshToonMaterial({
           color: color,
@@ -88,20 +86,22 @@ function toModelCoords(coord: [number, number], origin: [number, number]): [numb
         })
   }
 
-  function geoJSONtoMeshes(f: any, viewOrigin: [number, number]): THREE.Mesh[]{
+  function geoJSONtoMeshes(f: Geojson.Feature, viewOrigin: [number, number]): THREE.Mesh[]{
     if (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon'){
+      return [];
+    }
+    if (!f.properties) {
       return [];
     }
     if (!('building' in f.properties)){
       return [];
     }
-    // console.log("to render: ", f);
     const extrudeSettings = {
       depth: geoJSONtoHeight(f),
       bevelEnabled: false,
     };
     if (f.geometry.type === 'MultiPolygon') {
-      return f.geometry.coordinates.map((polygon: [number, number][][]) => {
+      return f.geometry.coordinates.map(polygon => {
         const featureBaseShape = coordsToShape(polygon, viewOrigin);
 
         const geometry = new THREE.ExtrudeGeometry(featureBaseShape, extrudeSettings );
