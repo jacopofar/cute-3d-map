@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prettify": "npx prettier src/*.ts --write"
   },
   "devDependencies": {
     "@types/three": "^0.177.0",
+    "prettier": "3.6.2",
     "typescript": "~5.8.3",
     "vite": "^6.3.5"
   },
