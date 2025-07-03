@@ -3,10 +3,11 @@ import {
   MercatorCoordinate,
   ScaleControl,
 } from "maplibre-gl";
+import * as THREE from "three";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+
 import type { CustomLayerInterface } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-
-import * as THREE from "three";
 
 import { meshesAt } from "./geojson_data.ts";
 
@@ -45,6 +46,7 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
 class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
+  customLayer: ThreeJSLayerInterface;
 
   constructor(tileCenter: [number, number]) {
     this.tileCenter = tileCenter;
@@ -87,7 +89,7 @@ class CoolMap {
       scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits(),
     };
     // configuration of the custom layer for a 3D model per the CustomLayerInterface
-    const customLayer: ThreeJSLayerInterface = {
+    this.customLayer = {
       id: "3d-model",
       type: "custom",
       renderingMode: "3d",
@@ -181,7 +183,28 @@ class CoolMap {
     };
 
     this.map.on("style.load", () => {
-      this.map.addLayer(customLayer);
+      this.map.addLayer(this.customLayer);
+    });
+  }
+
+  async getGLTF(): Promise<ArrayBuffer> {
+    return new Promise<ArrayBuffer>((res, rej) => {
+      const exporter = new GLTFExporter();
+      exporter.parse(
+        this.customLayer.scene,
+        function (gltf) {
+            if (gltf instanceof ArrayBuffer){
+                res(gltf);
+            }
+            else{
+                rej(["This is not an ArrayBuffer!", gltf])
+            }
+        },
+        function (error) {
+          rej(error);
+        },
+        { binary: true },
+      );
     });
   }
 
@@ -205,3 +228,12 @@ class CoolMap {
 }
 
 const c = new CoolMap([9.186, 45.497]);
+// example of how to download GLTF file
+// setTimeout(async () => {
+//   const data = await c.getGLTF();
+//   const blob = new Blob([data], { type: "model/gltf-binary" });
+//   const link = document.createElement("a");
+//   link.href = window.URL.createObjectURL(blob);
+//   link.download = "gltf.glb";
+//   link.click();
+// }, 5000);
