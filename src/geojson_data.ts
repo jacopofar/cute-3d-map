@@ -13,7 +13,7 @@ import type Geojson from "geojson";
 // import myGeoJSON from './tokyo_imperial_palace.json';
 // import myGeoJSON from './santa_monica_rand.json';
 // import myGeoJSON from './quito_colegio.json';
-import _myGeoJSON from "./milano_raw.json";
+import _myGeoJSON from "./milano.json";
 
 let myGeoJSON: Geojson.FeatureCollection =
   _myGeoJSON as Geojson.FeatureCollection;
@@ -44,10 +44,9 @@ function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
 
 function toModelCoords(
   coord: [number, number],
-  origin: [number, number],
+  originMeters: [number, number],
 ): [number, number] {
   const coordMeters = epsg4326toEpsg3857(coord);
-  const originMeters = epsg4326toEpsg3857(origin);
   const scaleFactor = Math.cos((2 * Math.PI * coord[1]) / 360);
   return [
     (coordMeters[0] - originMeters[0]) * scaleFactor,
@@ -57,10 +56,10 @@ function toModelCoords(
 
 function coordsToShape(
   coords: Geojson.Position[][],
-  viewOrigin: [number, number],
+  originMeters: [number, number],
 ) {
   const polyPoints: [number, number][] = coords[0].map((c) =>
-    toModelCoords([c[0], c[1]], viewOrigin),
+    toModelCoords([c[0], c[1]], originMeters),
   );
 
   const featureBaseShape = new THREE.Shape(
@@ -69,7 +68,7 @@ function coordsToShape(
   // now the holes, if any
   for (let hi = 1; hi < coords.length; hi++) {
     const holePoints = coords[hi].map((c) =>
-      toModelCoords([c[0], c[1]], viewOrigin),
+      toModelCoords([c[0], c[1]], originMeters),
     );
     featureBaseShape.holes.push(
       new THREE.Path(holePoints.map((pp) => new THREE.Vector2(pp[0], pp[1]))),
@@ -108,7 +107,7 @@ function geoJSONtoMaterial(f: Geojson.Feature): THREE.MeshToonMaterial {
 
 function geoJSONtoMeshes(
   f: Geojson.Feature,
-  viewOrigin: [number, number],
+  originMeters: [number, number],
 ): THREE.Mesh[] {
   if (f.geometry.type !== "Polygon" && f.geometry.type !== "MultiPolygon") {
     return [];
@@ -125,7 +124,7 @@ function geoJSONtoMeshes(
   };
   if (f.geometry.type === "MultiPolygon") {
     return f.geometry.coordinates.map((polygon) => {
-      const featureBaseShape = coordsToShape(polygon, viewOrigin);
+      const featureBaseShape = coordsToShape(polygon, originMeters);
 
       const geometry = new THREE.ExtrudeGeometry(
         featureBaseShape,
@@ -137,7 +136,7 @@ function geoJSONtoMeshes(
     if (f.geometry.type === "Polygon") {
       const featureBaseShape = coordsToShape(
         f.geometry.coordinates,
-        viewOrigin,
+        originMeters,
       );
       const geometry = new THREE.ExtrudeGeometry(
         featureBaseShape,
@@ -151,8 +150,10 @@ function geoJSONtoMeshes(
 }
 
 export function meshesAt(viewOrigin: [number, number]): THREE.Mesh[] {
+  // offset in meters of the origin
+  const originMeters = epsg4326toEpsg3857(viewOrigin);
   return myGeoJSON.features
-    .map((f) => geoJSONtoMeshes(f, viewOrigin))
+    .map((f) => geoJSONtoMeshes(f, originMeters))
     .filter((m: THREE.Mesh[]) => m.length !== 0)
     .flat(1);
 }

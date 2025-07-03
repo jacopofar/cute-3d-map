@@ -193,12 +193,11 @@ class CoolMap {
       exporter.parse(
         this.customLayer.scene,
         function (gltf) {
-            if (gltf instanceof ArrayBuffer){
-                res(gltf);
-            }
-            else{
-                rej(["This is not an ArrayBuffer!", gltf])
-            }
+          if (gltf instanceof ArrayBuffer) {
+            res(gltf);
+          } else {
+            rej(["This is not an ArrayBuffer!", gltf]);
+          }
         },
         function (error) {
           rej(error);
