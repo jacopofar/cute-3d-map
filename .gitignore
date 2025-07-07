@@ -1,5 +1,8 @@
 # Screenshots
 Screenshot*.png
+# own data for testing
+data/
+public/tiles
 # secrets
 .env
 # Logs
