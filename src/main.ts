@@ -6,10 +6,10 @@ import {
 import * as THREE from "three";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
-import type { CustomLayerInterface } from "maplibre-gl";
+import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { meshesAt } from "./geojson_data.ts";
+import { meshesAt, TILE_ZOOM } from "./geojson_data.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -43,20 +43,40 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
   map: MapLibreMap;
 }
 
+function getTileIndex(point: LngLat): [number, number] {
+  const lon2tile = (lon: number) =>
+    Math.floor(((lon + 180) / 360) * Math.pow(2, TILE_ZOOM));
+  const lat2tile = (lat: number) =>
+    Math.floor(
+      ((1 -
+        Math.log(
+          Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180),
+        ) /
+          Math.PI) /
+        2) *
+        Math.pow(2, TILE_ZOOM),
+    );
+
+  return [lon2tile(point.lng), lat2tile(point.lat)];
+}
+
 class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
-  customLayer: ThreeJSLayerInterface;
-
+  private customLayer: ThreeJSLayerInterface;
+  private loadedTiles: { [key: string]: THREE.Mesh[] } = {};
+  private renderTileMargin: number = 1;
   constructor(tileCenter: [number, number]) {
     this.tileCenter = tileCenter;
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
-      zoom: 12,
+      zoom: 14,
       pitch: 30,
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });
+    this.map.showTileBoundaries = true;
+
     this.map.addControl(
       new ScaleControl({
         maxWidth: 80,
@@ -107,7 +127,7 @@ class CoolMap {
         this.scene.add(directionalLight2);
 
         // this.scene.add(heartMesh());
-        meshesAt(tileCenter).forEach((m) => this.scene.add(m));
+
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
         // const loader = new GLTFLoader();
         // loader.load(
@@ -184,7 +204,69 @@ class CoolMap {
 
     this.map.on("style.load", () => {
       this.map.addLayer(this.customLayer);
+      // // this is only to show maplibre globe, not useful on a city-level map :)
+      // this.map.setSky({ "atmosphere-blend": 1.0 });
+      // this.map.setProjection({
+      //   type: "globe", // Set projection to globe
+      // });
     });
+
+    this.map.on("move", () => {
+      // bounds are to get the whole shown area
+      // for now let's just get a fixed radius around the center
+      // const bounds = this.map.getBounds();
+      // console.log(bounds);
+      const center = this.map.getCenter();
+      const [cx, cy] = getTileIndex(center);
+      console.log("center tile:", cx, cy);
+      let deleteUsKeys: string[] = [];
+      Object.keys(this.loadedTiles).forEach((k) => {
+        let x = Number(k.split("_")[0]);
+        let y = Number(k.split("_")[1]);
+        if (
+          Math.abs(x - cx) > this.renderTileMargin ||
+          Math.abs(y - cy) > this.renderTileMargin
+        ) {
+          console.log("Unloading tile ", k);
+          // TODO why is forEach needed and the array breaks it??
+          this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
+          deleteUsKeys.push(k);
+        }
+      });
+      deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
+      for (
+        let x = cx - this.renderTileMargin;
+        x < cx + this.renderTileMargin;
+        x++
+      ) {
+        for (
+          let y = cy - this.renderTileMargin;
+          y < cy + this.renderTileMargin;
+          y++
+        ) {
+          this.ensureTileLoaded(x, y);
+        }
+      }
+    });
+  }
+
+  private async ensureTileLoaded(x: number, y: number) {
+    const tileKey = `${x}_${y}`;
+    if (tileKey in this.loadedTiles) {
+      console.log("tile was already loaded, doing nothing for", tileKey);
+    } else {
+      console.log("loading", tileKey);
+      // TODO here immediatly set an empty value to avoid race condition
+      // if not, the tile is loaded multiple times while waiting for the first
+      // load to finish
+      // also, there's no handling of failed loads so far
+      this.loadedTiles[tileKey] = [];
+      this.loadedTiles[tileKey] = await meshesAt(this.tileCenter, x, y);
+      this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.add(m));
+      // setTimeout(() => {
+      //   this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.remove(m));
+      // }, 5000)
+    }
   }
 
   async getGLTF(): Promise<ArrayBuffer> {
