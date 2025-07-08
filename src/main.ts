@@ -9,7 +9,7 @@ import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { meshesAt, TILE_ZOOM } from "./geojson_data.ts";
+import { objectsAt, TILE_ZOOM } from "./geojson_data.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -64,7 +64,7 @@ class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
-  private loadedTiles: { [key: string]: THREE.Mesh[] } = {};
+  private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
   private renderTileMargin: number = 1;
   constructor(tileCenter: [number, number]) {
     this.tileCenter = tileCenter;
@@ -261,7 +261,7 @@ class CoolMap {
       // load to finish
       // also, there's no handling of failed loads so far
       this.loadedTiles[tileKey] = [];
-      this.loadedTiles[tileKey] = await meshesAt(this.tileCenter, x, y);
+      this.loadedTiles[tileKey] = await objectsAt(this.tileCenter, x, y);
       this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.add(m));
       // setTimeout(() => {
       //   this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.remove(m));

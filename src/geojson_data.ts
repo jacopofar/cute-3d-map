@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
+import { building } from "./elements3d/building";
+import { tree } from "./elements3d/tree";
+import { tree_row } from "./elements3d/tree_row";
+
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
 // in Berlin, east side
@@ -42,7 +46,7 @@ function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
 // Quito (close to Equator)
 // const scaleFactor =  1.000;
 
-function toModelCoords(
+export function toModelCoords(
   coord: [number, number],
   originMeters: [number, number],
   scaleFactor: number,
@@ -54,117 +58,36 @@ function toModelCoords(
   ];
 }
 
-function coordsToShape(
-  coords: Geojson.Position[][],
-  originMeters: [number, number],
-  scaleFactor: number,
-) {
-  const polyPoints: [number, number][] = coords[0].map((c) =>
-    toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-  );
-
-  const featureBaseShape = new THREE.Shape(
-    polyPoints.map((pp) => new THREE.Vector2(pp[0], pp[1])),
-  );
-  // now the holes, if any
-  for (let hi = 1; hi < coords.length; hi++) {
-    const holePoints = coords[hi].map((c) =>
-      toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-    );
-    featureBaseShape.holes.push(
-      new THREE.Path(holePoints.map((pp) => new THREE.Vector2(pp[0], pp[1]))),
-    );
-  }
-  return featureBaseShape;
-}
-
-function geoJSONtoHeight(f: Geojson.Feature): number {
-  if (f.properties && "building:levels" in f.properties) {
-    const levelsDesc = f.properties["building:levels"];
-    try {
-      return Number(levelsDesc) * 3;
-    } catch {
-      console.error(
-        "Cannot convert building height to a number:",
-        f.properties,
-      );
-    }
-  }
-  return 10;
-}
-
-function geoJSONtoMaterial(f: Geojson.Feature): THREE.MeshToonMaterial {
-  let color = "#aaaaaa";
-  if (f.properties && !("building:levels" in f.properties)) {
-    // mark missing data
-    color = "black";
-  }
-  if (f.properties && "building:colour" in f.properties) {
-    const facadeColorDesc = f.properties["building:colour"];
-    color = facadeColorDesc;
-  }
-  return new THREE.MeshToonMaterial({
-    color: color,
-    transparent: true,
-    opacity: 0.9,
-  });
-}
-
-function geoJSONtoMeshes(
+function geoJSONtoObjects(
   f: Geojson.Feature,
   originMeters: [number, number],
   scaleFactor: number,
-): THREE.Mesh[] {
-  if (f.geometry.type !== "Polygon" && f.geometry.type !== "MultiPolygon") {
-    return [];
-  }
+): THREE.Object3D[] {
   if (!f.properties) {
     return [];
   }
-  if (!("building" in f.properties)) {
+  if (!f.properties.cmtype) {
     return [];
   }
-  const extrudeSettings = {
-    depth: geoJSONtoHeight(f),
-    bevelEnabled: false,
-  };
-  if (f.geometry.type === "MultiPolygon") {
-    return f.geometry.coordinates.map((polygon) => {
-      const featureBaseShape = coordsToShape(
-        polygon,
-        originMeters,
-        scaleFactor,
-      );
-
-      const geometry = new THREE.ExtrudeGeometry(
-        featureBaseShape,
-        extrudeSettings,
-      );
-      return new THREE.Mesh(geometry, geoJSONtoMaterial(f));
-    });
-  } else {
-    if (f.geometry.type === "Polygon") {
-      const featureBaseShape = coordsToShape(
-        f.geometry.coordinates,
-        originMeters,
-        scaleFactor,
-      );
-      const geometry = new THREE.ExtrudeGeometry(
-        featureBaseShape,
-        extrudeSettings,
-      );
-      return [new THREE.Mesh(geometry, geoJSONtoMaterial(f))];
-    }
+  if (f.properties.cmtype === "building") {
+    return building(originMeters, scaleFactor, f);
   }
+  if (f.properties.cmtype === "tree") {
+    return tree(originMeters, scaleFactor, f);
+  }
+  if (f.properties.cmtype === "tree_row") {
+    return tree_row(originMeters, scaleFactor, f);
+  }
+
   console.error("Cannot handle feature:", f);
   return [];
 }
 
-export async function meshesAt(
+export async function objectsAt(
   viewOrigin: [number, number],
   x: number,
   y: number,
-): Promise<THREE.Mesh[]> {
+): Promise<THREE.Object3D[]> {
   // offset in meters of the origin
   const originMeters = epsg4326toEpsg3857(viewOrigin);
   // scaling factor
@@ -173,7 +96,7 @@ export async function meshesAt(
     await fetch(`/tiles/${x}/${y}.json`)
   ).json();
   return myGeoJSON.features
-    .map((f) => geoJSONtoMeshes(f, originMeters, scaleFactor))
-    .filter((m: THREE.Mesh[]) => m.length !== 0)
+    .map((f) => geoJSONtoObjects(f, originMeters, scaleFactor))
+    .filter((m: THREE.Object3D[]) => m.length !== 0)
     .flat(1);
 }

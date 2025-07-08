@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "prettify": "npx prettier src/*.ts --write"
+    "prettify": "npx prettier src/**.ts --write"
   },
   "devDependencies": {
     "@types/three": "^0.177.0",
@@ -16,6 +16,7 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
+    "@turf/turf": "^7.2.0",
     "@types/geojson": "^7946.0.16",
     "maplibre-gl": "^5.6.1",
     "three": "^0.177.0"

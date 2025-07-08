@@ -7,6 +7,7 @@ import click
 import duckdb
 import quackosm as qosm
 import shapely
+from shapely.geometry.base import BaseGeometry
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -23,30 +24,81 @@ def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
         int(((1-math.log(math.tan(lat * math.pi / 180) + 1 / math.cos(lat * math.pi / 180))/math.pi)/ 2 * (2 ** zoom))),
     )
 
-def pbf_to_parquet(input_pbf: Path, borders_shape: shapely.Geometry|None = None) -> Path:
+def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry|None = None) -> Path:
     gpq_path = qosm.convert_pbf_to_parquet(input_pbf, geometry_filter=borders_shape)
     logger.info(f"Extracted: {gpq_path}")
     return gpq_path
 
-def tile_to_geojson(data) -> list:
+def to_building(feature_id, tags, s) -> dict|None:
+    if s.geom_type == 'Point':
+        logger.warning(f"Point building?? {feature_id}")
+        return None
+    if s.geom_type not in ('Polygon', 'MultiPolygon'):
+        raise ValueError(f"Cannot handle building of type {s.geom_type}")
+    color = tags.get("building:colour")
+    height = tags.get("height")
+    if height is None and "building:levels" in tags:
+        try:
+            height = float(tags["building:levels"]) * 3
+        except ValueError:
+            logger.exception(f"Error in handling feature {feature_id} having tags {tags}")
+            return None
+
+    properties = dict(cmtype='building', color=color, height=height)
+    return dict(
+        type='feature',
+        id=feature_id,
+        geometry=json.loads(shapely.to_geojson(s)),
+        properties={k: v for k, v in properties.items() if v is not None},
+    )
+
+def to_tree(feature_id, tags, s) -> dict|None:
+    if s.geom_type != 'Point':
+        logger.warning(f"non-point tree?? {feature_id}")
+        return None
+    properties = dict(cmtype='tree')
+    return dict(
+        type='feature',
+        id=feature_id,
+        geometry=json.loads(shapely.to_geojson(s)),
+        properties={k: v for k, v in properties.items() if v is not None},
+    )
+
+def to_tree_row(feature_id, tags, s) -> dict|None:
+    if s.geom_type != 'LineString':
+        logger.warning(f"non-line tree_row?? {feature_id}")
+        return None
+    properties = dict(cmtype='tree_row')
+    return dict(
+        type='feature',
+        id=feature_id,
+        geometry=json.loads(shapely.to_geojson(s)),
+        properties={k: v for k, v in properties.items() if v is not None},
+    )
+
+def tile_to_geojson(data) -> tuple[list, list]:
     ret = []
+    ret_raw = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
-        if 'building' not in tags:
-            continue
-        if s.geom_type == 'Point':
-            logger.warning(f"Point building?? {feature_id}")
-            continue
-        if s.geom_type not in ('Polygon', 'MultiPolygon'):
-            raise ValueError(f"Cannot handle building of type {s.geom_type}")
-        feature_obj = dict(
+        ret_raw.append(dict(
             type='feature',
-            id='feature_id',
+            id=feature_id,
             geometry=json.loads(shapely.to_geojson(s)),
             properties=tags,
-        )
-        ret.append(feature_obj)
-    return ret
+        ))
+        if 'building' in tags:
+            c = to_building(feature_id, tags, s)
+            ret.append(c)
+        elif 'natural' in tags and tags['natural'] == 'tree':
+            c = to_tree(feature_id, tags, s)
+            ret.append(c)
+        elif 'natural' in tags and tags['natural'] == 'tree_row':
+            c = to_tree_row(feature_id, tags, s)
+            ret.append(c)
+            continue
+
+    return [r for r in ret if r is not None], ret_raw
 
 
 def parquet_to_tiles(input_parquet: Path, target_folder: Path, borders_shape: shapely.Geometry|None = None) -> None:
@@ -77,7 +129,10 @@ def parquet_to_tiles(input_parquet: Path, target_folder: Path, borders_shape: sh
     for x in range(min_x, max_x):
         for y in range(min_y, max_y):
             logger.info(f"Generating tile {x}/{y}")
-            (target_folder / str(x)).mkdir(parents=True, exist_ok=True)
+            target_path = (target_folder / str(x))
+            target_path.mkdir(parents=True, exist_ok=True)
+            target_path_raw = (target_folder / 'raw' / str(x))
+            target_path_raw.mkdir(parents=True, exist_ok=True)
             tile_data = duckdb.execute(
                 """
                 select
@@ -102,13 +157,23 @@ def parquet_to_tiles(input_parquet: Path, target_folder: Path, borders_shape: sh
                     y=y,
                 )
             )
-            features = tile_to_geojson(tile_data.fetchall())
-            with open(target_folder / str(x) / f"{y}.json", "w") as fw:
+            features, raw_features = tile_to_geojson(tile_data.fetchall())
+            with open(target_path / f"{y}.json", "w") as fw:
                 fw.write(
                     json.dumps(
                         dict(
                             type="FeatureCollection",
                             features=features,
+                        ),
+                        indent=2,
+                    )
+                )
+            with open(target_path_raw / f"{y}.json", "w") as fw:
+                fw.write(
+                    json.dumps(
+                        dict(
+                            type="FeatureCollection",
+                            features=raw_features,
                         ),
                         indent=2,
                     )
