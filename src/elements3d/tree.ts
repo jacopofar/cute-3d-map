@@ -15,15 +15,15 @@ const generateHash = (s: string): number => {
     hash = (hash << 5) - hash + char.charCodeAt(0);
     hash |= 0; // Constrain to 32bit integer
   }
-  return hash;
+  return Math.abs(hash);
 };
 
 const GREENS = [
   '#002000',
 	'#00340e',
 	'#106616',
-	'#4aa84f',
-	'#43c45d',
+  '#147d3b',
+  '#0d8c42',
 ]
 
 export function tree(
@@ -33,7 +33,7 @@ export function tree(
 ): THREE.Object3D[] {
   if (f.geometry.type === "Point") {
     const h = generateHash(`${f.id}`);
-    const geometry = new THREE.CylinderGeometry(0.5, 1.7, 1.2 + (h % 10) / 5, 5);
+    const geometry = new THREE.CylinderGeometry(0.5, 2.7, 2.2 + (h % 10) / 5.0, 5);
     const pos = toModelCoords(
       [f.geometry.coordinates[0], f.geometry.coordinates[1]],
       originMeters,
@@ -44,7 +44,7 @@ export function tree(
     return [
       new Tree(
         geometry,
-        new THREE.MeshToonMaterial({
+        new THREE.MeshBasicMaterial({
           color: GREENS[h % GREENS.length]
         }),
       ),

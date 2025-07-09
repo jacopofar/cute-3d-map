@@ -65,7 +65,7 @@ class CoolMap {
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
-  private renderTileMargin: number = 1;
+  private renderTileMargin: number = 3;
   constructor(tileCenter: [number, number]) {
     this.tileCenter = tileCenter;
     this.map = new MapLibreMap({
@@ -75,7 +75,8 @@ class CoolMap {
       pitch: 30,
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });
-    this.map.showTileBoundaries = true;
+    // for debugging
+    this.map.showTileBoundaries = false;
 
     this.map.addControl(
       new ScaleControl({
@@ -204,6 +205,8 @@ class CoolMap {
 
     this.map.on("style.load", () => {
       this.map.addLayer(this.customLayer);
+      // load map data at setup before the user moves
+      this.loadUnloadCoord(this.map.getCenter());
       // // this is only to show maplibre globe, not useful on a city-level map :)
       // this.map.setSky({ "atmosphere-blend": 1.0 });
       // this.map.setProjection({
@@ -217,40 +220,44 @@ class CoolMap {
       // const bounds = this.map.getBounds();
       // console.log(bounds);
       const center = this.map.getCenter();
-      const [cx, cy] = getTileIndex(center);
-      console.log("center tile:", cx, cy);
-      let deleteUsKeys: string[] = [];
-      Object.keys(this.loadedTiles).forEach((k) => {
-        let x = Number(k.split("_")[0]);
-        let y = Number(k.split("_")[1]);
-        if (
-          Math.abs(x - cx) > this.renderTileMargin ||
-          Math.abs(y - cy) > this.renderTileMargin
-        ) {
-          console.log("Unloading tile ", k);
-          // TODO why is forEach needed and the array breaks it??
-          this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
-          deleteUsKeys.push(k);
-        }
-      });
-      deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
-      for (
-        let x = cx - this.renderTileMargin;
-        x < cx + this.renderTileMargin;
-        x++
-      ) {
-        for (
-          let y = cy - this.renderTileMargin;
-          y < cy + this.renderTileMargin;
-          y++
-        ) {
-          this.ensureTileLoaded(x, y);
-        }
-      }
+      this.loadUnloadCoord(center);
     });
   }
 
-  private async ensureTileLoaded(x: number, y: number) {
+  private async loadUnloadCoord(center: LngLat) {
+    const [cx, cy] = getTileIndex(center);
+    console.log("center tile:", cx, cy);
+    let deleteUsKeys: string[] = [];
+    Object.keys(this.loadedTiles).forEach((k) => {
+      let x = Number(k.split("_")[0]);
+      let y = Number(k.split("_")[1]);
+      if (
+        Math.abs(x - cx) > this.renderTileMargin ||
+        Math.abs(y - cy) > this.renderTileMargin
+      ) {
+        console.log("Unloading tile ", k);
+        // TODO why is forEach needed and the array breaks it??
+        this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
+        deleteUsKeys.push(k);
+      }
+    });
+    deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
+    for (
+      let x = cx - this.renderTileMargin;
+      x < cx + this.renderTileMargin;
+      x++
+    ) {
+      for (
+        let y = cy - this.renderTileMargin;
+        y < cy + this.renderTileMargin;
+        y++
+      ) {
+        this.loadTile(x, y);
+      }
+    }
+  }
+
+  private async loadTile(x: number, y: number) {
     const tileKey = `${x}_${y}`;
     if (tileKey in this.loadedTiles) {
       console.log("tile was already loaded, doing nothing for", tileKey);
