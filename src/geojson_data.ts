@@ -93,7 +93,7 @@ export async function objectsAt(
   // scaling factor
   const scaleFactor = Math.cos((2 * Math.PI * viewOrigin[1]) / 360);
   let myGeoJSON: Geojson.FeatureCollection = await (
-    await fetch(`/tiles/${x}/${y}.json`)
+    await fetch(`tiles/${x}/${y}.json`)
   ).json();
   return myGeoJSON.features
     .map((f) => geoJSONtoObjects(f, originMeters, scaleFactor))
