@@ -5,6 +5,7 @@ import {
 } from "maplibre-gl";
 import * as THREE from "three";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+// import {VRButton} from 'three/addons/webxr/VRButton.js';
 
 import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -147,6 +148,10 @@ class CoolMap {
         });
 
         this.renderer.autoClear = false;
+        // NOTE: currently broken
+        // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
+        // this.renderer.xr.enabled = true;
+        // document.body.appendChild(VRButton.createButton(this.renderer));
       },
       render(gl, args) {
         const rotationX = new THREE.Matrix4().makeRotationAxis(
