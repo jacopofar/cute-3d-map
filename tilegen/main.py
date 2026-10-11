@@ -24,17 +24,14 @@ def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
         # int((2 ** zoom) - ((1-math.log(math.tan(lat * math.pi / 180) + 1 / math.cos(lat * math.pi / 180))/math.pi)/ 2 * (2 ** zoom))),
         int(
             (
-                (
-                    1
-                    - math.log(
-                        math.tan(lat * math.pi / 180)
-                        + 1 / math.cos(lat * math.pi / 180)
-                    )
-                    / math.pi
+                1
+                - math.log(
+                    math.tan(lat * math.pi / 180) + 1 / math.cos(lat * math.pi / 180)
                 )
-                / 2
-                * (2**zoom)
+                / math.pi
             )
+            / 2
+            * (2**zoom)
         ),
     )
 
@@ -72,39 +69,39 @@ def to_building(feature_id, tags, s) -> dict | None:
         if levels is not None:
             height = levels * 3
 
-    properties = dict(cmtype="building", color=color, height=height)
-    return dict(
-        type="feature",
-        id=feature_id,
-        geometry=json.loads(shapely.to_geojson(s)),
-        properties={k: v for k, v in properties.items() if v is not None},
-    )
+    properties = {"cmtype": "building", "color": color, "height": height}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
 
 
 def to_tree(feature_id, tags, s) -> dict | None:
     if s.geom_type != "Point":
         logger.warning(f"non-point tree?? {feature_id}")
         return None
-    properties = dict(cmtype="tree")
-    return dict(
-        type="feature",
-        id=feature_id,
-        geometry=json.loads(shapely.to_geojson(s)),
-        properties={k: v for k, v in properties.items() if v is not None},
-    )
+    properties = {"cmtype": "tree"}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
 
 
 def to_tree_row(feature_id, tags, s) -> dict | None:
     if s.geom_type != "LineString":
         logger.warning(f"non-line tree_row?? {feature_id}")
         return None
-    properties = dict(cmtype="tree_row")
-    return dict(
-        type="feature",
-        id=feature_id,
-        geometry=json.loads(shapely.to_geojson(s)),
-        properties={k: v for k, v in properties.items() if v is not None},
-    )
+    properties = {"cmtype": "tree_row"}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
 
 
 def tile_to_geojson(data) -> tuple[list, list]:
@@ -113,12 +110,12 @@ def tile_to_geojson(data) -> tuple[list, list]:
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
-            dict(
-                type="feature",
-                id=feature_id,
-                geometry=json.loads(shapely.to_geojson(s)),
-                properties=tags,
-            )
+            {
+                "type": "feature",
+                "id": feature_id,
+                "geometry": json.loads(shapely.to_geojson(s)),
+                "properties": tags,
+            }
         )
         if "building" in tags:
             c = to_building(feature_id, tags, s)
@@ -155,7 +152,7 @@ def parquet_to_tiles(
             ST_YMin(bb) as minlat
         from ext;
     """,
-        dict(input_path=str(input_parquet)),
+        {"input_path": str(input_parquet)},
     )
     (maxlon, minlon, maxlat, minlat) = bb.fetchall()[0]
     logger.info(f"Extent of the parquet file: {(maxlon, minlon, maxlat, minlat)}")
@@ -193,21 +190,21 @@ def parquet_to_tiles(
                         )
                     )
                 """,
-                dict(
-                    input_parquet=str(input_parquet),
-                    zoom_level=zoom_level,
-                    x=x,
-                    y=y,
-                ),
+                {
+                    "input_parquet": str(input_parquet),
+                    "zoom_level": zoom_level,
+                    "x": x,
+                    "y": y,
+                },
             )
             features, raw_features = tile_to_geojson(tile_data.fetchall())
             with open(target_path / f"{y}.json", "w") as fw:
                 fw.write(
                     json.dumps(
-                        dict(
-                            type="FeatureCollection",
-                            features=features,
-                        ),
+                        {
+                            "type": "FeatureCollection",
+                            "features": features,
+                        },
                         indent=2,
                     )
                 )
@@ -215,10 +212,10 @@ def parquet_to_tiles(
                 with open(target_path_raw / f"{y}.json", "w") as fw:
                     fw.write(
                         json.dumps(
-                            dict(
-                                type="FeatureCollection",
-                                features=raw_features,
-                            ),
+                            {
+                                "type": "FeatureCollection",
+                                "features": raw_features,
+                            },
                             indent=2,
                         )
                     )
@@ -232,7 +229,7 @@ def parquet_to_tiles(
     "--polygon-filter", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
 def main(input_pbf: Path, polygon_filter: Path | None) -> None:
-    logging.info(f"Processing {input_pbf}")
+    logger.info(f"Processing {input_pbf}")
     # Note: you can reduce the file size using a border geojson:
     # osmium extract -p borders.geojson {input_pbf} -o extract.osm.pbf
     # also quackosm can produce a parquet file applying a similar filter

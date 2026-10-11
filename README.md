@@ -75,6 +75,11 @@ To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,
 `natural=tree_row`; everything else is skipped.
 
+`tilegen/` is checked by Ruff and [`ty`](https://docs.astral.sh/ty/) via
+pre-commit (config at the repo root). After `uv sync --group dev` in `tilegen/`,
+enable the hooks once with `uvx pre-commit install`; run them over everything
+with `uvx pre-commit run --all-files`.
+
 ## Notes and current limitations
 
 - Data is loaded per-tile from static JSON files; there is no vector-tile or

@@ -16,5 +16,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.17.0",
+    "ty>=0.0.86",
     "types-shapely>=2.1.0.20260728",
 ]
