@@ -261,6 +261,25 @@ class CoolMap {
 
   private resetOrigin(center: LngLat) {
     const origin = MercatorCoordinate.fromLngLat(center, 0);
+    const newScale = origin.meterInMercatorCoordinateUnits();
+    const old = this.modelTransform;
+    // A model point p is rendered at world = translate + scale * p (with the
+    // y axis negated). To move to a new origin without dropping and
+    // refetching every tile (which blanks the scene, i.e. flicker), re-express
+    // each loaded mesh in the new origin's space: p' = a * p + b with
+    // a = old.scale / newScale so the world position is preserved exactly.
+    const a = old.scale / newScale;
+    const remap = new THREE.Matrix4()
+      .makeTranslation(
+        (old.translateX - origin.x) / newScale,
+        (origin.y - old.translateY) / newScale,
+        0,
+      )
+      .multiply(new THREE.Matrix4().makeScale(a, a, a));
+    Object.values(this.loadedTiles)
+      .flat()
+      .forEach((m) => m.applyMatrix4(remap));
+
     this.modelTransform = {
       translateX: origin.x,
       translateY: origin.y,
@@ -268,23 +287,12 @@ class CoolMap {
       rotateX: 0,
       rotateY: 0,
       rotateZ: 0,
-      scale: origin.meterInMercatorCoordinateUnits(),
+      scale: newScale,
     };
-    // mesh geometry is built in meters relative to the projection origin, so
-    // every loaded tile is now in a coordinate space that no longer matches
-    // the transform: drop all of them, they get recomputed against the new
-    // origin by the load loop that follows
-    Object.values(this.loadedTiles)
-      .flat()
-      .forEach((m) => this.customLayer.scene.remove(m));
-    this.loadedTiles = {};
     this.tileCenter = [center.lng, center.lat];
-    // bump the generation so async tile loads started with the previous
-    // origin can be discarded instead of landing on the new projection
+    // in-flight loads were baked against the old origin, so discard them and
+    // clear their bookkeeping to let the load loop request them again
     this.originGeneration += 1;
-    // in-flight loads belong to the old generation and will be discarded when
-    // they resolve, so clear their bookkeeping to let the new load loop
-    // request those tiles again
     this.pendingTiles.clear();
     console.log("reset projection origin to", center.lng, center.lat);
   }

@@ -95,9 +95,10 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
 - Tile loads have no debounce yet; failed loads are logged and retried on the
   next map move, and an in-flight set avoids duplicate concurrent fetches for
   the same tile.
-- The `tileCenter` origin is a single fixed reference point for all coordinates,
-  which introduces distortion far from the origin at low latitudes/in large
-  areas; per-tile origins would reduce skew.
+- The projection origin is recentered when the map center drifts more than two
+  tiles, which keeps the `cos(latitude)` approximation accurate. Existing
+  meshes are re-expressed in the new origin's space in place (no reload), and
+  tiles beyond the ±3 margin are dropped and reloaded against the new origin.
 - WebXR/VR support is stubbed out (currently broken upstream, see the comment in
   `src/main.ts`).
 - No frontend tests; `tilegen/` has a small pytest suite.
