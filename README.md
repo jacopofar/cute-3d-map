@@ -106,13 +106,14 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
 - Data is loaded per-tile from static JSON files; there is no vector-tile or
   binary-tile path yet, and tiles carry the full GeoJSON text (large for dense
   cities like Milan — rendering works but is clunky).
-- All meshes in a tile are separate objects; there is no geometry merging /
-  vertex-color batching yet (see the
-  [Three.js "lots of objects" manual](https://threejs.org/manual/#en/optimize-lots-of-objects)),
-  so draw calls and memory scale linearly with feature count.
-- Tile loads have no debounce yet; failed loads are logged and retried on the
-  next map move, and an in-flight set avoids duplicate concurrent fetches for
-  the same tile.
+- Meshes are merged per kind within a tile (one `BufferGeometry` per kind, with
+  colors baked into vertex attributes), so a tile renders in a handful of draw
+  calls instead of one per feature. The merged geometry is disposed when a tile
+  is unloaded.
+- Tile loads are debounced (150 ms); failed loads are logged and retried on a
+  later move, an in-flight set avoids duplicate concurrent fetches for the same
+  tile, and an HTTP 404 is treated as an empty tile (skipped tiles are not
+  written).
 - The projection origin is recentered when the map center drifts more than two
   tiles, which keeps the `cos(latitude)` approximation accurate. Existing
   meshes are re-expressed in the new origin's space in place (no reload), and

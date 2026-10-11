@@ -259,6 +259,11 @@ export class VehicleManager {
   // edges that belong to at least one kept cycle (cycle-followers cover these;
   // graph walkers cover the rest)
   private coveredEdges = new Set<string>();
+  // paths handed in by setRoads, rebuilt lazily so a burst of tile loads
+  // does not trigger a full graph rebuild per tile
+  private pendingPaths: Road[] = [];
+  private pendingStops: [number, number][] = [];
+  private roadsDirty = false;
   private vehicles: Vehicle[] = [];
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
@@ -298,6 +303,17 @@ export class VehicleManager {
 
   setRoads(paths: Road[], stops: [number, number][] = []): void {
     if (!this.enabled) return;
+    this.pendingPaths = paths;
+    this.pendingStops = stops;
+    // buildGraph + findCycles are expensive and setRoads is called once per
+    // tile load; mark dirty and rebuild at most once per frame (in update),
+    // so an initial burst of tile loads coalesces into a single rebuild
+    this.roadsDirty = true;
+  }
+
+  private rebuild(): void {
+    const paths = this.pendingPaths;
+    const stops = this.pendingStops;
     this.buildGraph(paths);
     this.snapStops(stops);
     this.findCycles();
@@ -675,6 +691,10 @@ export class VehicleManager {
   // in model space from the current origin every frame
   update(originMeters: [number, number], scaleFactor: number): void {
     if (!this.enabled) return;
+    if (this.roadsDirty) {
+      this.roadsDirty = false;
+      this.rebuild();
+    }
     const now = performance.now();
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 0.1);

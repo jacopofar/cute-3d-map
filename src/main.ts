@@ -543,6 +543,11 @@ class CoolMap {
   private clearSelection() {
     if (this.highlight) {
       this.customLayer.scene.remove(this.highlight);
+      // the outline's geometry and material are created per selection
+      if (this.highlight instanceof THREE.LineSegments) {
+        this.highlight.geometry.dispose();
+        this.highlight.material.dispose();
+      }
       this.highlight = undefined;
     }
     if (this.popup) {
@@ -618,7 +623,12 @@ class CoolMap {
       ) {
         console.log("Unloading tile ", k);
         // TODO why is forEach needed and the array breaks it??
-        this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
+        this.loadedTiles[k].forEach((m) => {
+          this.customLayer.scene.remove(m);
+          // each tile owns its merged geometry; the materials are shared
+          // module-level singletons, so dispose only the geometry
+          if (m instanceof THREE.Mesh) m.geometry.dispose();
+        });
         delete this.loadedRoads[k];
         delete this.loadedRails[k];
         delete this.loadedStops[k];
