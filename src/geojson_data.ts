@@ -102,11 +102,22 @@ export interface Road {
   coordinates: [number, number][];
 }
 
+// a building footprint for click-picking + info (outer rings only)
+export interface BuildingInfo {
+  rings: [number, number][][];
+  height: number;
+  color?: string;
+  name?: string;
+  street?: string;
+  housenumber?: string;
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   roads: Road[];
   rails: Road[];
   stops: [number, number][];
+  buildings: BuildingInfo[];
 }
 
 export async function objectsAt(
@@ -122,7 +133,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], roads: [], rails: [], stops: [] };
+    return { meshes: [], roads: [], rails: [], stops: [], buildings: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -133,6 +144,7 @@ export async function objectsAt(
   const roads: Road[] = [];
   const rails: Road[] = [];
   const stops: [number, number][] = [];
+  const buildings: BuildingInfo[] = [];
   myGeoJSON.features.forEach((f, index) => {
     const cmtype = f.properties?.cmtype;
     if (cmtype === "road" || cmtype === "rail") {
@@ -146,6 +158,9 @@ export async function objectsAt(
       stops.push(f.geometry.coordinates as [number, number]);
       return;
     }
+    if (cmtype === "building") {
+      buildings.push(buildingInfo(f));
+    }
     geoJSONtoGeometries(f, originMeters, scaleFactor).forEach(
       ({ kind, geometries }) => {
         (byKind[kind] ??= []).push(...geometries);
@@ -157,12 +172,12 @@ export async function objectsAt(
   for (const [kind, geometries] of Object.entries(byKind)) {
     const merged = BufferGeometryUtils.mergeGeometries(geometries);
     if (merged) {
-      meshes.push(
-        new THREE.Mesh(
-          merged,
-          kind === "building" ? buildingMaterial : treeMaterial,
-        ),
+      const mesh = new THREE.Mesh(
+        merged,
+        kind === "building" ? buildingMaterial : treeMaterial,
       );
+      mesh.userData = { kind, tileKey: `${x}_${y}` };
+      meshes.push(mesh);
     } else {
       // mergeGeometries returns null when the geometries have mismatched
       // attributes; don't drop the tile without a trace
@@ -171,7 +186,28 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, roads, rails, stops };
+  return { meshes, roads, rails, stops, buildings };
+}
+
+function buildingInfo(f: Geojson.Feature): BuildingInfo {
+  const rings: [number, number][][] = [];
+  const geom = f.geometry;
+  if (geom.type === "Polygon") {
+    rings.push(geom.coordinates[0] as [number, number][]);
+  } else if (geom.type === "MultiPolygon") {
+    for (const polygon of geom.coordinates) {
+      rings.push(polygon[0] as [number, number][]);
+    }
+  }
+  const props = f.properties ?? {};
+  return {
+    rings,
+    height: Number(props.height) > 0 ? Number(props.height) : 10,
+    color: props.color as string | undefined,
+    name: props.name as string | undefined,
+    street: props.street as string | undefined,
+    housenumber: props.housenumber as string | undefined,
+  };
 }
 
 function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {

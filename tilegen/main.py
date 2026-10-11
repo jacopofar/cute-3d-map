@@ -105,7 +105,14 @@ def to_building(feature_id, tags, s) -> dict | None:
         if levels is not None:
             height = levels * 3
 
-    properties = {"cmtype": "building", "color": color, "height": height}
+    properties = {
+        "cmtype": "building",
+        "color": color,
+        "height": height,
+        "name": tags.get("name"),
+        "street": tags.get("addr:street"),
+        "housenumber": tags.get("addr:housenumber"),
+    }
     return {
         "type": "feature",
         "id": feature_id,

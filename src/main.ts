@@ -1,6 +1,7 @@
 import {
   Map as MapLibreMap,
   MercatorCoordinate,
+  Popup,
   ScaleControl,
 } from "maplibre-gl";
 import * as THREE from "three";
@@ -12,8 +13,13 @@ import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { objectsAt, TILE_ZOOM, epsg4326toEpsg3857 } from "./geojson_data.ts";
-import type { Road } from "./geojson_data.ts";
+import {
+  objectsAt,
+  TILE_ZOOM,
+  epsg4326toEpsg3857,
+  toModelCoords,
+} from "./geojson_data.ts";
+import type { Road, BuildingInfo } from "./geojson_data.ts";
 import { VehicleManager, CAR_FLEET, TRAIN_FLEET } from "./vehicles.ts";
 
 import "./style.css";
@@ -25,6 +31,61 @@ import "./map_style.css";
 // vehicles are only shown (and their graph built) when the map is at least
 // this zoomed in
 const VEHICLE_MIN_ZOOM = 15;
+
+const HTML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => HTML_ENTITIES[c] ?? c);
+}
+
+// ray-cast point-in-polygon, in model space
+function ringContains(
+  ring: [number, number][],
+  point: THREE.Vector3,
+  originMeters: [number, number],
+  scaleFactor: number,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = toModelCoords(ring[i], originMeters, scaleFactor);
+    const b = toModelCoords(ring[j], originMeters, scaleFactor);
+    const crosses =
+      a[1] > point.y !== b[1] > point.y &&
+      point.x < ((b[0] - a[0]) * (point.y - a[1])) / (b[1] - a[1]) + a[0];
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+// distance (m) from a model-space point to a ring, used as a picking fallback
+function ringDistance(
+  ring: [number, number][],
+  point: THREE.Vector3,
+  originMeters: [number, number],
+  scaleFactor: number,
+): number {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = toModelCoords(ring[i], originMeters, scaleFactor);
+    const b = toModelCoords(ring[j], originMeters, scaleFactor);
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0
+      ? Math.max(0, Math.min(1, ((point.x - a[0]) * dx + (point.y - a[1]) * dy) / len2))
+      : 0;
+    const px = a[0] + t * dx;
+    const py = a[1] + t * dy;
+    best = Math.min(best, Math.hypot(point.x - px, point.y - py));
+  }
+  return best;
+}
 
 // Milan
 // const tileCenter: [number, number] = [9.186, 45.497];
@@ -79,6 +140,10 @@ class CoolMap {
   private loadedRails: { [key: string]: Road[] } = {};
   // tram stop points per loaded tile (the rail fleet pauses at them)
   private loadedStops: { [key: string]: [number, number][] } = {};
+  // building footprints per loaded tile, for click-picking
+  private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
+  private highlight?: THREE.Object3D;
+  private popup?: Popup;
   private vehicles?: VehicleManager;
   private trains?: VehicleManager;
   // user toggle (the page checkbox); combined with the zoom gate
@@ -264,6 +329,10 @@ class CoolMap {
         // const l = new THREE.Matrix4().fromArray(modelMatrix);
 
         this.camera.projectionMatrix = m.multiply(l);
+        // raycaster (for click-picking) needs the inverse to unproject NDC
+        this.camera.projectionMatrixInverse
+          .copy(this.camera.projectionMatrix)
+          .invert();
         const originMeters = epsg4326toEpsg3857(coolMap.tileCenter);
         const scaleFactor = Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360);
         if (coolMap.vehicles) coolMap.vehicles.update(originMeters, scaleFactor);
@@ -318,6 +387,154 @@ class CoolMap {
         this.setTrafficEnabled(trafficToggle.checked),
       );
     }
+
+    this.map.on("click", (event) => this.onMapClick(event));
+  }
+
+  // click a building to highlight it and show its height/address
+  private onMapClick(event: {
+    point: { x: number; y: number };
+    lngLat: LngLat;
+  }) {
+    const canvas = this.map.getCanvas();
+    // event.point is already in CSS pixels relative to the map canvas
+    const ndc = new THREE.Vector2(
+      (event.point.x / canvas.clientWidth) * 2 - 1,
+      -(event.point.y / canvas.clientHeight) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    // MapLibre bakes the view into the projection matrix, so build the ray
+    // from two unprojected points instead of setFromCamera (which assumes the
+    // camera sits at the world origin)
+    const inv = this.customLayer.camera.projectionMatrixInverse;
+    const near = new THREE.Vector3(ndc.x, ndc.y, -1).applyMatrix4(inv);
+    const far = new THREE.Vector3(ndc.x, ndc.y, 1).applyMatrix4(inv);
+    raycaster.set(near, far.sub(near).normalize());
+    const buildingMeshes: THREE.Object3D[] = [];
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "building") buildingMeshes.push(mesh);
+      }
+    }
+    const hits = raycaster.intersectObjects(buildingMeshes, false);
+    if (hits.length === 0) {
+      this.clearSelection();
+      return;
+    }
+    const hit = hits[0];
+    const tileKey = hit.object.userData.tileKey as string | undefined;
+    const point = hit.point;
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const candidates = this.loadedBuildings[tileKey ?? ""] ?? [];
+    let building = candidates.find((b) =>
+      b.rings.some((ring) => ringContains(ring, point, originMeters, scaleFactor)),
+    );
+    if (!building) {
+      // a roof/side hit can land just outside the footprint; take the nearest
+      let best = 3;
+      for (const candidate of candidates) {
+        for (const ring of candidate.rings) {
+          const distance = ringDistance(ring, point, originMeters, scaleFactor);
+          if (distance < best) {
+            best = distance;
+            building = candidate;
+          }
+        }
+      }
+    }
+    if (!building) {
+      this.clearSelection();
+      return;
+    }
+    this.selectBuilding(building, event.lngLat);
+  }
+
+  private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+
+    // outline: base + top loops and verticals for each ring
+    const positions: number[] = [];
+    for (const ring of info.rings) {
+      const pts = ring.map((c) => toModelCoords(c, originMeters, scaleFactor));
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i];
+        const b = pts[(i + 1) % pts.length];
+        positions.push(a[0], a[1], 0.3, b[0], b[1], 0.3);
+        positions.push(a[0], a[1], info.height, b[0], b[1], info.height);
+        positions.push(a[0], a[1], 0.3, a[0], a[1], info.height);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    const outline = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: 0xffcc00,
+        depthTest: false,
+        transparent: true,
+      }),
+    );
+    outline.renderOrder = 999;
+    this.customLayer.scene.add(outline);
+    this.highlight = outline;
+
+    const address = [info.housenumber, info.street].filter(Boolean).join(" ");
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      address ? escapeHtml(address) : null,
+      `Height: ${info.height.toFixed(1)} m`,
+      `<a href="#" data-zoom>Zoom to building</a>`,
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8 })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+    const link = this.popup
+      .getElement()
+      ?.querySelector("[data-zoom]") as HTMLElement | null;
+    link?.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      this.zoomToBuilding(info);
+    });
+  }
+
+  private zoomToBuilding(info: BuildingInfo) {
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+    for (const ring of info.rings) {
+      for (const [lon, lat] of ring) {
+        minLon = Math.min(minLon, lon);
+        minLat = Math.min(minLat, lat);
+        maxLon = Math.max(maxLon, lon);
+        maxLat = Math.max(maxLat, lat);
+      }
+    }
+    this.map.fitBounds(
+      [
+        [minLon, minLat],
+        [maxLon, maxLat],
+      ],
+      { maxZoom: 19, duration: 700, padding: 60 },
+    );
+  }
+
+  private clearSelection() {
+    if (this.highlight) {
+      this.customLayer.scene.remove(this.highlight);
+      this.highlight = undefined;
+    }
+    if (this.popup) {
+      this.popup.remove();
+      this.popup = undefined;
+    }
   }
 
   private resetOrigin(center: LngLat) {
@@ -351,6 +568,8 @@ class CoolMap {
       scale: newScale,
     };
     this.tileCenter = [center.lng, center.lat];
+    // the highlight is in the old origin's model space; drop it
+    this.clearSelection();
     // in-flight loads were baked against the old origin, so discard them and
     // clear their bookkeeping to let the load loop request them again
     this.originGeneration += 1;
@@ -389,6 +608,7 @@ class CoolMap {
         delete this.loadedRoads[k];
         delete this.loadedRails[k];
         delete this.loadedStops[k];
+        delete this.loadedBuildings[k];
         deleteUsKeys.push(k);
       }
     });
@@ -421,7 +641,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, roads, rails, stops } = await objectsAt(
+      const { meshes, roads, rails, stops, buildings } = await objectsAt(
         this.tileCenter,
         x,
         y,
@@ -446,6 +666,7 @@ class CoolMap {
       this.loadedRoads[tileKey] = roads;
       this.loadedRails[tileKey] = rails;
       this.loadedStops[tileKey] = stops;
+      this.loadedBuildings[tileKey] = buildings;
       this.syncVehicleRoads();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
