@@ -72,6 +72,8 @@ class CoolMap {
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
   private renderTileMargin: number = 3;
+  // move fires continuously; debounce the tile load/unload pass
+  private moveDebounce: ReturnType<typeof setTimeout> | undefined;
   // increments every time the projection origin is reset, so in-flight
   // async tile loads from the old origin can be recognized and discarded
   private originGeneration: number = 0;
@@ -245,8 +247,15 @@ class CoolMap {
       // for now let's just get a fixed radius around the center
       // const bounds = this.map.getBounds();
       // console.log(bounds);
-      const center = this.map.getCenter();
-      this.loadUnloadCoord(center);
+      // "move" fires on every pointer tick; wait until it settles before
+      // running the (relatively expensive) load/unload pass
+      if (this.moveDebounce !== undefined) {
+        clearTimeout(this.moveDebounce);
+      }
+      this.moveDebounce = setTimeout(() => {
+        this.moveDebounce = undefined;
+        this.loadUnloadCoord(this.map.getCenter());
+      }, 150);
     });
   }
 
@@ -297,7 +306,6 @@ class CoolMap {
     if (Math.abs(ox - cx) > 2 || Math.abs(oy - cy) > 2) {
       this.resetOrigin(center);
     }
-    console.log("center tile:", cx, cy);
     let deleteUsKeys: string[] = [];
     Object.keys(this.loadedTiles).forEach((k) => {
       let x = Number(k.split("_")[0]);
