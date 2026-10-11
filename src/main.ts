@@ -148,6 +148,8 @@ class CoolMap {
   private trains?: VehicleManager;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
+  // whether clicking a building inspects it
+  private inspectEnabled = true;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
@@ -388,6 +390,17 @@ class CoolMap {
       );
     }
 
+    const inspectToggle = document.querySelector<HTMLInputElement>(
+      "#inspect-toggle input",
+    );
+    if (inspectToggle) {
+      this.inspectEnabled = inspectToggle.checked;
+      inspectToggle.addEventListener("change", () => {
+        this.inspectEnabled = inspectToggle.checked;
+        if (!this.inspectEnabled) this.clearSelection();
+      });
+    }
+
     this.map.on("click", (event) => this.onMapClick(event));
   }
 
@@ -396,6 +409,7 @@ class CoolMap {
     point: { x: number; y: number };
     lngLat: LngLat;
   }) {
+    if (!this.inspectEnabled) return;
     const canvas = this.map.getCanvas();
     // event.point is already in CSS pixels relative to the map canvas
     const ndc = new THREE.Vector2(
