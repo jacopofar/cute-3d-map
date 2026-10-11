@@ -84,9 +84,9 @@ works. Features currently handled: `building`, `natural=tree`,
   vertex-color batching yet (see the
   [Three.js "lots of objects" manual](https://threejs.org/manual/#en/optimize-lots-of-objects)),
   so draw calls and memory scale linearly with feature count.
-- Tile loads have no debounce and no failed-load handling; the `loadedTiles`
-  bookkeeping marks tiles synchronously before the async fetch to limit but not
-  eliminate duplicate loads.
+- Tile loads have no debounce yet; failed loads are logged and retried on the
+  next map move, and an in-flight set avoids duplicate concurrent fetches for
+  the same tile.
 - The `tileCenter` origin is a single fixed reference point for all coordinates,
   which introduces distortion far from the origin at low latitudes/in large
   areas; per-tile origins would reduce skew.

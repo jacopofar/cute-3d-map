@@ -68,6 +68,9 @@ class CoolMap {
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
+  // tiles with a fetch in flight; kept separate from loadedTiles so a failed
+  // load does not leave a permanent "loaded but empty" entry that blocks retries
+  private pendingTiles: Set<string> = new Set();
   private renderTileMargin: number = 3;
   // increments every time the projection origin is reset, so in-flight
   // async tile loads from the old origin can be recognized and discarded
@@ -270,6 +273,10 @@ class CoolMap {
     // bump the generation so async tile loads started with the previous
     // origin can be discarded instead of landing on the new projection
     this.originGeneration += 1;
+    // in-flight loads belong to the old generation and will be discarded when
+    // they resolve, so clear their bookkeeping to let the new load loop
+    // request those tiles again
+    this.pendingTiles.clear();
     console.log("reset projection origin to", center.lng, center.lat);
   }
 
@@ -307,14 +314,17 @@ class CoolMap {
     });
     deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
     const generation = this.originGeneration;
+    // inclusive bounds so the loaded window matches the retention window
+    // above (|x - cx| <= margin), otherwise the +margin row/column is kept
+    // loaded but never (re)fetched
     for (
       let x = cx - this.renderTileMargin;
-      x < cx + this.renderTileMargin;
+      x <= cx + this.renderTileMargin;
       x++
     ) {
       for (
         let y = cy - this.renderTileMargin;
-        y < cy + this.renderTileMargin;
+        y <= cy + this.renderTileMargin;
         y++
       ) {
         this.loadTile(x, y, generation);
@@ -324,15 +334,11 @@ class CoolMap {
 
   private async loadTile(x: number, y: number, generation: number) {
     const tileKey = `${x}_${y}`;
-    if (tileKey in this.loadedTiles) {
-      console.log("tile was already loaded, doing nothing for", tileKey);
-    } else {
-      console.log("loading", tileKey);
-      // TODO here immediatly set an empty value to avoid race condition
-      // if not, the tile is loaded multiple times while waiting for the first
-      // load to finish
-      // also, there's no handling of failed loads so far
-      this.loadedTiles[tileKey] = [];
+    if (tileKey in this.loadedTiles || this.pendingTiles.has(tileKey)) {
+      return;
+    }
+    this.pendingTiles.add(tileKey);
+    try {
       const meshes = await objectsAt(this.tileCenter, x, y);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
@@ -340,11 +346,22 @@ class CoolMap {
         console.log("discarding stale tile", tileKey);
         return;
       }
+      // the tile may have left the render window while it was loading; if so
+      // don't add it (the move handler will skip it, or has already dropped it)
+      const [cx, cy] = getTileIndex(this.map.getCenter());
+      if (
+        Math.abs(x - cx) > this.renderTileMargin ||
+        Math.abs(y - cy) > this.renderTileMargin
+      ) {
+        return;
+      }
       this.loadedTiles[tileKey] = meshes;
-      this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.add(m));
-      // setTimeout(() => {
-      //   this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.remove(m));
-      // }, 5000)
+      meshes.forEach((m) => this.customLayer.scene.add(m));
+    } catch (e) {
+      // leave the tile out of loadedTiles so a later move retries it
+      console.warn("failed to load tile", tileKey, e);
+    } finally {
+      this.pendingTiles.delete(tileKey);
     }
   }
 

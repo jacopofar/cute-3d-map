@@ -45,22 +45,32 @@ def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -
     return gpq_path
 
 
+def parse_length(value: str | None) -> float | None:
+    """Parse an OSM length value, which is a string and may carry a unit
+    suffix ("12", "12.5", "12 m"). Returns None when there is no usable number."""
+    if value is None:
+        return None
+    token = value.strip().split()[0].rstrip("m").strip()
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
 def to_building(feature_id, tags, s) -> dict | None:
     if s.geom_type == "Point":
         logger.warning(f"Point building?? {feature_id}")
         return None
     if s.geom_type not in ("Polygon", "MultiPolygon"):
-        raise ValueError(f"Cannot handle building of type {s.geom_type}")
+        # don't abort the whole tile run over one weird feature
+        logger.warning(f"non-polygon building?? {feature_id} ({s.geom_type})")
+        return None
     color = tags.get("building:colour")
-    height = tags.get("height")
+    height = parse_length(tags.get("height"))
     if height is None and "building:levels" in tags:
-        try:
-            height = float(tags["building:levels"]) * 3
-        except ValueError:
-            logger.exception(
-                f"Error in handling feature {feature_id} having tags {tags}"
-            )
-            return None
+        levels = parse_length(tags["building:levels"])
+        if levels is not None:
+            height = levels * 3
 
     properties = dict(cmtype="building", color=color, height=height)
     return dict(
@@ -157,8 +167,8 @@ def parquet_to_tiles(
     min_x, max_y = coord_to_tile(minlon, minlat, zoom_level)
     max_x, min_y = coord_to_tile(maxlon, maxlat, zoom_level)
     logger.info(f"extent: {[min_x, min_y, max_x, max_y]}")
-    for x in range(min_x, max_x):
-        for y in range(min_y, max_y):
+    for x in range(min_x, max_x + 1):
+        for y in range(min_y, max_y + 1):
             logger.info(f"Generating tile {x}/{y}")
             target_path = target_folder / str(x)
             target_path.mkdir(parents=True, exist_ok=True)

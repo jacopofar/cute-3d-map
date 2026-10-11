@@ -28,7 +28,10 @@ function coordsToShape(
 }
 
 function geoJSONtoHeight(f: BuildingFeature): number {
-  return f.properties.height || 10;
+  // tilegen emits a number, but be defensive: height can be absent, or a
+  // string carrying a unit ("12 m") in hand-written GeoJSON
+  const h = Number(f.properties.height);
+  return Number.isFinite(h) && h > 0 ? h : 10;
 }
 
 // bake the per-feature color into a vertex color attribute, so many buildings
@@ -49,7 +52,9 @@ export type BuildingFeature = {
   geometry: Geojson.Geometry;
   properties: {
     color?: string;
-    height: number;
+    // tilegen writes a number; allow a string here so hand-written GeoJSON
+    // like "12 m" doesn't slip through as NaN
+    height?: number | string;
   };
 };
 

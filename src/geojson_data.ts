@@ -99,9 +99,11 @@ export async function objectsAt(
   const originMeters = epsg4326toEpsg3857(viewOrigin);
   // scaling factor
   const scaleFactor = Math.cos((2 * Math.PI * viewOrigin[1]) / 360);
-  let myGeoJSON: Geojson.FeatureCollection = await (
-    await fetch(`tiles/${x}/${y}.json`)
-  ).json();
+  const response = await fetch(`tiles/${x}/${y}.json`);
+  if (!response.ok) {
+    throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
+  }
+  let myGeoJSON: Geojson.FeatureCollection = await response.json();
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   myGeoJSON.features
@@ -119,6 +121,12 @@ export async function objectsAt(
           merged,
           kind === "building" ? buildingMaterial : treeMaterial,
         ),
+      );
+    } else {
+      // mergeGeometries returns null when the geometries have mismatched
+      // attributes; don't drop the tile without a trace
+      console.warn(
+        `could not merge ${geometries.length} ${kind} geometries in tile ${x}/${y}`,
       );
     }
   }
