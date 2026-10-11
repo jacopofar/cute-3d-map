@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
+import { applyVertexColor } from "./vertex_color";
 
 const generateHash = (s: string): number => {
   let hash = 0;
@@ -19,19 +20,6 @@ const GREENS = [
   '#147d3b',
   '#0d8c42',
 ]
-
-// bake the color into a vertex color attribute so trees can be merged into a
-// single mesh per tile
-function applyVertexColor(geometry: THREE.BufferGeometry, color: THREE.Color) {
-  const count = geometry.getAttribute("position").count;
-  const colors = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
-  }
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-}
 
 export function tree(
   originMeters: [number, number],

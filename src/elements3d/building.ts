@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
+import { applyVertexColor } from "./vertex_color";
 
 function coordsToShape(
   coords: Geojson.Position[][],
@@ -36,18 +37,6 @@ function geoJSONtoHeight(f: BuildingFeature): number {
 
 // bake the per-feature color into a vertex color attribute, so many buildings
 // can be merged into a single mesh (one draw call per tile, not per building)
-function applyVertexColor(geometry: THREE.BufferGeometry, colorHex: string) {
-  const color = new THREE.Color(colorHex);
-  const count = geometry.getAttribute("position").count;
-  const colors = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
-  }
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-}
-
 export type BuildingFeature = {
   geometry: Geojson.Geometry;
   properties: {
@@ -68,7 +57,7 @@ export function building(
     depth: geoJSONtoHeight(f),
     bevelEnabled: false,
   };
-  const color = f.properties.color || "#aaaaaa";
+  const color = new THREE.Color(f.properties.color || "#aaaaaa");
   if (f.geometry.type === "MultiPolygon") {
     return f.geometry.coordinates.map((polygon) => {
       const featureBaseShape = coordsToShape(
