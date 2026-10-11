@@ -24,7 +24,7 @@ import { tree_row } from "./elements3d/tree_row";
 // tilegen/main.py
 export const TILE_ZOOM = 15;
 
-function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
+export function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
   let x = (coordinates[0] * 20037508.34) / 180;
   let y =
     Math.log(Math.tan(((90 + coordinates[1]) * Math.PI) / 360)) /
@@ -91,11 +91,24 @@ export function geoJSONtoGeometries(
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 const treeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 
+// a drivable road, kept as lng/lat so vehicles can be placed against the
+// current projection origin every frame (see VehicleManager)
+export interface Road {
+  id: string;
+  highway?: string;
+  coordinates: [number, number][];
+}
+
+export interface TileObjects {
+  meshes: THREE.Object3D[];
+  roads: Road[];
+}
+
 export async function objectsAt(
   viewOrigin: [number, number],
   x: number,
   y: number,
-): Promise<THREE.Object3D[]> {
+): Promise<TileObjects> {
   // offset in meters of the origin
   const originMeters = epsg4326toEpsg3857(viewOrigin);
   // scaling factor
@@ -104,7 +117,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return [];
+    return { meshes: [], roads: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -112,11 +125,19 @@ export async function objectsAt(
   let myGeoJSON: Geojson.FeatureCollection = await response.json();
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
-  myGeoJSON.features
-    .flatMap((f) => geoJSONtoGeometries(f, originMeters, scaleFactor))
-    .forEach(({ kind, geometries }) => {
-      (byKind[kind] ??= []).push(...geometries);
-    });
+  const roads: Road[] = [];
+  myGeoJSON.features.forEach((f, index) => {
+    if (f.properties?.cmtype === "road") {
+      // roads are not rendered; they are used as paths for vehicles
+      roads.push(...roadsIn(f, `${x}/${y}/${index}`));
+      return;
+    }
+    geoJSONtoGeometries(f, originMeters, scaleFactor).forEach(
+      ({ kind, geometries }) => {
+        (byKind[kind] ??= []).push(...geometries);
+      },
+    );
+  });
 
   const meshes: THREE.Object3D[] = [];
   for (const [kind, geometries] of Object.entries(byKind)) {
@@ -136,5 +157,27 @@ export async function objectsAt(
       );
     }
   }
-  return meshes;
+  return { meshes, roads };
+}
+
+function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {
+  const highway = (f.properties?.highway as string | undefined) ?? undefined;
+  const geom = f.geometry;
+  if (geom.type === "LineString") {
+    return [
+      {
+        id: idPrefix,
+        highway,
+        coordinates: geom.coordinates as [number, number][],
+      },
+    ];
+  }
+  if (geom.type === "MultiLineString") {
+    return geom.coordinates.map((coordinates, i) => ({
+      id: `${idPrefix}/${i}`,
+      highway,
+      coordinates: coordinates as [number, number][],
+    }));
+  }
+  return [];
 }

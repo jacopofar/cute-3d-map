@@ -69,13 +69,33 @@ def test_to_tree_row_line_only():
     assert main.to_tree_row(7, {"natural": "tree_row"}, geom("POINT (0 0)")) is None
 
 
+def test_to_road_line_only():
+    f = main.to_road(8, {"highway": "residential"}, geom("LINESTRING (0 0, 1 1)"))
+    assert f is not None
+    assert f["properties"]["cmtype"] == "road"
+    assert f["properties"]["highway"] == "residential"
+    assert main.to_road(9, {"highway": "residential"}, geom("POINT (0 0)")) is None
+
+
 def test_tile_to_geojson_splits_render_and_raw():
     building = shapely.to_wkb(geom(POLYGON))
-    road = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+    footway = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
     data = [
         (1, {"building": "yes", "height": "10"}, building),
-        (2, {"highway": "residential"}, road),
+        (2, {"highway": "footway"}, footway),
     ]
     render, raw = main.tile_to_geojson(data)
     assert [f["properties"]["cmtype"] for f in render] == ["building"]
+    assert len(raw) == 2
+
+
+def test_tile_to_geojson_keeps_only_drivable_roads():
+    residential = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+    footway = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+    data = [
+        (1, {"highway": "residential"}, residential),
+        (2, {"highway": "footway"}, footway),
+    ]
+    render, raw = main.tile_to_geojson(data)
+    assert [f["properties"]["cmtype"] for f in render] == ["road"]
     assert len(raw) == 2

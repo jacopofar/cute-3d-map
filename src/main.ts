@@ -12,7 +12,9 @@ import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { objectsAt, TILE_ZOOM } from "./geojson_data.ts";
+import { objectsAt, TILE_ZOOM, epsg4326toEpsg3857 } from "./geojson_data.ts";
+import type { Road } from "./geojson_data.ts";
+import { VehicleManager } from "./vehicles.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -68,6 +70,9 @@ class CoolMap {
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
+  // roads per loaded tile, kept as lng/lat for the vehicle manager
+  private loadedRoads: { [key: string]: Road[] } = {};
+  private vehicles?: VehicleManager;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
@@ -170,6 +175,10 @@ class CoolMap {
         });
 
         this.renderer.autoClear = false;
+        // animated cars driving along the loaded roads (added to the scene
+        // directly — NOT via loadedTiles — so the origin reset does not touch
+        // it; its positions are recomputed each frame)
+        coolMap.vehicles = new VehicleManager(this.scene);
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -219,6 +228,13 @@ class CoolMap {
         // const l = new THREE.Matrix4().fromArray(modelMatrix);
 
         this.camera.projectionMatrix = m.multiply(l);
+        if (coolMap.vehicles) {
+          // advance the cars and place them against the current origin
+          coolMap.vehicles.update(
+            epsg4326toEpsg3857(coolMap.tileCenter),
+            Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360),
+          );
+        }
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -325,10 +341,13 @@ class CoolMap {
         console.log("Unloading tile ", k);
         // TODO why is forEach needed and the array breaks it??
         this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
+        delete this.loadedRoads[k];
         deleteUsKeys.push(k);
       }
     });
     deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
+    // drop vehicles whose roads just went away
+    this.syncVehicleRoads();
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
     // above (|x - cx| <= margin), otherwise the +margin row/column is kept
@@ -355,7 +374,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const meshes = await objectsAt(this.tileCenter, x, y);
+      const { meshes, roads } = await objectsAt(this.tileCenter, x, y);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -373,12 +392,20 @@ class CoolMap {
       }
       this.loadedTiles[tileKey] = meshes;
       meshes.forEach((m) => this.customLayer.scene.add(m));
+      this.loadedRoads[tileKey] = roads;
+      this.syncVehicleRoads();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
       console.warn("failed to load tile", tileKey, e);
     } finally {
       this.pendingTiles.delete(tileKey);
     }
+  }
+
+  // hand the union of the currently loaded tiles' roads to the vehicle manager
+  private syncVehicleRoads() {
+    if (!this.vehicles) return;
+    this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
   }
 
   async getGLTF(): Promise<ArrayBuffer> {

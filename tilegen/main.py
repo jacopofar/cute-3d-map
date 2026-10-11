@@ -20,6 +20,28 @@ logging.basicConfig(
 # zoom.
 TILE_ZOOM = 15
 
+# highway values whose ways carry vehicles; used to emit "road" features that
+# the frontend drives cars along
+DRIVABLE_HIGHWAYS = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+        "unclassified",
+        "residential",
+        "living_street",
+        "service",
+        "road",
+    }
+)
+
 
 def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
     """From EPSG:4326 to web mercator tiles using the"""
@@ -112,6 +134,19 @@ def to_tree_row(feature_id, tags, s) -> dict | None:
     }
 
 
+def to_road(feature_id, tags, s) -> dict | None:
+    if s.geom_type not in ("LineString", "MultiLineString"):
+        logger.warning(f"non-line road?? {feature_id} ({s.geom_type})")
+        return None
+    properties = {"cmtype": "road", "highway": tags.get("highway")}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def tile_to_geojson(data) -> tuple[list, list]:
     ret = []
     ret_raw = []
@@ -135,6 +170,9 @@ def tile_to_geojson(data) -> tuple[list, list]:
             c = to_tree_row(feature_id, tags, s)
             ret.append(c)
             continue
+        elif tags.get("highway") in DRIVABLE_HIGHWAYS:
+            c = to_road(feature_id, tags, s)
+            ret.append(c)
 
     return [r for r in ret if r is not None], ret_raw
 
