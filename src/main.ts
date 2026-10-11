@@ -46,7 +46,7 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
   map: MapLibreMap;
 }
 
-function getTileIndex(point: LngLat): [number, number] {
+function getTileIndex(point: { lng: number; lat: number }): [number, number] {
   const lon2tile = (lon: number) =>
     Math.floor(((lon + 180) / 360) * Math.pow(2, TILE_ZOOM));
   const lat2tile = (lat: number) =>
@@ -69,6 +69,18 @@ class CoolMap {
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
   private renderTileMargin: number = 3;
+  // increments every time the projection origin is reset, so in-flight
+  // async tile loads from the old origin can be recognized and discarded
+  private originGeneration: number = 0;
+  private modelTransform: {
+    translateX: number;
+    translateY: number;
+    translateZ: number;
+    rotateX: number;
+    rotateY: number;
+    rotateZ: number;
+    scale: number;
+  };
   constructor(tileCenter: [number, number]) {
     this.tileCenter = tileCenter;
     this.map = new MapLibreMap({
@@ -99,7 +111,7 @@ class CoolMap {
     // console.log("MERCATOR: ", modelAsMercatorCoordinate, modelAsMercatorCoordinate.toLngLat())
 
     // transformation parameters to position, rotate and scale the 3D model onto the map
-    const modelTransform = {
+    this.modelTransform = {
       translateX: modelAsMercatorCoordinate.x,
       translateY: modelAsMercatorCoordinate.y,
       translateZ: modelAsMercatorCoordinate.z,
@@ -112,6 +124,9 @@ class CoolMap {
       // in this case is 3.5646655226473536e-8
       scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits(),
     };
+    // the render callback is invoked with the layer as `this`, so capture
+    // the map instance to reach the (mutable) modelTransform
+    const coolMap = this;
     // configuration of the custom layer for a 3D model per the CustomLayerInterface
     this.customLayer = {
       id: "3d-model",
@@ -156,6 +171,7 @@ class CoolMap {
         // document.body.appendChild(VRButton.createButton(this.renderer));
       },
       render(gl, args) {
+        const modelTransform = coolMap.modelTransform;
         const rotationX = new THREE.Matrix4().makeRotationAxis(
           new THREE.Vector3(1, 0, 0),
           modelTransform.rotateX,
@@ -231,8 +247,47 @@ class CoolMap {
     });
   }
 
+  private resetOrigin(center: LngLat) {
+    const origin = MercatorCoordinate.fromLngLat(center, 0);
+    this.modelTransform = {
+      translateX: origin.x,
+      translateY: origin.y,
+      translateZ: origin.z,
+      rotateX: 0,
+      rotateY: 0,
+      rotateZ: 0,
+      scale: origin.meterInMercatorCoordinateUnits(),
+    };
+    // mesh geometry is built in meters relative to the projection origin, so
+    // every loaded tile is now in a coordinate space that no longer matches
+    // the transform: drop all of them, they get recomputed against the new
+    // origin by the load loop that follows
+    Object.values(this.loadedTiles)
+      .flat()
+      .forEach((m) => this.customLayer.scene.remove(m));
+    this.loadedTiles = {};
+    this.tileCenter = [center.lng, center.lat];
+    // bump the generation so async tile loads started with the previous
+    // origin can be discarded instead of landing on the new projection
+    this.originGeneration += 1;
+    console.log("reset projection origin to", center.lng, center.lat);
+  }
+
   private async loadUnloadCoord(center: LngLat) {
+    // the farther the projection origin is from the visible area, the more
+    // meters get squeezed into a Mercator unit (and the worse the float
+    // precision), so when we drift too far from the tile of the current
+    // origin, rebuild the transform around the current center
+    const [ox, oy] = getTileIndex(
+      MercatorCoordinate.fromLngLat(
+        [this.modelTransform.translateX, this.modelTransform.translateY],
+        0,
+      ).toLngLat(),
+    );
     const [cx, cy] = getTileIndex(center);
+    if (Math.abs(ox - cx) > 2 || Math.abs(oy - cy) > 2) {
+      this.resetOrigin(center);
+    }
     console.log("center tile:", cx, cy);
     let deleteUsKeys: string[] = [];
     Object.keys(this.loadedTiles).forEach((k) => {
@@ -249,6 +304,7 @@ class CoolMap {
       }
     });
     deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
+    const generation = this.originGeneration;
     for (
       let x = cx - this.renderTileMargin;
       x < cx + this.renderTileMargin;
@@ -259,12 +315,12 @@ class CoolMap {
         y < cy + this.renderTileMargin;
         y++
       ) {
-        this.loadTile(x, y);
+        this.loadTile(x, y, generation);
       }
     }
   }
 
-  private async loadTile(x: number, y: number) {
+  private async loadTile(x: number, y: number, generation: number) {
     const tileKey = `${x}_${y}`;
     if (tileKey in this.loadedTiles) {
       console.log("tile was already loaded, doing nothing for", tileKey);
@@ -275,7 +331,14 @@ class CoolMap {
       // load to finish
       // also, there's no handling of failed loads so far
       this.loadedTiles[tileKey] = [];
-      this.loadedTiles[tileKey] = await objectsAt(this.tileCenter, x, y);
+      const meshes = await objectsAt(this.tileCenter, x, y);
+      if (generation !== this.originGeneration) {
+        // the origin was reset while this tile was being computed, so the
+        // meshes are in coordinates of a projection that is no longer used
+        console.log("discarding stale tile", tileKey);
+        return;
+      }
+      this.loadedTiles[tileKey] = meshes;
       this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.add(m));
       // setTimeout(() => {
       //   this.loadedTiles[tileKey].forEach((m) => this.customLayer.scene.remove(m));
