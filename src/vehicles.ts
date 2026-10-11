@@ -71,6 +71,8 @@ interface Edge {
   cum: number[]; // cumulative meters from `a`
   length: number;
   stops: number[]; // distances (meters from `a`) where vehicles pause, sorted
+  forward: boolean; // may travel a -> b
+  backward: boolean; // may travel b -> a (false on one-way=yes)
 }
 
 // one edge of a cycle, plus whether the node it arrives at is a crossing
@@ -87,10 +89,12 @@ interface Cycle {
 }
 
 interface Vehicle {
-  id: string; // stable `${cycleId}#${slot}`
-  cycleId: string;
-  step: number; // index into the cycle's steps
-  s: number; // meters travelled along the current step
+  id: string; // stable `${cycleId}#${slot}` (cycle) or `w:${edgeKey}#${slot}`
+  cycleId?: string; // set for cycle-followers, undefined for graph walkers
+  step?: number; // index into the cycle's steps (cycle-followers only)
+  edgeKey: string;
+  dir: 1 | -1; // +1 travels a -> b, -1 travels b -> a
+  s: number; // meters travelled along the current edge
   speed: number;
   waitUntil: number; // ms timestamp: while in the future the vehicle is stopped
   color: THREE.Color;
@@ -185,6 +189,9 @@ export class VehicleManager {
   private readonly edges = new Map<string, Edge>();
   private readonly nodes = new Map<string, string[]>(); // node -> incident edge keys
   private readonly cycles = new Map<string, Cycle>();
+  // edges that belong to at least one kept cycle (cycle-followers cover these;
+  // graph walkers cover the rest)
+  private coveredEdges = new Set<string>();
   private vehicles: Vehicle[] = [];
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
@@ -226,22 +233,34 @@ export class VehicleManager {
     this.snapStops(stops);
     this.findCycles();
 
-    // Pick which vehicles to show by a stable bottom-k hash over every (cycle,
-    // slot) candidate, so the fleet spreads uniformly over the whole graph
-    // rather than greedily filling the cap on the first tiles that load.
-    const candidates: { id: string; cycleId: string; slot: number; key: number }[] =
-      [];
+    // Half the fleet follows cycles (repeatable routes); the rest are graph
+    // walkers that spread over the edges NOT covered by any cycle, so the
+    // whole network gets traffic.
+    const cycleBudget = Math.floor(this.config.maxVehicles / 2);
+    const walkBudget = this.config.maxVehicles - cycleBudget;
+    const speed = (id: string) =>
+      this.config.speedMin +
+      this.hash01(`${id}v`) * (this.config.speedMax - this.config.speedMin);
+
+    // cycle followers: stable bottom-k hash over (cycle, slot) candidates, so
+    // the fleet spreads uniformly rather than filling up on the first tiles
+    const cycleCandidates: {
+      id: string;
+      cycleId: string;
+      slot: number;
+      key: number;
+    }[] = [];
     for (const [cycleId, cycle] of this.cycles) {
       const n = Math.max(1, Math.floor(cycle.length / this.config.minSpacing));
       for (let i = 0; i < n; i++) {
-        const id = `${cycleId}#${i}`;
-        candidates.push({ id, cycleId, slot: i, key: this.hash01(id) });
+        const id = `c:${cycleId}#${i}`;
+        cycleCandidates.push({ id, cycleId, slot: i, key: this.hash01(id) });
       }
     }
-    candidates.sort((a, b) => a.key - b.key);
+    cycleCandidates.sort((a, b) => a.key - b.key);
 
     const vehicles: Vehicle[] = [];
-    for (const candidate of candidates.slice(0, this.config.maxVehicles)) {
+    for (const candidate of cycleCandidates.slice(0, cycleBudget)) {
       const existing = this.byId.get(candidate.id);
       if (existing) {
         // keep the vehicle (and its progress along the cycle) across re-syncs
@@ -253,20 +272,60 @@ export class VehicleManager {
       const step = Math.floor(
         this.hash01(`${candidate.id}step`) * cycle.steps.length,
       );
-      const edge = this.edges.get(cycle.steps[step].edgeKey);
+      const { edgeKey, dir } = cycle.steps[step];
+      const edge = this.edges.get(edgeKey);
       vehicles.push({
         id: candidate.id,
         cycleId: candidate.cycleId,
         step,
+        edgeKey,
+        dir,
         s: this.hash01(`${candidate.id}s`) * (edge?.length ?? 0),
-        speed:
-          this.config.speedMin +
-          this.hash01(`${candidate.id}v`) *
-            (this.config.speedMax - this.config.speedMin),
+        speed: speed(candidate.id),
         waitUntil: 0,
         color: this.vehicleColor(candidate.id),
       });
     }
+
+    // graph walkers: spawn on edges no cycle covers
+    const walkCandidates: {
+      id: string;
+      edgeKey: string;
+      dir: 1 | -1;
+      slot: number;
+      key: number;
+    }[] = [];
+    for (const [edgeKey, edge] of this.edges) {
+      if (this.coveredEdges.has(edgeKey)) continue;
+      const dir: 1 | -1 | 0 = edge.forward ? 1 : edge.backward ? -1 : 0;
+      if (dir === 0) continue; // no legal direction at all
+      const n = Math.max(1, Math.floor(edge.length / this.config.minSpacing));
+      for (let i = 0; i < n; i++) {
+        const id = `w:${edgeKey}#${i}`;
+        walkCandidates.push({ id, edgeKey, dir, slot: i, key: this.hash01(id) });
+      }
+    }
+    walkCandidates.sort((a, b) => a.key - b.key);
+    for (const candidate of walkCandidates.slice(0, walkBudget)) {
+      const existing = this.byId.get(candidate.id);
+      if (existing) {
+        vehicles.push(existing);
+        continue;
+      }
+      const edge = this.edges.get(candidate.edgeKey);
+      if (!edge) continue;
+      const n = Math.max(1, Math.floor(edge.length / this.config.minSpacing));
+      vehicles.push({
+        id: candidate.id,
+        edgeKey: candidate.edgeKey,
+        dir: candidate.dir,
+        s: ((candidate.slot + 0.5) / n) * edge.length,
+        speed: speed(candidate.id),
+        waitUntil: 0,
+        color: this.vehicleColor(candidate.id),
+      });
+    }
+
     this.vehicles = vehicles;
     this.byId = new Map(vehicles.map((v) => [v.id, v]));
   }
@@ -288,7 +347,19 @@ export class VehicleManager {
       }
       const length = cum[cum.length - 1];
       if (length < this.config.minEdgeLength) continue;
-      this.edges.set(key, { key, a, b, pts, cum, length, stops: [] });
+      // oneway: "yes" allows only a -> b (the way's own direction), "-1" only
+      // b -> a, anything else is two-way
+      this.edges.set(key, {
+        key,
+        a,
+        b,
+        pts,
+        cum,
+        length,
+        stops: [],
+        forward: road.oneway !== "-1",
+        backward: road.oneway !== "yes",
+      });
       this.node(a).push(key);
       this.node(b).push(key);
     }
@@ -334,6 +405,7 @@ export class VehicleManager {
   // applies to the cycle as a whole).
   private findCycles(): void {
     this.cycles.clear();
+    this.coveredEdges.clear();
     const parent = new Map<string, string | null>();
     const parentEdge = new Map<string, string | null>();
     const visited = new Set<string>();
@@ -399,30 +471,70 @@ export class VehicleManager {
       ) {
         continue;
       }
-      const steps = this.orderCycle(keys, edge.a);
-      if (!steps) continue;
+      const walk = this.orderCycle(keys, edge.a);
+      if (!walk) continue;
+      const steps = this.orientCycle(walk);
+      if (!steps) continue; // no legal travel direction (one-way constraints)
       const id = [...keys].sort().join(",");
       if (this.cycles.has(id)) continue;
       this.cycles.set(id, { id, steps, length });
+      for (const step of steps) this.coveredEdges.add(step.edgeKey);
     }
   }
 
   // order a set of edges (a simple cycle) into a walk starting at `start`
-  private orderCycle(keys: string[], start: string): Step[] | null {
+  private orderCycle(
+    keys: string[],
+    start: string,
+  ): { edgeKey: string; from: string; to: string }[] | null {
     const remaining = new Set(keys);
-    const steps: Step[] = [];
+    const walk: { edgeKey: string; from: string; to: string }[] = [];
     let current = start;
     while (remaining.size > 0) {
       const nextKey = this.node(current).find((k) => remaining.has(k));
       if (!nextKey) return null;
       remaining.delete(nextKey);
       const edge = this.edges.get(nextKey)!;
-      const dir: 1 | -1 = edge.a === current ? 1 : -1;
-      const to = dir === 1 ? edge.b : edge.a;
-      steps.push({ edgeKey: nextKey, dir, stop: this.node(to).length >= 3 });
+      const to = edge.a === current ? edge.b : edge.a;
+      walk.push({ edgeKey: nextKey, from: current, to });
       current = to;
     }
-    return steps.length >= this.config.minCycleCrossings ? steps : null;
+    if (current !== start) return null; // not a closed loop
+    return walk.length >= this.config.minCycleCrossings ? walk : null;
+  }
+
+  // a cycle can be driven in either direction; keep the orientation (if any)
+  // that respects one-way edges, otherwise discard the cycle
+  private orientCycle(
+    walk: { edgeKey: string; from: string; to: string }[],
+  ): Step[] | null {
+    const forward = this.walkToSteps(walk);
+    if (this.isLegal(forward)) return forward;
+    const reversed = this.walkToSteps(
+      [...walk].reverse().map(({ edgeKey, from, to }) => ({
+        edgeKey,
+        from: to,
+        to: from,
+      })),
+    );
+    return this.isLegal(reversed) ? reversed : null;
+  }
+
+  private walkToSteps(
+    walk: { edgeKey: string; from: string; to: string }[],
+  ): Step[] {
+    return walk.map(({ edgeKey, from, to }) => {
+      const edge = this.edges.get(edgeKey)!;
+      const dir: 1 | -1 = edge.a === from ? 1 : -1;
+      return { edgeKey, dir, stop: this.node(to).length >= 3 };
+    });
+  }
+
+  private isLegal(steps: Step[]): boolean {
+    return steps.every((step) => {
+      const edge = this.edges.get(step.edgeKey)!;
+      return step.dir === 1 ? edge.forward : edge.backward;
+    });
   }
 
   private vehicleColor(id: string): THREE.Color {
@@ -451,6 +563,19 @@ export class VehicleManager {
     return h / 4294967296;
   }
 
+  // legal exits from `node`, i.e. incident edges that may be left along; if
+  // there is none (dead end / all one-way into the node), allow a U-turn back
+  private legalNeighbors(fromEdgeKey: string, node: string): string[] {
+    const options: string[] = [];
+    for (const key of this.node(node)) {
+      if (key === fromEdgeKey) continue;
+      const edge = this.edges.get(key)!;
+      const allowed = edge.a === node ? edge.forward : edge.backward;
+      if (allowed) options.push(key);
+    }
+    return options.length > 0 ? options : [fromEdgeKey];
+  }
+
   // advance the fleet and write instance transforms; positions are recomputed
   // in model space from the current origin every frame
   update(originMeters: [number, number], scaleFactor: number): void {
@@ -459,41 +584,56 @@ export class VehicleManager {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     let count = 0;
     for (const v of this.vehicles) {
-      const cycle = this.cycles.get(v.cycleId);
-      if (!cycle) continue;
-      let step = cycle.steps[v.step];
-      let edge = this.edges.get(step.edgeKey);
+      let edge = this.edges.get(v.edgeKey);
       if (!edge) continue;
 
       if (now >= v.waitUntil) {
-        const before = step.dir === 1 ? v.s : edge.length - v.s;
+        const before = v.dir === 1 ? v.s : edge.length - v.s;
         v.s += v.speed * dt;
         if (v.s >= edge.length) {
-          // reached a junction: follow the cycle (wrap at the end) and, at a
-          // crossing, pause briefly (unless the fleet disables stops)
-          const stop = step.stop;
-          v.step = (v.step + 1) % cycle.steps.length;
-          step = cycle.steps[v.step];
-          v.s = 0;
-          edge = this.edges.get(step.edgeKey);
-          if (!edge) continue;
-          if (stop && this.config.stopMax > 0) {
-            v.waitUntil = now + this.stopDelay();
+          // reached a junction
+          if (v.cycleId !== undefined) {
+            // follow the cycle (wrap at the end)
+            const cycle = this.cycles.get(v.cycleId);
+            if (!cycle) continue;
+            const arrivalStop = cycle.steps[v.step!].stop;
+            v.step = (v.step! + 1) % cycle.steps.length;
+            const step = cycle.steps[v.step];
+            v.edgeKey = step.edgeKey;
+            v.dir = step.dir;
+            v.s = 0;
+            if (arrivalStop && this.config.stopMax > 0) {
+              v.waitUntil = now + this.stopDelay();
+            }
+          } else {
+            // graph walker: pick a legal outgoing edge (U-turn at dead ends)
+            const to = v.dir === 1 ? edge.b : edge.a;
+            const options = this.legalNeighbors(edge.key, to);
+            const nextKey = options[(Math.random() * options.length) | 0];
+            const next = this.edges.get(nextKey)!;
+            v.dir = next.a === to ? 1 : -1;
+            v.edgeKey = nextKey;
+            v.s = 0;
+            if (this.node(to).length >= 3 && this.config.stopMax > 0) {
+              v.waitUntil = now + this.stopDelay();
+            }
           }
+          edge = this.edges.get(v.edgeKey);
+          if (!edge) continue;
         } else if (this.config.stopMax > 0 && edge.stops.length > 0) {
           // pause when passing a stop (e.g. a tram stop), stopping exactly on it
-          const after = step.dir === 1 ? v.s : edge.length - v.s;
-          const stopDistance = crossedStop(edge, before, after, step.dir);
+          const after = v.dir === 1 ? v.s : edge.length - v.s;
+          const stopDistance = crossedStop(edge, before, after, v.dir);
           if (stopDistance !== null) {
-            v.s = step.dir === 1 ? stopDistance : edge.length - stopDistance;
+            v.s = v.dir === 1 ? stopDistance : edge.length - stopDistance;
             v.waitUntil = now + this.stopDelay();
           }
         }
       }
 
-      const distanceFromA = step.dir === 1 ? v.s : edge.length - v.s;
-      const behind = pointAt(edge, distanceFromA - step.dir);
-      const ahead = pointAt(edge, distanceFromA + step.dir);
+      const distanceFromA = v.dir === 1 ? v.s : edge.length - v.s;
+      const behind = pointAt(edge, distanceFromA - v.dir);
+      const ahead = pointAt(edge, distanceFromA + v.dir);
       const m = toModelCoords(behind, originMeters, scaleFactor);
       const ma = toModelCoords(ahead, originMeters, scaleFactor);
       const angle = Math.atan2(ma[1] - m[1], ma[0] - m[0]);

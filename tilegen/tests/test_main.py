@@ -147,3 +147,24 @@ def test_tile_to_geojson_emits_tram_stop():
     data = [(1, {"railway": "tram_stop"}, stop)]
     render, _ = main.tile_to_geojson(data, 17220, 11723, 15)
     assert [f["properties"]["cmtype"] for f in render] == ["tram_stop"]
+
+
+def test_road_oneway():
+    assert main.road_oneway({"oneway": "yes"}) == "yes"
+    assert main.road_oneway({"oneway": "-1"}) == "-1"
+    assert main.road_oneway({"oneway": "no"}) is None
+    assert main.road_oneway({"junction": "roundabout"}) == "yes"
+    assert main.road_oneway({}) is None
+
+
+def test_tile_to_geojson_marks_oneway_roads():
+    min_lon, min_lat, max_lon, max_lat = main.tile_lonlat_bounds(17220, 11723, 15)
+    lon = (min_lon + max_lon) / 2
+    lat = (min_lat + max_lat) / 2
+    d = 0.001
+    road = shapely.to_wkb(geom(f"LINESTRING ({lon} {lat}, {lon + 2 * d} {lat})"))
+    data = [(1, {"highway": "residential", "oneway": "yes"}, road)]
+    render, _ = main.tile_to_geojson(data, 17220, 11723, 15)
+    roads = [f for f in render if f["properties"]["cmtype"] == "road"]
+    assert len(roads) == 1
+    assert roads[0]["properties"]["oneway"] == "yes"

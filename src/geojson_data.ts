@@ -96,6 +96,8 @@ const treeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 export interface Road {
   id: string;
   highway?: string;
+  // "yes" = one-way along the coordinate order, "-1" = against it
+  oneway?: string;
   coordinates: [number, number][];
 }
 
@@ -173,12 +175,14 @@ export async function objectsAt(
 
 function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {
   const highway = (f.properties?.highway as string | undefined) ?? undefined;
+  const oneway = (f.properties?.oneway as string | undefined) ?? undefined;
   const geom = f.geometry;
   if (geom.type === "LineString") {
     return [
       {
         id: idPrefix,
         highway,
+        oneway,
         coordinates: geom.coordinates as [number, number][],
       },
     ];
@@ -187,6 +191,7 @@ function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {
     return geom.coordinates.map((coordinates, i) => ({
       id: `${idPrefix}/${i}`,
       highway,
+      oneway,
       coordinates: coordinates as [number, number][],
     }));
   }

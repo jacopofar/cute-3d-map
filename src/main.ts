@@ -81,6 +81,8 @@ class CoolMap {
   private loadedStops: { [key: string]: [number, number][] } = {};
   private vehicles?: VehicleManager;
   private trains?: VehicleManager;
+  // user toggle (the page checkbox); combined with the zoom gate
+  private trafficEnabled = true;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
@@ -260,7 +262,7 @@ class CoolMap {
       this.map.addLayer(this.customLayer);
       // load map data at setup before the user moves
       this.loadUnloadCoord(this.map.getCenter());
-      this.updateVehicleActivity();
+      this.applyTrafficState();
       // // this is only to show maplibre globe, not useful on a city-level map :)
       // this.map.setSky({ "atmosphere-blend": 1.0 });
       // this.map.setProjection({
@@ -280,10 +282,20 @@ class CoolMap {
       }
       this.moveDebounce = setTimeout(() => {
         this.moveDebounce = undefined;
-        this.updateVehicleActivity();
+        this.applyTrafficState();
         this.loadUnloadCoord(this.map.getCenter());
       }, 150);
     });
+
+    const trafficToggle = document.querySelector<HTMLInputElement>(
+      "#traffic-toggle input",
+    );
+    if (trafficToggle) {
+      this.trafficEnabled = trafficToggle.checked;
+      trafficToggle.addEventListener("change", () =>
+        this.setTrafficEnabled(trafficToggle.checked),
+      );
+    }
   }
 
   private resetOrigin(center: LngLat) {
@@ -421,15 +433,20 @@ class CoolMap {
     }
   }
 
-  // enable/disable the fleets based on the current zoom; when they turn on,
-  // (re)build them from the paths already loaded
-  private updateVehicleActivity() {
+  // enable/disable the fleets from the traffic toggle and the current zoom;
+  // when they turn on, (re)build them from the paths already loaded
+  private applyTrafficState() {
     if (!this.vehicles || !this.trains) return;
-    const enabled = this.map.getZoom() >= VEHICLE_MIN_ZOOM;
-    if (enabled === this.vehicles.enabled) return;
-    this.vehicles.setEnabled(enabled);
-    this.trains.setEnabled(enabled);
-    if (enabled) this.syncVehicleRoads();
+    const on = this.trafficEnabled && this.map.getZoom() >= VEHICLE_MIN_ZOOM;
+    if (on === this.vehicles.enabled) return;
+    this.vehicles.setEnabled(on);
+    this.trains.setEnabled(on);
+    if (on) this.syncVehicleRoads();
+  }
+
+  setTrafficEnabled(enabled: boolean) {
+    this.trafficEnabled = enabled;
+    this.applyTrafficState();
   }
 
   // hand the union of the currently loaded tiles' paths to the fleet managers

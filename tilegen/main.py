@@ -199,10 +199,52 @@ def lines_to_features(
     ]
 
 
+def road_oneway(tags) -> str | None:
+    """Normalized oneway direction of a highway way, or None if two-way."""
+    value = tags.get("oneway")
+    if value in ("yes", "true", "1"):
+        return "yes"
+    if value in ("-1", "reverse"):
+        return "-1"
+    if value in ("no", "false", "0"):
+        return None
+    if tags.get("junction") in ("roundabout", "circular"):
+        return "yes"
+    return None
+
+
+def clip_line(line: LineString, box: BaseGeometry) -> list[LineString]:
+    """Intersect a line with the tile box, keeping the line's own direction so
+    oneway semantics survive clipping."""
+    clipped = shapely.intersection(line, box)
+    if clipped.is_empty:
+        return []
+    if isinstance(clipped, LineString):
+        parts = [clipped]
+    elif isinstance(clipped, MultiLineString):
+        parts = list(clipped.geoms)
+    elif isinstance(clipped, GeometryCollection):
+        parts = [p for p in clipped.geoms if isinstance(p, LineString)]
+    else:
+        parts = []
+    start = shapely.Point(line.coords[0])
+    result = []
+    for part in parts:
+        first = shapely.Point(part.coords[0])
+        last = shapely.Point(part.coords[-1])
+        if first.distance(start) > last.distance(start):
+            part = shapely.reverse(part)
+        result.append(part)
+    return result
+
+
 def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
     ret = []
     ret_raw = []
-    road_geometries: list[BaseGeometry] = []
+    # two-way roads are merged into longer lines (direction does not matter);
+    # one-way roads are kept per way so their direction survives
+    bidir_roads: list[BaseGeometry] = []
+    oneway_roads: list[tuple[LineString, str]] = []
     rail_geometries: list[BaseGeometry] = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
@@ -237,14 +279,33 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
                     }
                 )
         elif tags.get("highway") in DRIVABLE_HIGHWAYS:
-            road_geometries.append(s)
+            oneway = road_oneway(tags)
+            if oneway is None:
+                bidir_roads.append(s)
+            elif isinstance(s, LineString):
+                oneway_roads.append((s, oneway))
+            elif isinstance(s, MultiLineString):
+                oneway_roads.extend((part, oneway) for part in s.geoms)
         elif tags.get("railway") in RAILWAYS:
             rail_geometries.append(s)
 
-    if road_geometries or rail_geometries:
+    if bidir_roads or oneway_roads or rail_geometries:
         box = shapely.box(*tile_lonlat_bounds(tile_x, tile_y, zoom))
-        ret += lines_to_features(road_geometries, box, "road", tile_x, tile_y)
+        ret += lines_to_features(bidir_roads, box, "road", tile_x, tile_y)
         ret += lines_to_features(rail_geometries, box, "rail", tile_x, tile_y)
+        # one-way roads: clipped per way so the direction is preserved
+        index = 0
+        for geom, oneway in oneway_roads:
+            for line in clip_line(geom, box):
+                ret.append(
+                    {
+                        "type": "feature",
+                        "id": f"{tile_x}/{tile_y}/oneway/{index}",
+                        "geometry": json.loads(shapely.to_geojson(line)),
+                        "properties": {"cmtype": "road", "oneway": oneway},
+                    }
+                )
+                index += 1
 
     return [r for r in ret if r is not None], ret_raw
 

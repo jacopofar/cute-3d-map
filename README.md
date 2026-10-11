@@ -21,8 +21,9 @@ The project has two halves:
      height falls back to `building:levels * 3` or 10 m;
    - `cmtype: "tree"` (point);
    - `cmtype: "tree_row"` (LineString);
-   - `cmtype: "road"` (LineString, drivable highways only) — clipped to the
-     tile and consecutive segments stitched into longer lines;
+   - `cmtype: "road"` (LineString, drivable highways only) — two-way ways are
+     clipped and stitched; one-way ways (`oneway=yes`/`-1`, roundabouts) are
+     kept per way with an `oneway` property so their direction survives;
    - `cmtype: "rail"` (LineString, `railway=rail`/`tram` only, no metros) —
      clipped and stitched the same way;
    - `cmtype: "tram_stop"` (Point, `railway=tram_stop`) — the rail fleet pauses
