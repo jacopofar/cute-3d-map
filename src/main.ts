@@ -4,6 +4,8 @@ import {
   ScaleControl,
 } from "maplibre-gl";
 import * as THREE from "three";
+import "./maplibre_setup";
+
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 // import {VRButton} from 'three/addons/webxr/VRButton.js';
 
