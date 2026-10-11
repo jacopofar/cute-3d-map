@@ -75,15 +75,15 @@ def test_tile_lonlat_bounds_contains_center():
     assert min_lat < 45.497 < max_lat
 
 
-def test_merge_roads_stitches_and_drops_short():
+def test_merge_roads_stitches_and_keeps_short():
     seg1 = geom("LINESTRING (9.19 45.50, 9.191 45.50)")
     seg2 = geom("LINESTRING (9.191 45.50, 9.192 45.50)")
     stub = geom("LINESTRING (9.20 45.50, 9.2001 45.50)")
     box = shapely.box(9.0, 45.0, 9.5, 45.5)
     lines = main.merge_roads([seg1, seg2, stub], box)
-    # seg1+seg2 form one ~156 m line; the ~8 m stub is dropped
-    assert len(lines) == 1
-    assert len(list(lines[0].coords)) == 3
+    # seg1+seg2 stitch into one 3-point line; the short stub is kept (the
+    # minimum-length rule now applies to cycles in the frontend)
+    assert sorted(len(list(ln.coords)) for ln in lines) == [2, 3]
 
 
 def test_merge_roads_clips_to_box():

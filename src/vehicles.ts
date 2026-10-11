@@ -5,7 +5,7 @@ import { toModelCoords, type Road } from "./geojson_data";
 const CAR_LENGTH = 8 / 3;
 const CAR_WIDTH = 4 / 3;
 const CAR_HEIGHT = 1;
-const MIN_SPACING = 12.5; // meters between cars spawned on one edge
+const MIN_SPACING = 12.5; // meters between cars spawned on one cycle
 const MAX_VEHICLES = 4000;
 const SPEED_MIN = 6; // m/s
 const SPEED_MAX = 16;
@@ -13,10 +13,15 @@ const STOP_MIN = 0.4; // seconds paused when arriving at a crossing
 const STOP_MAX = 1.5;
 const MIN_EDGE_LENGTH = 1; // ignore degenerate edges (meters)
 
-const CAR_COLORS = [
-  0xff5555, 0x5555ff, 0xffffff, 0x222222, 0xffcc33, 0x33cc99, 0xcccccc,
-  0x99bbff,
-];
+// a drivable cycle must pass through this many crossings (degree >= 3 nodes)
+// and be at least this long; the 50 m rule applies to the cycle as a whole
+const MIN_CYCLE_CROSSINGS = 3;
+const MAX_CYCLE_CROSSINGS = 10;
+const MIN_CYCLE_LENGTH = 50;
+
+// 60% of cars use a grey shade, the rest a colour
+const GREY_COLORS = [0xe0e0e0, 0xb0b0b0, 0x888888, 0x555555, 0x333333, 0xa8a8a8];
+const CAR_COLORS = [0xff5555, 0x5555ff, 0xffcc33, 0x33cc99];
 
 // one road segment between two graph nodes
 interface Edge {
@@ -28,15 +33,24 @@ interface Edge {
   length: number;
 }
 
-interface GraphNode {
-  edges: string[]; // incident edge keys
+// one edge of a cycle, plus whether the node it arrives at is a crossing
+interface Step {
+  edgeKey: string;
+  dir: 1 | -1; // +1 travels a -> b, -1 travels b -> a
+  stop: boolean;
+}
+
+interface Cycle {
+  id: string;
+  steps: Step[];
+  length: number;
 }
 
 interface Vehicle {
-  id: string; // stable `${edgeKey}#${slot}`
-  edgeKey: string;
-  dir: 1 | -1; // +1 travels a -> b, -1 travels b -> a
-  s: number; // meters travelled since entering the current edge
+  id: string; // stable `${cycleId}#${slot}`
+  cycleId: string;
+  step: number; // index into the cycle's steps
+  s: number; // meters travelled along the current step
   speed: number;
   waitUntil: number; // ms timestamp: while in the future the car is stopped
   color: THREE.Color;
@@ -74,13 +88,14 @@ function pointAt(edge: Edge, distanceFromA: number): [number, number] {
 }
 
 export class VehicleManager {
-  // Roads are pulled into a single graph spanning every loaded tile, so a car
-  // can drive out of one tile and into the next one. Nodes are road
-  // endpoints; a node with three or more edges is a crossing, where cars pick
-  // a (random) branch and briefly stop.
+  // Roads from every loaded tile are pulled into one graph, so a cycle can
+  // run across tile boundaries. Cars then loop their cycle: no ping-pong, and
+  // at each crossing they may take a different branch (different cycles), with
+  // a brief stop.
   private readonly mesh: THREE.InstancedMesh;
   private readonly edges = new Map<string, Edge>();
-  private readonly nodes = new Map<string, GraphNode>();
+  private readonly nodes = new Map<string, string[]>(); // node -> incident edge keys
+  private readonly cycles = new Map<string, Cycle>();
   private vehicles: Vehicle[] = [];
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
@@ -100,17 +115,18 @@ export class VehicleManager {
 
   setRoads(roads: Road[]): void {
     this.buildGraph(roads);
+    this.findCycles();
 
-    // Pick which cars to show by a stable bottom-k hash over every (edge,
+    // Pick which cars to show by a stable bottom-k hash over every (cycle,
     // slot) candidate, so the fleet spreads uniformly over the whole graph
-    // (rather than greedily filling the cap on the first tiles that load).
-    const candidates: { id: string; edgeKey: string; slot: number; key: number }[] =
+    // rather than greedily filling the cap on the first tiles that load.
+    const candidates: { id: string; cycleId: string; slot: number; key: number }[] =
       [];
-    for (const [key, edge] of this.edges) {
-      const n = Math.max(1, Math.floor(edge.length / MIN_SPACING));
+    for (const [cycleId, cycle] of this.cycles) {
+      const n = Math.max(1, Math.floor(cycle.length / MIN_SPACING));
       for (let i = 0; i < n; i++) {
-        const id = `${key}#${i}`;
-        candidates.push({ id, edgeKey: key, slot: i, key: this.hash01(id) });
+        const id = `${cycleId}#${i}`;
+        candidates.push({ id, cycleId, slot: i, key: this.hash01(id) });
       }
     }
     candidates.sort((a, b) => a.key - b.key);
@@ -119,24 +135,23 @@ export class VehicleManager {
     for (const candidate of candidates.slice(0, MAX_VEHICLES)) {
       const existing = this.byId.get(candidate.id);
       if (existing) {
-        // keep the car (and its current route) as tiles load/unload
+        // keep the car (and its progress along the cycle) across re-syncs
         vehicles.push(existing);
         continue;
       }
-      const edge = this.edges.get(candidate.edgeKey);
-      if (!edge) continue;
-      const n = Math.max(1, Math.floor(edge.length / MIN_SPACING));
+      const cycle = this.cycles.get(candidate.cycleId);
+      if (!cycle) continue;
+      const step = Math.floor(this.hash01(`${candidate.id}step`) * cycle.steps.length);
+      const edge = this.edges.get(cycle.steps[step].edgeKey);
       vehicles.push({
         id: candidate.id,
-        edgeKey: candidate.edgeKey,
-        dir: this.hash01(`${candidate.id}d`) < 0.5 ? 1 : -1,
-        s: ((candidate.slot + 0.5) / n) * edge.length,
+        cycleId: candidate.cycleId,
+        step,
+        s: this.hash01(`${candidate.id}s`) * (edge?.length ?? 0),
         speed:
-          SPEED_MIN + this.hash01(`${candidate.id}s`) * (SPEED_MAX - SPEED_MIN),
+          SPEED_MIN + this.hash01(`${candidate.id}v`) * (SPEED_MAX - SPEED_MIN),
         waitUntil: 0,
-        color: new THREE.Color(
-          CAR_COLORS[(this.hash01(`${candidate.id}c`) * CAR_COLORS.length) | 0],
-        ),
+        color: this.carColor(candidate.id),
       });
     }
     this.vehicles = vehicles;
@@ -161,18 +176,120 @@ export class VehicleManager {
       const length = cum[cum.length - 1];
       if (length < MIN_EDGE_LENGTH) continue;
       this.edges.set(key, { key, a, b, pts, cum, length });
-      this.node(a).edges.push(key);
-      this.node(b).edges.push(key);
+      this.node(a).push(key);
+      this.node(b).push(key);
     }
   }
 
-  private node(key: string): GraphNode {
-    let node = this.nodes.get(key);
-    if (!node) {
-      node = { edges: [] };
-      this.nodes.set(key, node);
+  private node(key: string): string[] {
+    let incident = this.nodes.get(key);
+    if (!incident) {
+      incident = [];
+      this.nodes.set(key, incident);
     }
-    return node;
+    return incident;
+  }
+
+  // Find cycles via a spanning forest: every non-tree edge closes exactly one
+  // fundamental cycle. Keep those that pass through 3..10 crossings and are at
+  // least MIN_CYCLE_LENGTH long (the minimum-length rule for cycles).
+  private findCycles(): void {
+    this.cycles.clear();
+    const parent = new Map<string, string | null>();
+    const parentEdge = new Map<string, string | null>();
+    const visited = new Set<string>();
+    for (const start of this.nodes.keys()) {
+      if (visited.has(start)) continue;
+      visited.add(start);
+      parent.set(start, null);
+      parentEdge.set(start, null);
+      const queue = [start];
+      for (let qi = 0; qi < queue.length; qi++) {
+        const u = queue[qi];
+        for (const key of this.node(u)) {
+          const edge = this.edges.get(key)!;
+          const v = edge.a === u ? edge.b : edge.a;
+          if (!visited.has(v)) {
+            visited.add(v);
+            parent.set(v, u);
+            parentEdge.set(v, key);
+            queue.push(v);
+          }
+        }
+      }
+    }
+
+    const treePathKeys = (u: string, v: string): string[] => {
+      const ancestors = new Set<string>();
+      for (let x: string | null = u; x; x = parent.get(x) ?? null) {
+        ancestors.add(x);
+      }
+      let lca: string | null = v;
+      while (lca && !ancestors.has(lca)) lca = parent.get(lca) ?? null;
+      const keys: string[] = [];
+      for (let x: string | null = u; x && x !== lca; x = parent.get(x) ?? null) {
+        keys.push(parentEdge.get(x)!);
+      }
+      for (let x: string | null = v; x && x !== lca; x = parent.get(x) ?? null) {
+        keys.push(parentEdge.get(x)!);
+      }
+      return keys;
+    };
+
+    for (const [key, edge] of this.edges) {
+      if (parentEdge.get(edge.a) === key || parentEdge.get(edge.b) === key) {
+        continue; // tree edge
+      }
+      const keys = [key, ...treePathKeys(edge.a, edge.b)];
+      const nodesOnCycle = new Set<string>();
+      let length = 0;
+      for (const k of keys) {
+        const e = this.edges.get(k)!;
+        nodesOnCycle.add(e.a);
+        nodesOnCycle.add(e.b);
+        length += e.length;
+      }
+      let crossings = 0;
+      for (const node of nodesOnCycle) {
+        if (this.node(node).length >= 3) crossings++;
+      }
+      if (
+        crossings < MIN_CYCLE_CROSSINGS ||
+        crossings > MAX_CYCLE_CROSSINGS ||
+        length < MIN_CYCLE_LENGTH
+      ) {
+        continue;
+      }
+      const steps = this.orderCycle(keys, edge.a);
+      if (!steps) continue;
+      const id = [...keys].sort().join(",");
+      if (this.cycles.has(id)) continue;
+      this.cycles.set(id, { id, steps, length });
+    }
+  }
+
+  // order a set of edges (a simple cycle) into a walk starting at `start`
+  private orderCycle(keys: string[], start: string): Step[] | null {
+    const remaining = new Set(keys);
+    const steps: Step[] = [];
+    let current = start;
+    while (remaining.size > 0) {
+      const nextKey = this.node(current).find((k) => remaining.has(k));
+      if (!nextKey) return null;
+      remaining.delete(nextKey);
+      const edge = this.edges.get(nextKey)!;
+      const dir: 1 | -1 = edge.a === current ? 1 : -1;
+      const to = dir === 1 ? edge.b : edge.a;
+      steps.push({ edgeKey: nextKey, dir, stop: this.node(to).length >= 3 });
+      current = to;
+    }
+    return steps.length >= MIN_CYCLE_CROSSINGS ? steps : null;
+  }
+
+  private carColor(id: string): THREE.Color {
+    const palette =
+      this.hash01(`${id}gray`) < 0.6 ? GREY_COLORS : CAR_COLORS;
+    return new THREE.Color(palette[(this.hash01(`${id}c`) * palette.length) | 0]);
   }
 
   // deterministic [0, 1) hash of a string, for stable pseudo-random choices
@@ -192,19 +309,33 @@ export class VehicleManager {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     let count = 0;
     for (const v of this.vehicles) {
-      let edge = this.edges.get(v.edgeKey);
+      const cycle = this.cycles.get(v.cycleId);
+      if (!cycle) continue;
+      let step = cycle.steps[v.step];
+      let edge = this.edges.get(step.edgeKey);
       if (!edge) continue;
+
       if (now >= v.waitUntil) {
         v.s += v.speed * dt;
         if (v.s >= edge.length) {
-          this.arrive(v, edge, now);
-          edge = this.edges.get(v.edgeKey);
+          // reached a junction: follow the cycle (wrap at the end) and, at a
+          // crossing, pause briefly
+          const stop = step.stop;
+          v.step = (v.step + 1) % cycle.steps.length;
+          step = cycle.steps[v.step];
+          v.s = 0;
+          edge = this.edges.get(step.edgeKey);
           if (!edge) continue;
+          if (stop) {
+            v.waitUntil =
+              now + (STOP_MIN + Math.random() * (STOP_MAX - STOP_MIN)) * 1000;
+          }
         }
       }
-      const distanceFromA = v.dir === 1 ? v.s : edge.length - v.s;
-      const behind = pointAt(edge, distanceFromA - v.dir);
-      const ahead = pointAt(edge, distanceFromA + v.dir);
+
+      const distanceFromA = step.dir === 1 ? v.s : edge.length - v.s;
+      const behind = pointAt(edge, distanceFromA - step.dir);
+      const ahead = pointAt(edge, distanceFromA + step.dir);
       const m = toModelCoords(behind, originMeters, scaleFactor);
       const ma = toModelCoords(ahead, originMeters, scaleFactor);
       const angle = Math.atan2(ma[1] - m[1], ma[0] - m[0]);
@@ -218,24 +349,5 @@ export class VehicleManager {
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-  }
-
-  // reached the end of the current edge: pick a branch at the junction. At a
-  // dead end, turn around. At a crossing (>= 3 edges), pause briefly.
-  private arrive(v: Vehicle, edge: Edge, now: number): void {
-    const toKey = v.dir === 1 ? edge.b : edge.a;
-    const node = this.nodes.get(toKey);
-    if (!node) return;
-    let options = node.edges.filter((key) => key !== edge.key);
-    if (options.length === 0) options = [edge.key]; // dead end -> U-turn
-    const nextKey = options[Math.floor(Math.random() * options.length)];
-    const next = this.edges.get(nextKey);
-    if (!next) return;
-    v.dir = next.a === toKey ? 1 : -1;
-    v.edgeKey = nextKey;
-    v.s = 0;
-    if (node.edges.length >= 3) {
-      v.waitUntil = now + (STOP_MIN + Math.random() * (STOP_MAX - STOP_MIN)) * 1000;
-    }
   }
 }

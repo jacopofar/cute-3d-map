@@ -22,8 +22,7 @@ The project has two halves:
    - `cmtype: "tree"` (point);
    - `cmtype: "tree_row"` (LineString);
    - `cmtype: "road"` (LineString, drivable highways only) — clipped to the
-     tile, consecutive segments stitched into longer lines, and dropped if
-     under 50 m.
+     tile and consecutive segments stitched into longer lines.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads

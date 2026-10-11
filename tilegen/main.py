@@ -1,8 +1,6 @@
-import itertools
 import json
 import logging
 import math
-from collections.abc import Sequence
 from pathlib import Path
 
 import click
@@ -137,11 +135,6 @@ def to_tree_row(feature_id, tags, s) -> dict | None:
     }
 
 
-# roads shorter than this (measured in meters, after clipping to the tile and
-# stitching consecutive segments) are dropped
-MIN_ROAD_LENGTH = 50.0
-
-
 def tile_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
     """(min_lon, min_lat, max_lon, max_lat) of a slippy tile in EPSG:4326."""
     n = 2**zoom
@@ -152,33 +145,14 @@ def tile_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, 
     return min_lon, min_lat, max_lon, max_lat
 
 
-def haversine_m(a: Sequence[float], b: Sequence[float]) -> float:
-    """Great-circle distance between two (lon, lat) points, in meters."""
-    (lon1, lat1) = a[0], a[1]
-    (lon2, lat2) = b[0], b[1]
-    radius = 6371000.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    h = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    )
-    return 2 * radius * math.asin(math.sqrt(h))
-
-
-def line_length_m(line: LineString) -> float:
-    points = list(line.coords)
-    return sum(haversine_m(a, b) for a, b in itertools.pairwise(points))
-
-
 def merge_roads(
     geometries: list[BaseGeometry],
     box: BaseGeometry,
-    min_length: float = MIN_ROAD_LENGTH,
 ) -> list[BaseGeometry]:
-    """Clip road ways to the tile, stitch consecutive segments into longer
-    lines, and drop anything still shorter than min_length meters."""
+    """Clip road ways to the tile and stitch consecutive segments into longer
+    lines. Short segments are kept: the minimum-length rule is applied to whole
+    cycles in the frontend, so dropping short connectors here would fragment
+    the road graph."""
     clipped: list[LineString] = []
     for g in geometries:
         c = shapely.intersection(g, box)
@@ -199,7 +173,7 @@ def merge_roads(
         lines = [merged]
     else:
         lines = []
-    return [ln for ln in lines if line_length_m(ln) >= min_length]
+    return list(lines)
 
 
 def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
