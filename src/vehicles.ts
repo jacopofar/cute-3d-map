@@ -2,24 +2,43 @@ import * as THREE from "three";
 
 import { toModelCoords, type Road } from "./geojson_data";
 
-const CAR_LENGTH = 8;
-const CAR_WIDTH = 4;
-const CAR_HEIGHT = 3;
-const MIN_SPACING = 25; // meters between cars spawned on one road
-const MAX_VEHICLES = 2000;
+const CAR_LENGTH = 8 / 3;
+const CAR_WIDTH = 4 / 3;
+const CAR_HEIGHT = 1;
+const MIN_SPACING = 12.5; // meters between cars spawned on one edge
+const MAX_VEHICLES = 4000;
 const SPEED_MIN = 6; // m/s
 const SPEED_MAX = 16;
+const STOP_MIN = 0.4; // seconds paused when arriving at a crossing
+const STOP_MAX = 1.5;
+const MIN_EDGE_LENGTH = 1; // ignore degenerate edges (meters)
 
 const CAR_COLORS = [
   0xff5555, 0x5555ff, 0xffffff, 0x222222, 0xffcc33, 0x33cc99, 0xcccccc,
   0x99bbff,
 ];
 
+// one road segment between two graph nodes
+interface Edge {
+  key: string;
+  a: string; // node key at pts[0]
+  b: string; // node key at pts[last]
+  pts: [number, number][];
+  cum: number[]; // cumulative meters from `a`
+  length: number;
+}
+
+interface GraphNode {
+  edges: string[]; // incident edge keys
+}
+
 interface Vehicle {
-  roadId: string;
-  s: number; // meters along the road
-  dir: 1 | -1;
+  id: string; // stable `${edgeKey}#${slot}`
+  edgeKey: string;
+  dir: 1 | -1; // +1 travels a -> b, -1 travels b -> a
+  s: number; // meters travelled since entering the current edge
   speed: number;
+  waitUntil: number; // ms timestamp: while in the future the car is stopped
   color: THREE.Color;
 }
 
@@ -36,41 +55,34 @@ function metersBetween(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// a road preprocessed for fast placement: cumulative metrage plus a point
-// lookup, so the per-frame update avoids calling into turf for every vehicle
-class RoadPath {
-  readonly pts: [number, number][];
-  private readonly cum: number[];
-  readonly length: number;
+// a node id shared by roads meeting at the same point. Coordinates are
+// rounded so tile-clipped endpoints on a shared boundary collide exactly.
+function coordKey(c: [number, number]): string {
+  return `${c[0].toFixed(6)},${c[1].toFixed(6)}`;
+}
 
-  constructor(coordinates: [number, number][]) {
-    this.pts = coordinates;
-    this.cum = [0];
-    for (let i = 1; i < coordinates.length; i++) {
-      this.cum.push(
-        this.cum[i - 1] + metersBetween(coordinates[i - 1], coordinates[i]),
-      );
-    }
-    this.length = this.cum[this.cum.length - 1];
-  }
-
-  pointAt(s: number): [number, number] {
-    const clamped = Math.max(0, Math.min(this.length, s));
-    let i = 1;
-    while (i < this.cum.length - 1 && this.cum[i] < clamped) i++;
-    const c0 = this.cum[i - 1];
-    const c1 = this.cum[i];
-    const t = c1 > c0 ? (clamped - c0) / (c1 - c0) : 0;
-    const a = this.pts[i - 1];
-    const b = this.pts[i];
-    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  }
+function pointAt(edge: Edge, distanceFromA: number): [number, number] {
+  const clamped = Math.max(0, Math.min(edge.length, distanceFromA));
+  let i = 1;
+  while (i < edge.cum.length - 1 && edge.cum[i] < clamped) i++;
+  const c0 = edge.cum[i - 1];
+  const c1 = edge.cum[i];
+  const t = c1 > c0 ? (clamped - c0) / (c1 - c0) : 0;
+  const a = edge.pts[i - 1];
+  const b = edge.pts[i];
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
 
 export class VehicleManager {
+  // Roads are pulled into a single graph spanning every loaded tile, so a car
+  // can drive out of one tile and into the next one. Nodes are road
+  // endpoints; a node with three or more edges is a crossing, where cars pick
+  // a (random) branch and briefly stop.
   private readonly mesh: THREE.InstancedMesh;
-  private readonly paths = new Map<string, RoadPath>();
+  private readonly edges = new Map<string, Edge>();
+  private readonly nodes = new Map<string, GraphNode>();
   private vehicles: Vehicle[] = [];
+  private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
   private readonly clock = new THREE.Clock();
 
@@ -79,62 +91,88 @@ export class VehicleManager {
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(geometry, material, MAX_VEHICLES);
     this.mesh.count = 0;
-    // instances move every frame, so frustum culling against the initial
-    // (empty) bounds would hide them
+    // instances move every frame, so frustum culling against stale bounds
+    // would hide them
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
   }
 
-  // reconcile the fleet with the currently loaded roads. Cars whose road is
-  // still present are kept (so they don't teleport when tiles load/unload).
   setRoads(roads: Road[]): void {
-    const present = new Set<string>();
-    for (const road of roads) {
-      if (road.coordinates.length < 2) continue;
-      present.add(road.id);
-      if (!this.paths.has(road.id)) {
-        const path = new RoadPath(road.coordinates);
-        if (path.length > 2) this.paths.set(road.id, path);
-      }
-    }
-    for (const id of [...this.paths.keys()]) {
-      if (!present.has(id)) this.paths.delete(id);
-    }
+    this.buildGraph(roads);
 
-    // Pick which cars to show by a stable bottom-k hash over every (road,
-    // slot) candidate. This spreads the fleet uniformly over ALL loaded roads
-    // instead of greedily filling the cap on whichever tiles happened to load
-    // first (which left the visible center empty). Because the key only
-    // depends on the road id, a car keeps its road/speed/direction across
-    // re-syncs, so the fleet does not churn as tiles load.
-    const candidates: { key: number; vehicle: Vehicle }[] = [];
-    for (const [id, path] of this.paths) {
-      const n = Math.max(1, Math.floor(path.length / MIN_SPACING));
+    // Pick which cars to show by a stable bottom-k hash over every (edge,
+    // slot) candidate, so the fleet spreads uniformly over the whole graph
+    // (rather than greedily filling the cap on the first tiles that load).
+    const candidates: { id: string; edgeKey: string; slot: number; key: number }[] =
+      [];
+    for (const [key, edge] of this.edges) {
+      const n = Math.max(1, Math.floor(edge.length / MIN_SPACING));
       for (let i = 0; i < n; i++) {
-        const key = this.hash01(`${id}#${i}`);
-        candidates.push({
-          key,
-          vehicle: {
-            roadId: id,
-            s: ((i + 0.5) / n) * path.length,
-            speed:
-              SPEED_MIN +
-              this.hash01(`${id}#${i}#speed`) * (SPEED_MAX - SPEED_MIN),
-            dir: this.hash01(`${id}#${i}#dir`) < 0.5 ? 1 : -1,
-            color: new THREE.Color(
-              CAR_COLORS[
-                (this.hash01(`${id}#${i}#color`) * CAR_COLORS.length) | 0
-              ],
-            ),
-          },
-        });
+        const id = `${key}#${i}`;
+        candidates.push({ id, edgeKey: key, slot: i, key: this.hash01(id) });
       }
     }
     candidates.sort((a, b) => a.key - b.key);
-    this.vehicles = candidates
-      .slice(0, MAX_VEHICLES)
-      .map((candidate) => candidate.vehicle);
+
+    const vehicles: Vehicle[] = [];
+    for (const candidate of candidates.slice(0, MAX_VEHICLES)) {
+      const existing = this.byId.get(candidate.id);
+      if (existing) {
+        // keep the car (and its current route) as tiles load/unload
+        vehicles.push(existing);
+        continue;
+      }
+      const edge = this.edges.get(candidate.edgeKey);
+      if (!edge) continue;
+      const n = Math.max(1, Math.floor(edge.length / MIN_SPACING));
+      vehicles.push({
+        id: candidate.id,
+        edgeKey: candidate.edgeKey,
+        dir: this.hash01(`${candidate.id}d`) < 0.5 ? 1 : -1,
+        s: ((candidate.slot + 0.5) / n) * edge.length,
+        speed:
+          SPEED_MIN + this.hash01(`${candidate.id}s`) * (SPEED_MAX - SPEED_MIN),
+        waitUntil: 0,
+        color: new THREE.Color(
+          CAR_COLORS[(this.hash01(`${candidate.id}c`) * CAR_COLORS.length) | 0],
+        ),
+      });
+    }
+    this.vehicles = vehicles;
+    this.byId = new Map(vehicles.map((v) => [v.id, v]));
+  }
+
+  private buildGraph(roads: Road[]): void {
+    this.edges.clear();
+    this.nodes.clear();
+    for (const road of roads) {
+      const pts = road.coordinates;
+      if (pts.length < 2) continue;
+      const a = coordKey(pts[0]);
+      const b = coordKey(pts[pts.length - 1]);
+      if (a === b) continue;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (this.edges.has(key)) continue;
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) {
+        cum.push(cum[i - 1] + metersBetween(pts[i - 1], pts[i]));
+      }
+      const length = cum[cum.length - 1];
+      if (length < MIN_EDGE_LENGTH) continue;
+      this.edges.set(key, { key, a, b, pts, cum, length });
+      this.node(a).edges.push(key);
+      this.node(b).edges.push(key);
+    }
+  }
+
+  private node(key: string): GraphNode {
+    let node = this.nodes.get(key);
+    if (!node) {
+      node = { edges: [] };
+      this.nodes.set(key, node);
+    }
+    return node;
   }
 
   // deterministic [0, 1) hash of a string, for stable pseudo-random choices
@@ -147,31 +185,29 @@ export class VehicleManager {
     return h / 4294967296;
   }
 
-  // advance the fleet and write instance transforms. Positions are recomputed
-  // in model space from the current origin every frame, so a projection-origin
-  // reset needs no special handling here (unlike the tile meshes).
+  // advance the fleet and write instance transforms; positions are recomputed
+  // in model space from the current origin every frame
   update(originMeters: [number, number], scaleFactor: number): void {
+    const now = performance.now();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     let count = 0;
     for (const v of this.vehicles) {
-      const path = this.paths.get(v.roadId);
-      if (!path) continue;
-      v.s += v.dir * v.speed * dt;
-      // ping-pong at the ends of the road
-      if (v.s > path.length) {
-        v.s = 2 * path.length - v.s;
-        v.dir = -1;
-      } else if (v.s < 0) {
-        v.s = -v.s;
-        v.dir = 1;
+      let edge = this.edges.get(v.edgeKey);
+      if (!edge) continue;
+      if (now >= v.waitUntil) {
+        v.s += v.speed * dt;
+        if (v.s >= edge.length) {
+          this.arrive(v, edge, now);
+          edge = this.edges.get(v.edgeKey);
+          if (!edge) continue;
+        }
       }
-      const here = path.pointAt(v.s);
-      const before = path.pointAt(v.s - 1);
-      const ahead = path.pointAt(v.s + 1);
-      const m = toModelCoords(here, originMeters, scaleFactor);
-      const ma = toModelCoords(before, originMeters, scaleFactor);
-      const mb = toModelCoords(ahead, originMeters, scaleFactor);
-      const angle = Math.atan2(mb[1] - ma[1], mb[0] - ma[0]);
+      const distanceFromA = v.dir === 1 ? v.s : edge.length - v.s;
+      const behind = pointAt(edge, distanceFromA - v.dir);
+      const ahead = pointAt(edge, distanceFromA + v.dir);
+      const m = toModelCoords(behind, originMeters, scaleFactor);
+      const ma = toModelCoords(ahead, originMeters, scaleFactor);
+      const angle = Math.atan2(ma[1] - m[1], ma[0] - m[0]);
       this.dummy.position.set(m[0], m[1], CAR_HEIGHT / 2);
       this.dummy.rotation.set(0, 0, angle);
       this.dummy.updateMatrix();
@@ -182,5 +218,24 @@ export class VehicleManager {
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  // reached the end of the current edge: pick a branch at the junction. At a
+  // dead end, turn around. At a crossing (>= 3 edges), pause briefly.
+  private arrive(v: Vehicle, edge: Edge, now: number): void {
+    const toKey = v.dir === 1 ? edge.b : edge.a;
+    const node = this.nodes.get(toKey);
+    if (!node) return;
+    let options = node.edges.filter((key) => key !== edge.key);
+    if (options.length === 0) options = [edge.key]; // dead end -> U-turn
+    const nextKey = options[Math.floor(Math.random() * options.length)];
+    const next = this.edges.get(nextKey);
+    if (!next) return;
+    v.dir = next.a === toKey ? 1 : -1;
+    v.edgeKey = nextKey;
+    v.s = 0;
+    if (node.edges.length >= 3) {
+      v.waitUntil = now + (STOP_MIN + Math.random() * (STOP_MAX - STOP_MIN)) * 1000;
+    }
   }
 }
