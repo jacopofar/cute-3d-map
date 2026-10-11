@@ -11,12 +11,14 @@ export function tree_row(
 ): THREE.BufferGeometry[] {
   if (f.geometry.type === "LineString") {
     const line = turf.lineString(f.geometry.coordinates);
-    const totLength = turf.length(line);
+    // be explicit about units: turf defaults to kilometers, so the spacing
+    // would silently depend on that default
+    const totLength = turf.length(line, { units: "meters" });
     let ret: THREE.BufferGeometry[][] = [];
-    for(let a = 0; a < totLength; a += 0.005){
-      const p = turf.along(line, a);
+    for (let a = 0; a < totLength; a += 5) {
+      const p = turf.along(line, a, { units: "meters" });
       p.id = `${f.id}/${a}`;
-      ret.push(tree(originMeters, scaleFactor, p))
+      ret.push(tree(originMeters, scaleFactor, p));
     }
     return ret.flat(1);
   }
