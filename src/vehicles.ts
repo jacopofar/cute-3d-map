@@ -262,7 +262,7 @@ export class VehicleManager {
   private vehicles: Vehicle[] = [];
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
-  private readonly clock = new THREE.Clock();
+  private readonly timer = new THREE.Timer();
   private readonly config: FleetConfig;
   // when disabled (map zoomed out) the mesh is hidden and the per-frame update
   // is skipped
@@ -287,6 +287,8 @@ export class VehicleManager {
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
+    // Page Visibility API: avoid a huge delta when the tab was hidden
+    this.timer.connect(document);
   }
 
   setEnabled(enabled: boolean): void {
@@ -674,7 +676,8 @@ export class VehicleManager {
   update(originMeters: [number, number], scaleFactor: number): void {
     if (!this.enabled) return;
     const now = performance.now();
-    const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.timer.update();
+    const dt = Math.min(this.timer.getDelta(), 0.1);
 
     // group vehicles by edge+direction to find the gap to the one ahead (they
     // are ordered by `s`, which increases with travel for both directions)
