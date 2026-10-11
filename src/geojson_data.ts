@@ -20,7 +20,8 @@ import { tree_row } from "./elements3d/tree_row";
 // import myGeoJSON from './quito_colegio.json';
 // import _myGeoJSON from "./11721.json";
 
-// static, the zoom at which 3D tile data are stored
+// static, the zoom at which 3D tile data are stored; must match TILE_ZOOM in
+// tilegen/main.py
 export const TILE_ZOOM = 15;
 
 function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {

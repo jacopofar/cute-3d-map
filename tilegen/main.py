@@ -15,6 +15,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+# Web-Mercator zoom at which tiles are generated. Must match TILE_ZOOM in
+# src/geojson_data.ts, since the frontend requests tiles/{x}/{y}.json at that
+# zoom.
+TILE_ZOOM = 15
+
 
 def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
     """From EPSG:4326 to web mercator tiles using the"""
@@ -141,7 +146,7 @@ def parquet_to_tiles(
     borders_shape: shapely.Geometry | None = None,
 ) -> None:
     duckdb.load_extension("spatial")
-    zoom_level = 15
+    zoom_level = TILE_ZOOM
     bb = duckdb.execute(
         """
         with ext as (
