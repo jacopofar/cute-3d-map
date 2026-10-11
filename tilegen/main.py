@@ -198,27 +198,24 @@ def parquet_to_tiles(
                 },
             )
             features, raw_features = tile_to_geojson(tile_data.fetchall())
-            with open(target_path / f"{y}.json", "w") as fw:
-                fw.write(
+            # compact JSON (indent=2 put every coordinate on its own line and
+            # dominated the payload) and no files for empty tiles
+            if features:
+                (target_path / f"{y}.json").write_text(
                     json.dumps(
-                        {
-                            "type": "FeatureCollection",
-                            "features": features,
-                        },
-                        indent=2,
+                        {"type": "FeatureCollection", "features": features},
+                        separators=(",", ":"),
+                        ensure_ascii=False,
                     )
                 )
-            if target_path_raw is not None:
-                with open(target_path_raw / f"{y}.json", "w") as fw:
-                    fw.write(
-                        json.dumps(
-                            {
-                                "type": "FeatureCollection",
-                                "features": raw_features,
-                            },
-                            indent=2,
-                        )
+            if target_path_raw is not None and raw_features:
+                (target_path_raw / f"{y}.json").write_text(
+                    json.dumps(
+                        {"type": "FeatureCollection", "features": raw_features},
+                        separators=(",", ":"),
+                        ensure_ascii=False,
                     )
+                )
 
 
 @click.command()

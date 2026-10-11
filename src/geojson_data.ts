@@ -100,6 +100,11 @@ export async function objectsAt(
   // scaling factor
   const scaleFactor = Math.cos((2 * Math.PI * viewOrigin[1]) / 360);
   const response = await fetch(`tiles/${x}/${y}.json`);
+  if (response.status === 404) {
+    // tiles with no renderable features are not written at all, so a 404
+    // means "nothing here" (treat as empty, don't retry forever)
+    return [];
+  }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
   }
