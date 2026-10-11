@@ -278,10 +278,12 @@ class CoolMap {
     // meters get squeezed into a Mercator unit (and the worse the float
     // precision), so when we drift too far from the tile of the current
     // origin, rebuild the transform around the current center
+    // modelTransform.translateX/Y are Mercator world units, not lng/lat, so
+    // build the coordinate directly and convert back with toLngLat()
     const [ox, oy] = getTileIndex(
-      MercatorCoordinate.fromLngLat(
-        [this.modelTransform.translateX, this.modelTransform.translateY],
-        0,
+      new MercatorCoordinate(
+        this.modelTransform.translateX,
+        this.modelTransform.translateY,
       ).toLngLat(),
     );
     const [cx, cy] = getTileIndex(center);
