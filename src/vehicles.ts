@@ -100,6 +100,9 @@ export class VehicleManager {
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
   private readonly clock = new THREE.Clock();
+  // when disabled (map zoomed out) the mesh is hidden and the per-frame update
+  // is skipped
+  enabled = true;
 
   constructor(scene: THREE.Scene) {
     const geometry = new THREE.BoxGeometry(CAR_LENGTH, CAR_WIDTH, CAR_HEIGHT);
@@ -113,7 +116,13 @@ export class VehicleManager {
     scene.add(this.mesh);
   }
 
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    this.mesh.visible = enabled;
+  }
+
   setRoads(roads: Road[]): void {
+    if (!this.enabled) return;
     this.buildGraph(roads);
     this.findCycles();
 
@@ -305,6 +314,7 @@ export class VehicleManager {
   // advance the fleet and write instance transforms; positions are recomputed
   // in model space from the current origin every frame
   update(originMeters: [number, number], scaleFactor: number): void {
+    if (!this.enabled) return;
     const now = performance.now();
     const dt = Math.min(this.clock.getDelta(), 0.1);
     let count = 0;

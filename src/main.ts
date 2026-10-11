@@ -22,6 +22,10 @@ import "./style.css";
 
 import "./map_style.css";
 
+// vehicles are only shown (and their graph built) when the map is at least
+// this zoomed in
+const VEHICLE_MIN_ZOOM = 15;
+
 // Milan
 // const tileCenter: [number, number] = [9.186, 45.497];
 // Berlin
@@ -254,6 +258,7 @@ class CoolMap {
       this.map.addLayer(this.customLayer);
       // load map data at setup before the user moves
       this.loadUnloadCoord(this.map.getCenter());
+      this.updateVehicleActivity();
       // // this is only to show maplibre globe, not useful on a city-level map :)
       // this.map.setSky({ "atmosphere-blend": 1.0 });
       // this.map.setProjection({
@@ -273,6 +278,7 @@ class CoolMap {
       }
       this.moveDebounce = setTimeout(() => {
         this.moveDebounce = undefined;
+        this.updateVehicleActivity();
         this.loadUnloadCoord(this.map.getCenter());
       }, 150);
     });
@@ -405,9 +411,19 @@ class CoolMap {
     }
   }
 
+  // enable/disable the vehicle layer based on the current zoom; when it turns
+  // on, (re)build the fleet from the roads already loaded
+  private updateVehicleActivity() {
+    if (!this.vehicles) return;
+    const enabled = this.map.getZoom() >= VEHICLE_MIN_ZOOM;
+    if (enabled === this.vehicles.enabled) return;
+    this.vehicles.setEnabled(enabled);
+    if (enabled) this.syncVehicleRoads();
+  }
+
   // hand the union of the currently loaded tiles' roads to the vehicle manager
   private syncVehicleRoads() {
-    if (!this.vehicles) return;
+    if (!this.vehicles || !this.vehicles.enabled) return;
     this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
   }
 
