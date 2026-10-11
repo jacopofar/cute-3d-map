@@ -62,6 +62,30 @@ def test_to_tree_point_only():
     assert main.to_tree(5, {"natural": "tree"}, geom("LINESTRING (0 0, 1 1)")) is None
 
 
+def test_tree_type_size():
+    assert main.tree_type_size({"leaf_type": "needleleaved"}, 0)[0] == "conifer"
+    assert main.tree_type_size({"leaf_type": "broadleaved"}, 0)[0] == "broadleaf"
+    # genus/species hint at a conifer even without leaf_type
+    assert main.tree_type_size({"genus": "Pinus"}, 3)[0] == "conifer"
+    # crown diameter -> radius, else height -> 0.25 * height, else seed
+    assert main.tree_type_size({"diameter_crown": "6"}, 0)[1] == 3.0
+    assert main.tree_type_size({"height": "10"}, 0)[1] == 2.5
+    # seed decides when there are no tags
+    assert main.tree_type_size({}, 0)[0] == "conifer"  # 0 % 3 == 0
+    assert main.tree_type_size({}, 1)[0] == "broadleaf"
+
+
+def test_to_tree_has_type_and_size():
+    f = main.to_tree(
+        1,
+        {"natural": "tree", "leaf_type": "broadleaved", "height": "8"},
+        geom("POINT (0 0)"),
+    )
+    assert f is not None
+    assert f["properties"]["type"] == "broadleaf"
+    assert f["properties"]["size"] == 2.0
+
+
 def test_to_tree_row_line_only():
     f = main.to_tree_row(6, {"natural": "tree_row"}, geom("LINESTRING (0 0, 1 1)"))
     assert f is not None

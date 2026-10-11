@@ -156,14 +156,32 @@ class CoolMap {
       camera: new THREE.PerspectiveCamera(),
       scene: new THREE.Scene(),
       onAdd(map, gl) {
-        // create two three.js lights to illuminate the model
-        const directionalLight = new THREE.DirectionalLight(0xffffff);
-        directionalLight.position.set(0, -70, 100).normalize();
-        this.scene.add(directionalLight);
+        // lighting: a warm sun, a cool fill from the opposite side, and a
+        // hemisphere light so faces away from the sun are not pitch black
+        const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
+        sun.position.set(-40, 60, 100).normalize();
+        this.scene.add(sun);
 
-        const directionalLight2 = new THREE.DirectionalLight(0xffffff);
-        directionalLight2.position.set(0, 70, 100).normalize();
-        this.scene.add(directionalLight2);
+        const fill = new THREE.DirectionalLight(0xbfd4ff, 0.6);
+        fill.position.set(60, -50, 60).normalize();
+        this.scene.add(fill);
+
+        const hemisphere = new THREE.HemisphereLight(0xcfe0ff, 0x4a4030, 1.0);
+        this.scene.add(hemisphere);
+
+        // faint ground plane under everything (also a shadow catcher later)
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(20000, 20000),
+          new THREE.MeshBasicMaterial({
+            color: 0x8a8f95,
+            transparent: true,
+            opacity: 0.12,
+            depthWrite: false,
+          }),
+        );
+        ground.position.z = -0.05;
+        ground.renderOrder = -1;
+        this.scene.add(ground);
 
         // this.scene.add(heartMesh());
 
@@ -183,6 +201,10 @@ class CoolMap {
           context: gl,
           antialias: true,
         });
+
+        // filmic tone mapping for a less flat look
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure = 1.0;
 
         this.renderer.autoClear = false;
         // animated cars (on roads) and trains (on rails), added to the scene

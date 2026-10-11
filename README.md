@@ -19,8 +19,9 @@ The project has two halves:
    Each tile is a GeoJSON FeatureCollection with properties used for rendering:
    - `cmtype: "building"` (with optional `height`, `color`) — extruded polygon,
      height falls back to `building:levels * 3` or 10 m;
-   - `cmtype: "tree"` (point);
-   - `cmtype: "tree_row"` (LineString);
+   - `cmtype: "tree"` (point) — with `type` (broadleaf/conifer) and `size`
+     (crown radius, m) derived from OSM tags or a hash;
+   - `cmtype: "tree_row"` (LineString) — one shared type/size for the row;
    - `cmtype: "road"` (LineString, drivable highways only) — two-way ways are
      clipped and stitched; one-way ways (`oneway=yes`/`-1`, roundabouts) are
      kept per way with an `oneway` property so their direction survives;

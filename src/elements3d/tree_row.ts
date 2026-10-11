@@ -18,6 +18,12 @@ export function tree_row(
     for (let a = 0; a < totLength; a += 5) {
       const p = turf.along(line, a, { units: "meters" });
       p.id = `${f.id}/${a}`;
+      // every tree in a row shares the row's type/size (from the preprocessing)
+      p.properties = {
+        cmtype: "tree",
+        type: f.properties?.type,
+        size: f.properties?.size,
+      };
       ret.push(tree(originMeters, scaleFactor, p));
     }
     return ret.flat(1);

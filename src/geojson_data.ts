@@ -89,7 +89,8 @@ export function geoJSONtoGeometries(
 // colors, so a whole tile renders in a single draw call per kind instead of
 // one mesh per feature
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
-const treeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
+// trees are lit too, so they shade with the sun instead of being flat
+const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 // a road or rail line, kept as lng/lat so fleets can be placed against the
 // current projection origin every frame (see VehicleManager)
