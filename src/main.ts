@@ -77,6 +77,8 @@ class CoolMap {
   // roads/rails per loaded tile, kept as lng/lat for the fleet managers
   private loadedRoads: { [key: string]: Road[] } = {};
   private loadedRails: { [key: string]: Road[] } = {};
+  // tram stop points per loaded tile (the rail fleet pauses at them)
+  private loadedStops: { [key: string]: [number, number][] } = {};
   private vehicles?: VehicleManager;
   private trains?: VehicleManager;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
@@ -352,6 +354,7 @@ class CoolMap {
         this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
         delete this.loadedRoads[k];
         delete this.loadedRails[k];
+        delete this.loadedStops[k];
         deleteUsKeys.push(k);
       }
     });
@@ -384,7 +387,11 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, roads, rails } = await objectsAt(this.tileCenter, x, y);
+      const { meshes, roads, rails, stops } = await objectsAt(
+        this.tileCenter,
+        x,
+        y,
+      );
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -404,6 +411,7 @@ class CoolMap {
       meshes.forEach((m) => this.customLayer.scene.add(m));
       this.loadedRoads[tileKey] = roads;
       this.loadedRails[tileKey] = rails;
+      this.loadedStops[tileKey] = stops;
       this.syncVehicleRoads();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -430,7 +438,10 @@ class CoolMap {
       this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
     }
     if (this.trains) {
-      this.trains.setRoads(Object.values(this.loadedRails).flat());
+      this.trains.setRoads(
+        Object.values(this.loadedRails).flat(),
+        Object.values(this.loadedStops).flat(),
+      );
     }
   }
 

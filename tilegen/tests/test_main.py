@@ -140,3 +140,10 @@ def test_tile_to_geojson_emits_rail_and_ignores_metro():
     rails = [f for f in render if f["properties"]["cmtype"] == "rail"]
     assert len(rails) == 1
     assert "/rail/" in rails[0]["id"]
+
+
+def test_tile_to_geojson_emits_tram_stop():
+    stop = shapely.to_wkb(geom("POINT (9.19 45.497)"))
+    data = [(1, {"railway": "tram_stop"}, stop)]
+    render, _ = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["tram_stop"]

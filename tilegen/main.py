@@ -224,6 +224,18 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
             c = to_tree_row(feature_id, tags, s)
             ret.append(c)
             continue
+        elif tags.get("railway") == "tram_stop":
+            # tram stops are points the trams pause at (in addition to
+            # crossings); kept raw as cmtype "tram_stop"
+            if s.geom_type == "Point":
+                ret.append(
+                    {
+                        "type": "feature",
+                        "id": feature_id,
+                        "geometry": json.loads(shapely.to_geojson(s)),
+                        "properties": {"cmtype": "tram_stop"},
+                    }
+                )
         elif tags.get("highway") in DRIVABLE_HIGHWAYS:
             road_geometries.append(s)
         elif tags.get("railway") in RAILWAYS:

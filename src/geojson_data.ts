@@ -103,6 +103,7 @@ export interface TileObjects {
   meshes: THREE.Object3D[];
   roads: Road[];
   rails: Road[];
+  stops: [number, number][];
 }
 
 export async function objectsAt(
@@ -118,7 +119,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], roads: [], rails: [] };
+    return { meshes: [], roads: [], rails: [], stops: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -128,12 +129,18 @@ export async function objectsAt(
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const roads: Road[] = [];
   const rails: Road[] = [];
+  const stops: [number, number][] = [];
   myGeoJSON.features.forEach((f, index) => {
     const cmtype = f.properties?.cmtype;
     if (cmtype === "road" || cmtype === "rail") {
       // not rendered; used as paths for the vehicle/train fleets
       const target = cmtype === "road" ? roads : rails;
       target.push(...roadsIn(f, `${x}/${y}/${index}`));
+      return;
+    }
+    if (cmtype === "tram_stop" && f.geometry.type === "Point") {
+      // tram stops the rail fleet pauses at
+      stops.push(f.geometry.coordinates as [number, number]);
       return;
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor).forEach(
@@ -161,7 +168,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, roads, rails };
+  return { meshes, roads, rails, stops };
 }
 
 function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {

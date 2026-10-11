@@ -70,6 +70,7 @@ interface Edge {
   pts: [number, number][];
   cum: number[]; // cumulative meters from `a`
   length: number;
+  stops: number[]; // distances (meters from `a`) where vehicles pause, sorted
 }
 
 // one edge of a cycle, plus whether the node it arrives at is a crossing
@@ -126,6 +127,55 @@ function pointAt(edge: Edge, distanceFromA: number): [number, number] {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
 
+// nearest point on the edge to `point`, in local meters; returns the distance
+// and the arc-length (meters from `a`) of that point
+function projectOntoEdge(
+  edge: Edge,
+  point: [number, number],
+): { dist: number; along: number } {
+  const cosLat = Math.cos((point[1] * Math.PI) / 180);
+  let bestDist = Infinity;
+  let bestAlong = 0;
+  for (let i = 1; i < edge.pts.length; i++) {
+    const a = edge.pts[i - 1];
+    const b = edge.pts[i];
+    const ax = (a[0] - point[0]) * cosLat * 111320;
+    const ay = (a[1] - point[1]) * 110540;
+    const bx = (b[0] - point[0]) * cosLat * 111320;
+    const by = (b[1] - point[1]) * 110540;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t =
+      len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const dist = Math.hypot(ax + t * dx, ay + t * dy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestAlong = edge.cum[i - 1] + t * (edge.cum[i] - edge.cum[i - 1]);
+    }
+  }
+  return { dist: bestDist, along: bestAlong };
+}
+
+// the stop distance (from `a`) crossed while travelling from `from` to `to`,
+// or null. `edge.stops` is sorted ascending.
+function crossedStop(
+  edge: Edge,
+  from: number,
+  to: number,
+  dir: 1 | -1,
+): number | null {
+  if (dir === 1) {
+    for (const d of edge.stops) if (d > from && d <= to) return d;
+  } else {
+    for (let i = edge.stops.length - 1; i >= 0; i--) {
+      const d = edge.stops[i];
+      if (d < from && d >= to) return d;
+    }
+  }
+  return null;
+}
+
 export class VehicleManager {
   // The paths from every loaded tile are pulled into one graph, so a cycle can
   // run across tile boundaries. Vehicles loop their cycle (no ping-pong); at a
@@ -170,9 +220,10 @@ export class VehicleManager {
     this.mesh.visible = enabled;
   }
 
-  setRoads(roads: Road[]): void {
+  setRoads(paths: Road[], stops: [number, number][] = []): void {
     if (!this.enabled) return;
-    this.buildGraph(roads);
+    this.buildGraph(paths);
+    this.snapStops(stops);
     this.findCycles();
 
     // Pick which vehicles to show by a stable bottom-k hash over every (cycle,
@@ -237,9 +288,34 @@ export class VehicleManager {
       }
       const length = cum[cum.length - 1];
       if (length < this.config.minEdgeLength) continue;
-      this.edges.set(key, { key, a, b, pts, cum, length });
+      this.edges.set(key, { key, a, b, pts, cum, length, stops: [] });
       this.node(a).push(key);
       this.node(b).push(key);
+    }
+  }
+
+  // attach each stop point to the nearest edge (within a tolerance), recording
+  // the distance along that edge where vehicles should pause
+  private snapStops(points: [number, number][]): void {
+    for (const point of points) {
+      let bestDistance = Infinity;
+      let bestEdge: Edge | null = null;
+      let bestAlong = 0;
+      for (const edge of this.edges.values()) {
+        const projection = projectOntoEdge(edge, point);
+        if (projection.dist < bestDistance) {
+          bestDistance = projection.dist;
+          bestEdge = edge;
+          bestAlong = projection.along;
+        }
+      }
+      // only snap if the stop is actually next to a rail
+      if (bestEdge && bestDistance < 20) {
+        bestEdge.stops.push(bestAlong);
+      }
+    }
+    for (const edge of this.edges.values()) {
+      edge.stops.sort((a, b) => a - b);
     }
   }
 
@@ -357,6 +433,14 @@ export class VehicleManager {
     return new THREE.Color(palette[(this.hash01(`${id}c`) * palette.length) | 0]);
   }
 
+  private stopDelay(): number {
+    return (
+      (this.config.stopMin +
+        Math.random() * (this.config.stopMax - this.config.stopMin)) *
+      1000
+    );
+  }
+
   // deterministic [0, 1) hash of a string, for stable pseudo-random choices
   private hash01(s: string): number {
     let h = 2166136261 >>> 0;
@@ -382,6 +466,7 @@ export class VehicleManager {
       if (!edge) continue;
 
       if (now >= v.waitUntil) {
+        const before = step.dir === 1 ? v.s : edge.length - v.s;
         v.s += v.speed * dt;
         if (v.s >= edge.length) {
           // reached a junction: follow the cycle (wrap at the end) and, at a
@@ -393,11 +478,15 @@ export class VehicleManager {
           edge = this.edges.get(step.edgeKey);
           if (!edge) continue;
           if (stop && this.config.stopMax > 0) {
-            v.waitUntil =
-              now +
-              (this.config.stopMin +
-                Math.random() * (this.config.stopMax - this.config.stopMin)) *
-                1000;
+            v.waitUntil = now + this.stopDelay();
+          }
+        } else if (this.config.stopMax > 0 && edge.stops.length > 0) {
+          // pause when passing a stop (e.g. a tram stop), stopping exactly on it
+          const after = step.dir === 1 ? v.s : edge.length - v.s;
+          const stopDistance = crossedStop(edge, before, after, step.dir);
+          if (stopDistance !== null) {
+            v.s = step.dir === 1 ? stopDistance : edge.length - stopDistance;
+            v.waitUntil = now + this.stopDelay();
           }
         }
       }

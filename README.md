@@ -24,7 +24,9 @@ The project has two halves:
    - `cmtype: "road"` (LineString, drivable highways only) — clipped to the
      tile and consecutive segments stitched into longer lines;
    - `cmtype: "rail"` (LineString, `railway=rail`/`tram` only, no metros) —
-     clipped and stitched the same way.
+     clipped and stitched the same way;
+   - `cmtype: "tram_stop"` (Point, `railway=tram_stop`) — the rail fleet pauses
+     there in addition to crossings.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads
