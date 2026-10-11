@@ -69,7 +69,9 @@ uv run main.py ../data/milano_extract.osm.pbf --polygon-filter ../data/milano_po
 
 This writes render-ready tiles to `tilegen/tiles/` and, alongside, "raw" tiles
 with all OSM tags to `tilegen/raw_tiles/` (useful for future renderers).
-Copy/move the `tiles/` output into `public/tiles/` so the frontend can fetch it.
+Copy/move the `tiles/` output into `public/tiles/` so the frontend can fetch it,
+or write it there directly with `--output ../public/tiles` (and `--no-raw` to
+skip the raw tiles).
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,

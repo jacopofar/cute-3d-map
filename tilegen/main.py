@@ -228,7 +228,32 @@ def parquet_to_tiles(
 @click.option(
     "--polygon-filter", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
-def main(input_pbf: Path, polygon_filter: Path | None) -> None:
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("tiles"),
+    show_default=True,
+    help="Directory for render-ready tiles ({x}/{y}.json).",
+)
+@click.option(
+    "--raw-output",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("raw_tiles"),
+    show_default=True,
+    help="Directory for raw-tag tiles (all OSM tags).",
+)
+@click.option(
+    "--raw/--no-raw",
+    default=True,
+    help="Also write the raw-tag tiles (large).",
+)
+def main(
+    input_pbf: Path,
+    polygon_filter: Path | None,
+    output: Path,
+    raw_output: Path,
+    raw: bool,
+) -> None:
     logger.info(f"Processing {input_pbf}")
     # Note: you can reduce the file size using a border geojson:
     # osmium extract -p borders.geojson {input_pbf} -o extract.osm.pbf
@@ -239,7 +264,10 @@ def main(input_pbf: Path, polygon_filter: Path | None) -> None:
     gpq_path = pbf_to_parquet(input_pbf, borders_shape=borders_shape)
     print(f"Extracted: {gpq_path}")
     parquet_to_tiles(
-        gpq_path, Path("tiles"), Path("raw_tiles"), borders_shape=borders_shape
+        gpq_path,
+        output,
+        raw_output if raw else None,
+        borders_shape=borders_shape,
     )
 
 
