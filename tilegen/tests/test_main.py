@@ -69,33 +69,55 @@ def test_to_tree_row_line_only():
     assert main.to_tree_row(7, {"natural": "tree_row"}, geom("POINT (0 0)")) is None
 
 
-def test_to_road_line_only():
-    f = main.to_road(8, {"highway": "residential"}, geom("LINESTRING (0 0, 1 1)"))
-    assert f is not None
-    assert f["properties"]["cmtype"] == "road"
-    assert f["properties"]["highway"] == "residential"
-    assert main.to_road(9, {"highway": "residential"}, geom("POINT (0 0)")) is None
+def test_tile_lonlat_bounds_contains_center():
+    min_lon, min_lat, max_lon, max_lat = main.tile_lonlat_bounds(17220, 11723, 15)
+    assert min_lon < 9.186 < max_lon
+    assert min_lat < 45.497 < max_lat
+
+
+def test_merge_roads_stitches_and_drops_short():
+    seg1 = geom("LINESTRING (9.19 45.50, 9.191 45.50)")
+    seg2 = geom("LINESTRING (9.191 45.50, 9.192 45.50)")
+    stub = geom("LINESTRING (9.20 45.50, 9.2001 45.50)")
+    box = shapely.box(9.0, 45.0, 9.5, 45.5)
+    lines = main.merge_roads([seg1, seg2, stub], box)
+    # seg1+seg2 form one ~156 m line; the ~8 m stub is dropped
+    assert len(lines) == 1
+    assert len(list(lines[0].coords)) == 3
+
+
+def test_merge_roads_clips_to_box():
+    box = shapely.box(9.0, 45.0, 9.5, 45.5)
+    line = geom("LINESTRING (9.25 45.0, 9.25 45.7)")
+    lines = main.merge_roads([line], box)
+    assert len(lines) == 1
+    assert max(c[1] for c in lines[0].coords) <= 45.5 + 1e-9
 
 
 def test_tile_to_geojson_splits_render_and_raw():
     building = shapely.to_wkb(geom(POLYGON))
-    footway = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+    footway = shapely.to_wkb(geom("LINESTRING (9.19 45.497, 9.191 45.497)"))
     data = [
         (1, {"building": "yes", "height": "10"}, building),
         (2, {"highway": "footway"}, footway),
     ]
-    render, raw = main.tile_to_geojson(data)
+    render, raw = main.tile_to_geojson(data, 17220, 11723, 15)
     assert [f["properties"]["cmtype"] for f in render] == ["building"]
     assert len(raw) == 2
 
 
-def test_tile_to_geojson_keeps_only_drivable_roads():
-    residential = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
-    footway = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+def test_tile_to_geojson_merges_drivable_roads():
+    min_lon, min_lat, max_lon, max_lat = main.tile_lonlat_bounds(17220, 11723, 15)
+    lon = (min_lon + max_lon) / 2
+    lat = (min_lat + max_lat) / 2
+    d = 0.001  # ~78 m of longitude at this latitude
+    a = shapely.to_wkb(geom(f"LINESTRING ({lon} {lat}, {lon + d} {lat})"))
+    b = shapely.to_wkb(geom(f"LINESTRING ({lon + d} {lat}, {lon + 2 * d} {lat})"))
     data = [
-        (1, {"highway": "residential"}, residential),
-        (2, {"highway": "footway"}, footway),
+        (1, {"highway": "residential"}, a),
+        (2, {"highway": "residential"}, b),
     ]
-    render, raw = main.tile_to_geojson(data)
-    assert [f["properties"]["cmtype"] for f in render] == ["road"]
-    assert len(raw) == 2
+    render, _ = main.tile_to_geojson(data, 17220, 11723, 15)
+    roads = [f for f in render if f["properties"]["cmtype"] == "road"]
+    assert len(roads) == 1
+    assert len(roads[0]["geometry"]["coordinates"]) == 3

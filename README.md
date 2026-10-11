@@ -20,7 +20,10 @@ The project has two halves:
    - `cmtype: "building"` (with optional `height`, `color`) — extruded polygon,
      height falls back to `building:levels * 3` or 10 m;
    - `cmtype: "tree"` (point);
-   - `cmtype: "tree_row"` (LineString).
+   - `cmtype: "tree_row"` (LineString);
+   - `cmtype: "road"` (LineString, drivable highways only) — clipped to the
+     tile, consecutive segments stitched into longer lines, and dropped if
+     under 50 m.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads

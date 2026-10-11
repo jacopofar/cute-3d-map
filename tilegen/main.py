@@ -1,12 +1,15 @@
+import itertools
 import json
 import logging
 import math
+from collections.abc import Sequence
 from pathlib import Path
 
 import click
 import duckdb
 import quackosm as qosm
 import shapely
+from shapely.geometry import GeometryCollection, LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
 
 logger = logging.getLogger(__name__)
@@ -134,22 +137,75 @@ def to_tree_row(feature_id, tags, s) -> dict | None:
     }
 
 
-def to_road(feature_id, tags, s) -> dict | None:
-    if s.geom_type not in ("LineString", "MultiLineString"):
-        logger.warning(f"non-line road?? {feature_id} ({s.geom_type})")
-        return None
-    properties = {"cmtype": "road", "highway": tags.get("highway")}
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+# roads shorter than this (measured in meters, after clipping to the tile and
+# stitching consecutive segments) are dropped
+MIN_ROAD_LENGTH = 50.0
 
 
-def tile_to_geojson(data) -> tuple[list, list]:
+def tile_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
+    """(min_lon, min_lat, max_lon, max_lat) of a slippy tile in EPSG:4326."""
+    n = 2**zoom
+    min_lon = x / n * 360 - 180
+    max_lon = (x + 1) / n * 360 - 180
+    max_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+    min_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
+    return min_lon, min_lat, max_lon, max_lat
+
+
+def haversine_m(a: Sequence[float], b: Sequence[float]) -> float:
+    """Great-circle distance between two (lon, lat) points, in meters."""
+    (lon1, lat1) = a[0], a[1]
+    (lon2, lat2) = b[0], b[1]
+    radius = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    h = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    )
+    return 2 * radius * math.asin(math.sqrt(h))
+
+
+def line_length_m(line: LineString) -> float:
+    points = list(line.coords)
+    return sum(haversine_m(a, b) for a, b in itertools.pairwise(points))
+
+
+def merge_roads(
+    geometries: list[BaseGeometry],
+    box: BaseGeometry,
+    min_length: float = MIN_ROAD_LENGTH,
+) -> list[BaseGeometry]:
+    """Clip road ways to the tile, stitch consecutive segments into longer
+    lines, and drop anything still shorter than min_length meters."""
+    clipped: list[LineString] = []
+    for g in geometries:
+        c = shapely.intersection(g, box)
+        if c.is_empty:
+            continue
+        if isinstance(c, LineString):
+            clipped.append(c)
+        elif isinstance(c, MultiLineString):
+            clipped.extend(c.geoms)
+        elif isinstance(c, GeometryCollection):
+            clipped.extend(p for p in c.geoms if isinstance(p, LineString))
+    if not clipped:
+        return []
+    merged = shapely.line_merge(shapely.union_all(clipped))
+    if isinstance(merged, MultiLineString):
+        lines = list(merged.geoms)
+    elif isinstance(merged, LineString):
+        lines = [merged]
+    else:
+        lines = []
+    return [ln for ln in lines if line_length_m(ln) >= min_length]
+
+
+def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
     ret = []
     ret_raw = []
+    road_geometries: list[BaseGeometry] = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
@@ -171,8 +227,22 @@ def tile_to_geojson(data) -> tuple[list, list]:
             ret.append(c)
             continue
         elif tags.get("highway") in DRIVABLE_HIGHWAYS:
-            c = to_road(feature_id, tags, s)
-            ret.append(c)
+            road_geometries.append(s)
+
+    if road_geometries:
+        # clip to the tile first, otherwise a way crossing a tile boundary is
+        # emitted in full in every tile it touches (duplicated cars); then
+        # stitch consecutive segments and drop short leftovers
+        box = shapely.box(*tile_lonlat_bounds(tile_x, tile_y, zoom))
+        for i, line in enumerate(merge_roads(road_geometries, box)):
+            ret.append(
+                {
+                    "type": "feature",
+                    "id": f"{tile_x}/{tile_y}/road/{i}",
+                    "geometry": json.loads(shapely.to_geojson(line)),
+                    "properties": {"cmtype": "road"},
+                }
+            )
 
     return [r for r in ret if r is not None], ret_raw
 
@@ -243,7 +313,9 @@ def parquet_to_tiles(
                     "y": y,
                 },
             )
-            features, raw_features = tile_to_geojson(tile_data.fetchall())
+            features, raw_features = tile_to_geojson(
+                tile_data.fetchall(), x, y, zoom_level
+            )
             # compact JSON (indent=2 put every coordinate on its own line and
             # dominated the payload) and no files for empty tiles
             if features:
