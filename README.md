@@ -22,7 +22,9 @@ The project has two halves:
    - `cmtype: "tree"` (point);
    - `cmtype: "tree_row"` (LineString);
    - `cmtype: "road"` (LineString, drivable highways only) — clipped to the
-     tile and consecutive segments stitched into longer lines.
+     tile and consecutive segments stitched into longer lines;
+   - `cmtype: "rail"` (LineString, `railway=rail`/`tram` only, no metros) —
+     clipped and stitched the same way.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads
@@ -34,12 +36,12 @@ The project has two halves:
    MapLibre's projection matrix. There is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
 
-   Drivable-`highway` features (also `cmtype: "road"`) are not rendered;
-   instead `src/vehicles.ts` drives a fleet of cars (one `InstancedMesh`,
-   per-instance color) along them, ping-ponging at the road ends. The fleet is
-   advanced in the layer's `render()` (which already repaints), and car
-   positions are recomputed from lng/lat each frame so the projection-origin
-   reset needs no special handling.
+   Drivable-`highway` and `railway` features (also `cmtype: "road"`/`"rail"`)
+   are not rendered; instead `src/vehicles.ts` drives fleets along them: cars
+   on roads and longer, less frequent trains/trams on rails. Each fleet builds
+   one graph (and closed cycles) over all loaded tiles, renders as a single
+   `InstancedMesh` (per-instance color), and is only shown above a minimum
+   zoom.
 
 `src/maplibre_setup.ts` fixes a MapLibre v6 issue where the web worker URL is
 resolved dynamically and doesn't survive `vite build` — it wires the worker

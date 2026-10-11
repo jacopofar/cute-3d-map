@@ -43,6 +43,10 @@ DRIVABLE_HIGHWAYS = frozenset(
     }
 )
 
+# railway values whose ways carry trains/trams; used to emit "rail" features
+# the frontend drives trains along. Metros (railway=subway) are ignored.
+RAILWAYS = frozenset({"rail", "tram"})
+
 
 def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
     """From EPSG:4326 to web mercator tiles using the"""
@@ -176,10 +180,30 @@ def merge_roads(
     return list(lines)
 
 
+def lines_to_features(
+    geometries: list[BaseGeometry],
+    box: BaseGeometry,
+    cmtype: str,
+    tile_x: int,
+    tile_y: int,
+) -> list[dict]:
+    """Clip + stitch the linear features of a tile into cmtype features."""
+    return [
+        {
+            "type": "feature",
+            "id": f"{tile_x}/{tile_y}/{cmtype}/{i}",
+            "geometry": json.loads(shapely.to_geojson(line)),
+            "properties": {"cmtype": cmtype},
+        }
+        for i, line in enumerate(merge_roads(geometries, box))
+    ]
+
+
 def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
     ret = []
     ret_raw = []
     road_geometries: list[BaseGeometry] = []
+    rail_geometries: list[BaseGeometry] = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
@@ -202,21 +226,13 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
             continue
         elif tags.get("highway") in DRIVABLE_HIGHWAYS:
             road_geometries.append(s)
+        elif tags.get("railway") in RAILWAYS:
+            rail_geometries.append(s)
 
-    if road_geometries:
-        # clip to the tile first, otherwise a way crossing a tile boundary is
-        # emitted in full in every tile it touches (duplicated cars); then
-        # stitch consecutive segments and drop short leftovers
+    if road_geometries or rail_geometries:
         box = shapely.box(*tile_lonlat_bounds(tile_x, tile_y, zoom))
-        for i, line in enumerate(merge_roads(road_geometries, box)):
-            ret.append(
-                {
-                    "type": "feature",
-                    "id": f"{tile_x}/{tile_y}/road/{i}",
-                    "geometry": json.loads(shapely.to_geojson(line)),
-                    "properties": {"cmtype": "road"},
-                }
-            )
+        ret += lines_to_features(road_geometries, box, "road", tile_x, tile_y)
+        ret += lines_to_features(rail_geometries, box, "rail", tile_x, tile_y)
 
     return [r for r in ret if r is not None], ret_raw
 

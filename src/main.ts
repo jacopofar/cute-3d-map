@@ -14,7 +14,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { objectsAt, TILE_ZOOM, epsg4326toEpsg3857 } from "./geojson_data.ts";
 import type { Road } from "./geojson_data.ts";
-import { VehicleManager } from "./vehicles.ts";
+import { VehicleManager, CAR_FLEET, TRAIN_FLEET } from "./vehicles.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -74,9 +74,11 @@ class CoolMap {
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
-  // roads per loaded tile, kept as lng/lat for the vehicle manager
+  // roads/rails per loaded tile, kept as lng/lat for the fleet managers
   private loadedRoads: { [key: string]: Road[] } = {};
+  private loadedRails: { [key: string]: Road[] } = {};
   private vehicles?: VehicleManager;
+  private trains?: VehicleManager;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
@@ -179,12 +181,13 @@ class CoolMap {
         });
 
         this.renderer.autoClear = false;
-        // animated cars driving along the loaded roads (added to the scene
+        // animated cars (on roads) and trains (on rails), added to the scene
         // directly — NOT via loadedTiles — so the origin reset does not touch
-        // it; its positions are recomputed each frame)
-        coolMap.vehicles = new VehicleManager(this.scene);
+        // them; their positions are recomputed each frame
+        coolMap.vehicles = new VehicleManager(this.scene, CAR_FLEET);
+        coolMap.trains = new VehicleManager(this.scene, TRAIN_FLEET);
         // tiles may already have loaded before this layer was added, so seed
-        // the fleet with whatever roads are present
+        // the fleets with whatever paths are present
         coolMap.syncVehicleRoads();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
@@ -235,13 +238,10 @@ class CoolMap {
         // const l = new THREE.Matrix4().fromArray(modelMatrix);
 
         this.camera.projectionMatrix = m.multiply(l);
-        if (coolMap.vehicles) {
-          // advance the cars and place them against the current origin
-          coolMap.vehicles.update(
-            epsg4326toEpsg3857(coolMap.tileCenter),
-            Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360),
-          );
-        }
+        const originMeters = epsg4326toEpsg3857(coolMap.tileCenter);
+        const scaleFactor = Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360);
+        if (coolMap.vehicles) coolMap.vehicles.update(originMeters, scaleFactor);
+        if (coolMap.trains) coolMap.trains.update(originMeters, scaleFactor);
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -351,6 +351,7 @@ class CoolMap {
         // TODO why is forEach needed and the array breaks it??
         this.loadedTiles[k].forEach((m) => this.customLayer.scene.remove(m));
         delete this.loadedRoads[k];
+        delete this.loadedRails[k];
         deleteUsKeys.push(k);
       }
     });
@@ -383,7 +384,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, roads } = await objectsAt(this.tileCenter, x, y);
+      const { meshes, roads, rails } = await objectsAt(this.tileCenter, x, y);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -402,6 +403,7 @@ class CoolMap {
       this.loadedTiles[tileKey] = meshes;
       meshes.forEach((m) => this.customLayer.scene.add(m));
       this.loadedRoads[tileKey] = roads;
+      this.loadedRails[tileKey] = rails;
       this.syncVehicleRoads();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -411,20 +413,25 @@ class CoolMap {
     }
   }
 
-  // enable/disable the vehicle layer based on the current zoom; when it turns
-  // on, (re)build the fleet from the roads already loaded
+  // enable/disable the fleets based on the current zoom; when they turn on,
+  // (re)build them from the paths already loaded
   private updateVehicleActivity() {
-    if (!this.vehicles) return;
+    if (!this.vehicles || !this.trains) return;
     const enabled = this.map.getZoom() >= VEHICLE_MIN_ZOOM;
     if (enabled === this.vehicles.enabled) return;
     this.vehicles.setEnabled(enabled);
+    this.trains.setEnabled(enabled);
     if (enabled) this.syncVehicleRoads();
   }
 
-  // hand the union of the currently loaded tiles' roads to the vehicle manager
+  // hand the union of the currently loaded tiles' paths to the fleet managers
   private syncVehicleRoads() {
-    if (!this.vehicles || !this.vehicles.enabled) return;
-    this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
+    if (this.vehicles) {
+      this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
+    }
+    if (this.trains) {
+      this.trains.setRoads(Object.values(this.loadedRails).flat());
+    }
   }
 
   async getGLTF(): Promise<ArrayBuffer> {

@@ -2,28 +2,67 @@ import * as THREE from "three";
 
 import { toModelCoords, type Road } from "./geojson_data";
 
-const CAR_LENGTH = 8 / 3;
-const CAR_WIDTH = 4 / 3;
-const CAR_HEIGHT = 1;
-const MIN_SPACING = 12.5; // meters between cars spawned on one cycle
-const MAX_VEHICLES = 4000;
-const SPEED_MIN = 6; // m/s
-const SPEED_MAX = 16;
-const STOP_MIN = 0.4; // seconds paused when arriving at a crossing
-const STOP_MAX = 1.5;
-const MIN_EDGE_LENGTH = 1; // ignore degenerate edges (meters)
+// tuning for one fleet (cars on roads, trains on rails, ...)
+export interface FleetConfig {
+  length: number; // vehicle box size, meters
+  width: number;
+  height: number;
+  minSpacing: number; // meters between vehicles along a cycle
+  maxVehicles: number;
+  speedMin: number; // m/s
+  speedMax: number;
+  stopMin: number; // seconds paused when arriving at a crossing
+  stopMax: number;
+  greyFraction: number; // fraction of vehicles using a grey shade
+  greyColors: number[];
+  colors: number[];
+  minCycleCrossings: number; // a cycle must pass through this many crossings...
+  maxCycleCrossings: number;
+  minCycleLength: number; // ...and be at least this long
+  minEdgeLength: number; // ignore degenerate edges (meters)
+}
 
-// a drivable cycle must pass through this many crossings (degree >= 3 nodes)
-// and be at least this long; the 50 m rule applies to the cycle as a whole
-const MIN_CYCLE_CROSSINGS = 3;
-const MAX_CYCLE_CROSSINGS = 10;
-const MIN_CYCLE_LENGTH = 50;
+export const CAR_FLEET: FleetConfig = {
+  length: 8 / 3,
+  width: 4 / 3,
+  height: 1,
+  minSpacing: 12.5,
+  maxVehicles: 4000,
+  speedMin: 6,
+  speedMax: 16,
+  stopMin: 0.2,
+  stopMax: 0.75,
+  greyFraction: 0.6,
+  greyColors: [0xe0e0e0, 0xb0b0b0, 0x888888, 0x555555, 0x333333, 0xa8a8a8],
+  colors: [0xff5555, 0x5555ff, 0xffcc33, 0x33cc99],
+  minCycleCrossings: 3,
+  maxCycleCrossings: 10,
+  minCycleLength: 50,
+  minEdgeLength: 1,
+};
 
-// 60% of cars use a grey shade, the rest a colour
-const GREY_COLORS = [0xe0e0e0, 0xb0b0b0, 0x888888, 0x555555, 0x333333, 0xa8a8a8];
-const CAR_COLORS = [0xff5555, 0x5555ff, 0xffcc33, 0x33cc99];
+// trains/trams: half the size and frequency of before, dark orange, and they
+// stop at junctions for longer than cars
+export const TRAIN_FLEET: FleetConfig = {
+  length: 15,
+  width: 1.5,
+  height: 2,
+  minSpacing: 800,
+  maxVehicles: 100,
+  speedMin: 8,
+  speedMax: 20,
+  stopMin: 0.8,
+  stopMax: 3,
+  greyFraction: 0,
+  greyColors: [],
+  colors: [0xff8c00],
+  minCycleCrossings: 3,
+  maxCycleCrossings: 10,
+  minCycleLength: 50,
+  minEdgeLength: 1,
+};
 
-// one road segment between two graph nodes
+// one road/rail segment between two graph nodes
 interface Edge {
   key: string;
   a: string; // node key at pts[0]
@@ -52,7 +91,7 @@ interface Vehicle {
   step: number; // index into the cycle's steps
   s: number; // meters travelled along the current step
   speed: number;
-  waitUntil: number; // ms timestamp: while in the future the car is stopped
+  waitUntil: number; // ms timestamp: while in the future the vehicle is stopped
   color: THREE.Color;
 }
 
@@ -69,8 +108,8 @@ function metersBetween(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// a node id shared by roads meeting at the same point. Coordinates are
-// rounded so tile-clipped endpoints on a shared boundary collide exactly.
+// a node id shared by ways meeting at the same point. Coordinates are rounded
+// so tile-clipped endpoints on a shared boundary collide exactly.
 function coordKey(c: [number, number]): string {
   return `${c[0].toFixed(6)},${c[1].toFixed(6)}`;
 }
@@ -88,10 +127,10 @@ function pointAt(edge: Edge, distanceFromA: number): [number, number] {
 }
 
 export class VehicleManager {
-  // Roads from every loaded tile are pulled into one graph, so a cycle can
-  // run across tile boundaries. Cars then loop their cycle: no ping-pong, and
-  // at each crossing they may take a different branch (different cycles), with
-  // a brief stop.
+  // The paths from every loaded tile are pulled into one graph, so a cycle can
+  // run across tile boundaries. Vehicles loop their cycle (no ping-pong); at a
+  // crossing they may take a different branch (different cycles), with a brief
+  // stop (cars; trains have stopMin/stopMax = 0).
   private readonly mesh: THREE.InstancedMesh;
   private readonly edges = new Map<string, Edge>();
   private readonly nodes = new Map<string, string[]>(); // node -> incident edge keys
@@ -100,14 +139,24 @@ export class VehicleManager {
   private byId = new Map<string, Vehicle>();
   private readonly dummy = new THREE.Object3D();
   private readonly clock = new THREE.Clock();
+  private readonly config: FleetConfig;
   // when disabled (map zoomed out) the mesh is hidden and the per-frame update
   // is skipped
   enabled = true;
 
-  constructor(scene: THREE.Scene) {
-    const geometry = new THREE.BoxGeometry(CAR_LENGTH, CAR_WIDTH, CAR_HEIGHT);
+  constructor(scene: THREE.Scene, config: FleetConfig) {
+    this.config = config;
+    const geometry = new THREE.BoxGeometry(
+      config.length,
+      config.width,
+      config.height,
+    );
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    this.mesh = new THREE.InstancedMesh(geometry, material, MAX_VEHICLES);
+    this.mesh = new THREE.InstancedMesh(
+      geometry,
+      material,
+      config.maxVehicles,
+    );
     this.mesh.count = 0;
     // instances move every frame, so frustum culling against stale bounds
     // would hide them
@@ -126,13 +175,13 @@ export class VehicleManager {
     this.buildGraph(roads);
     this.findCycles();
 
-    // Pick which cars to show by a stable bottom-k hash over every (cycle,
+    // Pick which vehicles to show by a stable bottom-k hash over every (cycle,
     // slot) candidate, so the fleet spreads uniformly over the whole graph
     // rather than greedily filling the cap on the first tiles that load.
     const candidates: { id: string; cycleId: string; slot: number; key: number }[] =
       [];
     for (const [cycleId, cycle] of this.cycles) {
-      const n = Math.max(1, Math.floor(cycle.length / MIN_SPACING));
+      const n = Math.max(1, Math.floor(cycle.length / this.config.minSpacing));
       for (let i = 0; i < n; i++) {
         const id = `${cycleId}#${i}`;
         candidates.push({ id, cycleId, slot: i, key: this.hash01(id) });
@@ -141,16 +190,18 @@ export class VehicleManager {
     candidates.sort((a, b) => a.key - b.key);
 
     const vehicles: Vehicle[] = [];
-    for (const candidate of candidates.slice(0, MAX_VEHICLES)) {
+    for (const candidate of candidates.slice(0, this.config.maxVehicles)) {
       const existing = this.byId.get(candidate.id);
       if (existing) {
-        // keep the car (and its progress along the cycle) across re-syncs
+        // keep the vehicle (and its progress along the cycle) across re-syncs
         vehicles.push(existing);
         continue;
       }
       const cycle = this.cycles.get(candidate.cycleId);
       if (!cycle) continue;
-      const step = Math.floor(this.hash01(`${candidate.id}step`) * cycle.steps.length);
+      const step = Math.floor(
+        this.hash01(`${candidate.id}step`) * cycle.steps.length,
+      );
       const edge = this.edges.get(cycle.steps[step].edgeKey);
       vehicles.push({
         id: candidate.id,
@@ -158,9 +209,11 @@ export class VehicleManager {
         step,
         s: this.hash01(`${candidate.id}s`) * (edge?.length ?? 0),
         speed:
-          SPEED_MIN + this.hash01(`${candidate.id}v`) * (SPEED_MAX - SPEED_MIN),
+          this.config.speedMin +
+          this.hash01(`${candidate.id}v`) *
+            (this.config.speedMax - this.config.speedMin),
         waitUntil: 0,
-        color: this.carColor(candidate.id),
+        color: this.vehicleColor(candidate.id),
       });
     }
     this.vehicles = vehicles;
@@ -183,7 +236,7 @@ export class VehicleManager {
         cum.push(cum[i - 1] + metersBetween(pts[i - 1], pts[i]));
       }
       const length = cum[cum.length - 1];
-      if (length < MIN_EDGE_LENGTH) continue;
+      if (length < this.config.minEdgeLength) continue;
       this.edges.set(key, { key, a, b, pts, cum, length });
       this.node(a).push(key);
       this.node(b).push(key);
@@ -200,8 +253,9 @@ export class VehicleManager {
   }
 
   // Find cycles via a spanning forest: every non-tree edge closes exactly one
-  // fundamental cycle. Keep those that pass through 3..10 crossings and are at
-  // least MIN_CYCLE_LENGTH long (the minimum-length rule for cycles).
+  // fundamental cycle. Keep those that pass through the configured number of
+  // crossings and are at least minCycleLength long (the minimum-length rule
+  // applies to the cycle as a whole).
   private findCycles(): void {
     this.cycles.clear();
     const parent = new Map<string, string | null>();
@@ -263,9 +317,9 @@ export class VehicleManager {
         if (this.node(node).length >= 3) crossings++;
       }
       if (
-        crossings < MIN_CYCLE_CROSSINGS ||
-        crossings > MAX_CYCLE_CROSSINGS ||
-        length < MIN_CYCLE_LENGTH
+        crossings < this.config.minCycleCrossings ||
+        crossings > this.config.maxCycleCrossings ||
+        length < this.config.minCycleLength
       ) {
         continue;
       }
@@ -292,12 +346,14 @@ export class VehicleManager {
       steps.push({ edgeKey: nextKey, dir, stop: this.node(to).length >= 3 });
       current = to;
     }
-    return steps.length >= MIN_CYCLE_CROSSINGS ? steps : null;
+    return steps.length >= this.config.minCycleCrossings ? steps : null;
   }
 
-  private carColor(id: string): THREE.Color {
+  private vehicleColor(id: string): THREE.Color {
     const palette =
-      this.hash01(`${id}gray`) < 0.6 ? GREY_COLORS : CAR_COLORS;
+      this.hash01(`${id}gray`) < this.config.greyFraction
+        ? this.config.greyColors
+        : this.config.colors;
     return new THREE.Color(palette[(this.hash01(`${id}c`) * palette.length) | 0]);
   }
 
@@ -329,16 +385,19 @@ export class VehicleManager {
         v.s += v.speed * dt;
         if (v.s >= edge.length) {
           // reached a junction: follow the cycle (wrap at the end) and, at a
-          // crossing, pause briefly
+          // crossing, pause briefly (unless the fleet disables stops)
           const stop = step.stop;
           v.step = (v.step + 1) % cycle.steps.length;
           step = cycle.steps[v.step];
           v.s = 0;
           edge = this.edges.get(step.edgeKey);
           if (!edge) continue;
-          if (stop) {
+          if (stop && this.config.stopMax > 0) {
             v.waitUntil =
-              now + (STOP_MIN + Math.random() * (STOP_MAX - STOP_MIN)) * 1000;
+              now +
+              (this.config.stopMin +
+                Math.random() * (this.config.stopMax - this.config.stopMin)) *
+                1000;
           }
         }
       }
@@ -349,7 +408,7 @@ export class VehicleManager {
       const m = toModelCoords(behind, originMeters, scaleFactor);
       const ma = toModelCoords(ahead, originMeters, scaleFactor);
       const angle = Math.atan2(ma[1] - m[1], ma[0] - m[0]);
-      this.dummy.position.set(m[0], m[1], CAR_HEIGHT / 2);
+      this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, angle);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(count, this.dummy.matrix);

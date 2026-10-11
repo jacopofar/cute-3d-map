@@ -91,7 +91,7 @@ export function geoJSONtoGeometries(
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 const treeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 
-// a drivable road, kept as lng/lat so vehicles can be placed against the
+// a road or rail line, kept as lng/lat so fleets can be placed against the
 // current projection origin every frame (see VehicleManager)
 export interface Road {
   id: string;
@@ -102,6 +102,7 @@ export interface Road {
 export interface TileObjects {
   meshes: THREE.Object3D[];
   roads: Road[];
+  rails: Road[];
 }
 
 export async function objectsAt(
@@ -117,7 +118,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], roads: [] };
+    return { meshes: [], roads: [], rails: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -126,10 +127,13 @@ export async function objectsAt(
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const roads: Road[] = [];
+  const rails: Road[] = [];
   myGeoJSON.features.forEach((f, index) => {
-    if (f.properties?.cmtype === "road") {
-      // roads are not rendered; they are used as paths for vehicles
-      roads.push(...roadsIn(f, `${x}/${y}/${index}`));
+    const cmtype = f.properties?.cmtype;
+    if (cmtype === "road" || cmtype === "rail") {
+      // not rendered; used as paths for the vehicle/train fleets
+      const target = cmtype === "road" ? roads : rails;
+      target.push(...roadsIn(f, `${x}/${y}/${index}`));
       return;
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor).forEach(
@@ -157,7 +161,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, roads };
+  return { meshes, roads, rails };
 }
 
 function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {

@@ -121,3 +121,22 @@ def test_tile_to_geojson_merges_drivable_roads():
     roads = [f for f in render if f["properties"]["cmtype"] == "road"]
     assert len(roads) == 1
     assert len(roads[0]["geometry"]["coordinates"]) == 3
+
+
+def test_tile_to_geojson_emits_rail_and_ignores_metro():
+    min_lon, min_lat, max_lon, max_lat = main.tile_lonlat_bounds(17220, 11723, 15)
+    lon = (min_lon + max_lon) / 2
+    lat = (min_lat + max_lat) / 2
+    d = 0.001  # ~78 m of longitude at this latitude
+    rail = shapely.to_wkb(geom(f"LINESTRING ({lon} {lat}, {lon + 2 * d} {lat})"))
+    metro = shapely.to_wkb(
+        geom(f"LINESTRING ({lon} {lat + 0.001}, {lon + 2 * d} {lat + 0.001})")
+    )
+    data = [
+        (1, {"railway": "rail"}, rail),
+        (2, {"railway": "subway"}, metro),
+    ]
+    render, _ = main.tile_to_geojson(data, 17220, 11723, 15)
+    rails = [f for f in render if f["properties"]["cmtype"] == "rail"]
+    assert len(rails) == 1
+    assert "/rail/" in rails[0]["id"]
