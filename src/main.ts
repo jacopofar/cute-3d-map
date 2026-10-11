@@ -96,7 +96,7 @@ class CoolMap {
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
-      zoom: 14,
+      zoom: 16,
       pitch: 30,
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });
@@ -179,6 +179,9 @@ class CoolMap {
         // directly — NOT via loadedTiles — so the origin reset does not touch
         // it; its positions are recomputed each frame)
         coolMap.vehicles = new VehicleManager(this.scene);
+        // tiles may already have loaded before this layer was added, so seed
+        // the fleet with whatever roads are present
+        coolMap.syncVehicleRoads();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;

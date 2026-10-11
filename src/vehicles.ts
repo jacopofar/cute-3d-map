@@ -2,11 +2,11 @@ import * as THREE from "three";
 
 import { toModelCoords, type Road } from "./geojson_data";
 
-const CAR_LENGTH = 4;
-const CAR_WIDTH = 2;
-const CAR_HEIGHT = 1.5;
-const MIN_SPACING = 60; // meters between cars spawned on one road
-const MAX_VEHICLES = 500;
+const CAR_LENGTH = 8;
+const CAR_WIDTH = 4;
+const CAR_HEIGHT = 3;
+const MIN_SPACING = 25; // meters between cars spawned on one road
+const MAX_VEHICLES = 2000;
 const SPEED_MIN = 6; // m/s
 const SPEED_MAX = 16;
 
@@ -101,28 +101,50 @@ export class VehicleManager {
     for (const id of [...this.paths.keys()]) {
       if (!present.has(id)) this.paths.delete(id);
     }
-    this.vehicles = this.vehicles.filter((v) => this.paths.has(v.roadId));
 
-    const occupied = new Set(this.vehicles.map((v) => v.roadId));
+    // Pick which cars to show by a stable bottom-k hash over every (road,
+    // slot) candidate. This spreads the fleet uniformly over ALL loaded roads
+    // instead of greedily filling the cap on whichever tiles happened to load
+    // first (which left the visible center empty). Because the key only
+    // depends on the road id, a car keeps its road/speed/direction across
+    // re-syncs, so the fleet does not churn as tiles load.
+    const candidates: { key: number; vehicle: Vehicle }[] = [];
     for (const [id, path] of this.paths) {
-      if (this.vehicles.length >= MAX_VEHICLES) break;
-      if (occupied.has(id)) continue;
-      const n = Math.min(
-        Math.max(1, Math.floor(path.length / MIN_SPACING)),
-        MAX_VEHICLES - this.vehicles.length,
-      );
+      const n = Math.max(1, Math.floor(path.length / MIN_SPACING));
       for (let i = 0; i < n; i++) {
-        this.vehicles.push({
-          roadId: id,
-          s: ((i + Math.random()) / n) * path.length,
-          dir: Math.random() < 0.5 ? 1 : -1,
-          speed: SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN),
-          color: new THREE.Color(
-            CAR_COLORS[(Math.random() * CAR_COLORS.length) | 0],
-          ),
+        const key = this.hash01(`${id}#${i}`);
+        candidates.push({
+          key,
+          vehicle: {
+            roadId: id,
+            s: ((i + 0.5) / n) * path.length,
+            speed:
+              SPEED_MIN +
+              this.hash01(`${id}#${i}#speed`) * (SPEED_MAX - SPEED_MIN),
+            dir: this.hash01(`${id}#${i}#dir`) < 0.5 ? 1 : -1,
+            color: new THREE.Color(
+              CAR_COLORS[
+                (this.hash01(`${id}#${i}#color`) * CAR_COLORS.length) | 0
+              ],
+            ),
+          },
         });
       }
     }
+    candidates.sort((a, b) => a.key - b.key);
+    this.vehicles = candidates
+      .slice(0, MAX_VEHICLES)
+      .map((candidate) => candidate.vehicle);
+  }
+
+  // deterministic [0, 1) hash of a string, for stable pseudo-random choices
+  private hash01(s: string): number {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h / 4294967296;
   }
 
   // advance the fleet and write instance transforms. Positions are recomputed

@@ -32,6 +32,13 @@ The project has two halves:
    MapLibre's projection matrix. There is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
 
+   Drivable-`highway` features (also `cmtype: "road"`) are not rendered;
+   instead `src/vehicles.ts` drives a fleet of cars (one `InstancedMesh`,
+   per-instance color) along them, ping-ponging at the road ends. The fleet is
+   advanced in the layer's `render()` (which already repaints), and car
+   positions are recomputed from lng/lat each frame so the projection-origin
+   reset needs no special handling.
+
 `src/maplibre_setup.ts` fixes a MapLibre v6 issue where the web worker URL is
 resolved dynamically and doesn't survive `vite build` — it wires the worker
 through Vite's `?worker&url` handling.
