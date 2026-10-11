@@ -3,12 +3,6 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
 
-class Tree extends THREE.Mesh {
-  constructor(geometry: THREE.CylinderGeometry, material: THREE.Material) {
-    super(geometry, material);
-  }
-}
-
 const generateHash = (s: string): number => {
   let hash = 0;
   for (const char of s) {
@@ -26,11 +20,24 @@ const GREENS = [
   '#0d8c42',
 ]
 
+// bake the color into a vertex color attribute so trees can be merged into a
+// single mesh per tile
+function applyVertexColor(geometry: THREE.BufferGeometry, color: THREE.Color) {
+  const count = geometry.getAttribute("position").count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
 export function tree(
   originMeters: [number, number],
   scaleFactor: number,
   f: Geojson.Feature,
-): THREE.Object3D[] {
+): THREE.BufferGeometry[] {
   if (f.geometry.type === "Point") {
     const h = generateHash(`${f.id}`);
     const geometry = new THREE.CylinderGeometry(0.5, 2.7, 2.2 + (h % 10) / 5.0, 5);
@@ -41,14 +48,10 @@ export function tree(
     );
     geometry.rotateX(Math.PI / 2);
     geometry.translate(pos[0], pos[1], 2);
-    return [
-      new Tree(
-        geometry,
-        new THREE.MeshBasicMaterial({
-          color: GREENS[h % GREENS.length]
-        }),
-      ),
-    ];
+    applyVertexColor(geometry, new THREE.Color(GREENS[h % GREENS.length]));
+    // ExtrudeGeometry (buildings) is non-indexed, cylinders are indexed:
+    // make everything non-indexed so mergeGeometries can combine them
+    return [geometry.toNonIndexed()];
   }
 
   throw Error(`Cannot have tree of type ${f.geometry.type}`);

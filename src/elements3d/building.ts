@@ -31,18 +31,18 @@ function geoJSONtoHeight(f: BuildingFeature): number {
   return f.properties.height || 10;
 }
 
-function geoJSONtoMaterial(f: BuildingFeature): THREE.MeshToonMaterial {
-  return new THREE.MeshToonMaterial({
-    color: f.properties.color || "#aaaaaa",
-    // transparent: true,
-    // opacity: 0.9,
-  });
-}
-
-class Building extends THREE.Mesh {
-  constructor(geometry: THREE.ExtrudeGeometry, material: THREE.Material) {
-    super(geometry, material);
+// bake the per-feature color into a vertex color attribute, so many buildings
+// can be merged into a single mesh (one draw call per tile, not per building)
+function applyVertexColor(geometry: THREE.BufferGeometry, colorHex: string) {
+  const color = new THREE.Color(colorHex);
+  const count = geometry.getAttribute("position").count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
   }
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 }
 
 export type BuildingFeature = {
@@ -57,12 +57,13 @@ export function building(
   originMeters: [number, number],
   scaleFactor: number,
   fin: Geojson.Feature,
-): THREE.Object3D[] {
+): THREE.BufferGeometry[] {
   const f = fin as unknown as BuildingFeature;
   const extrudeSettings = {
     depth: geoJSONtoHeight(f),
     bevelEnabled: false,
   };
+  const color = f.properties.color || "#aaaaaa";
   if (f.geometry.type === "MultiPolygon") {
     return f.geometry.coordinates.map((polygon) => {
       const featureBaseShape = coordsToShape(
@@ -70,12 +71,12 @@ export function building(
         originMeters,
         scaleFactor,
       );
-
       const geometry = new THREE.ExtrudeGeometry(
         featureBaseShape,
         extrudeSettings,
       );
-      return new Building(geometry, geoJSONtoMaterial(f));
+      applyVertexColor(geometry, color);
+      return geometry;
     });
   }
   if (f.geometry.type === "Polygon") {
@@ -88,7 +89,8 @@ export function building(
       featureBaseShape,
       extrudeSettings,
     );
-    return [new Building(geometry, geoJSONtoMaterial(f))];
+    applyVertexColor(geometry, color);
+    return [geometry];
   }
   throw Error(`Cannot have building of type ${f.geometry.type}`);
 }

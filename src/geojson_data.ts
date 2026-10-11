@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { tree } from "./elements3d/tree";
@@ -58,11 +59,11 @@ export function toModelCoords(
   ];
 }
 
-function geoJSONtoObjects(
+export function geoJSONtoGeometries(
   f: Geojson.Feature,
   originMeters: [number, number],
   scaleFactor: number,
-): THREE.Object3D[] {
+): { kind: "building" | "tree"; geometries: THREE.BufferGeometry[] }[] {
   if (!f.properties) {
     return [];
   }
@@ -70,18 +71,24 @@ function geoJSONtoObjects(
     return [];
   }
   if (f.properties.cmtype === "building") {
-    return building(originMeters, scaleFactor, f);
+    return [{ kind: "building", geometries: building(originMeters, scaleFactor, f) }];
   }
   if (f.properties.cmtype === "tree") {
-    return tree(originMeters, scaleFactor, f);
+    return [{ kind: "tree", geometries: tree(originMeters, scaleFactor, f) }];
   }
   if (f.properties.cmtype === "tree_row") {
-    return tree_row(originMeters, scaleFactor, f);
+    return [{ kind: "tree", geometries: tree_row(originMeters, scaleFactor, f) }];
   }
 
   console.error("Cannot handle feature:", f);
   return [];
 }
+
+// one shared material per kind; per-feature colors are baked into vertex
+// colors, so a whole tile renders in a single draw call per kind instead of
+// one mesh per feature
+const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
+const treeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 
 export async function objectsAt(
   viewOrigin: [number, number],
@@ -95,8 +102,25 @@ export async function objectsAt(
   let myGeoJSON: Geojson.FeatureCollection = await (
     await fetch(`tiles/${x}/${y}.json`)
   ).json();
-  return myGeoJSON.features
-    .map((f) => geoJSONtoObjects(f, originMeters, scaleFactor))
-    .filter((m: THREE.Object3D[]) => m.length !== 0)
-    .flat(1);
+
+  const byKind: Record<string, THREE.BufferGeometry[]> = {};
+  myGeoJSON.features
+    .flatMap((f) => geoJSONtoGeometries(f, originMeters, scaleFactor))
+    .forEach(({ kind, geometries }) => {
+      (byKind[kind] ??= []).push(...geometries);
+    });
+
+  const meshes: THREE.Object3D[] = [];
+  for (const [kind, geometries] of Object.entries(byKind)) {
+    const merged = BufferGeometryUtils.mergeGeometries(geometries);
+    if (merged) {
+      meshes.push(
+        new THREE.Mesh(
+          merged,
+          kind === "building" ? buildingMaterial : treeMaterial,
+        ),
+      );
+    }
+  }
+  return meshes;
 }
