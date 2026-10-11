@@ -50,6 +50,9 @@ npm run dev          # dev server
 npm run build        # tsc + production build
 npm run preview      # serve the production build
 npm run prettify     # prettier on src/*.ts
+
+npx playwright install   # once, for the e2e browser
+npm run test:e2e         # Playwright smoke tests
 ```
 
 The app expects tiles under `public/tiles/` (fetch path is `tiles/{x}/{y}.json`
@@ -101,7 +104,9 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
   tiles beyond the ±3 margin are dropped and reloaded against the new origin.
 - WebXR/VR support is stubbed out (currently broken upstream, see the comment in
   `src/main.ts`).
-- No frontend tests; `tilegen/` has a small pytest suite.
+- Frontend has only Playwright smoke tests (the app boots and the tile
+  pipeline responds); there are no visual/geometry assertions. `tilegen/` has a
+  small pytest suite.
 
 ## Ideas / TODO
 
