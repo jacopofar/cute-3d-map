@@ -15,7 +15,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.4.0",
     "ruff>=0.17.0",
     "ty>=0.0.86",
     "types-shapely>=2.1.0.20260728",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -47,7 +47,10 @@ def parse_length(value: str | None) -> float | None:
     suffix ("12", "12.5", "12 m"). Returns None when there is no usable number."""
     if value is None:
         return None
-    token = value.strip().split()[0].rstrip("m").strip()
+    parts = value.strip().split()
+    if not parts:
+        return None
+    token = parts[0].rstrip("m").strip()
     try:
         return float(token)
     except ValueError:

@@ -78,7 +78,8 @@ works. Features currently handled: `building`, `natural=tree`,
 `tilegen/` is checked by Ruff and [`ty`](https://docs.astral.sh/ty/) via
 pre-commit (config at the repo root). After `uv sync --group dev` in `tilegen/`,
 enable the hooks once with `uvx pre-commit install`; run them over everything
-with `uvx pre-commit run --all-files`.
+with `uvx pre-commit run --all-files`. The tilegen unit tests run with
+`uv run pytest` from `tilegen/`.
 
 ## Notes and current limitations
 
@@ -97,7 +98,7 @@ with `uvx pre-commit run --all-files`.
   areas; per-tile origins would reduce skew.
 - WebXR/VR support is stubbed out (currently broken upstream, see the comment in
   `src/main.ts`).
-- No tests, frontend or tilegen.
+- No frontend tests; `tilegen/` has a small pytest suite.
 
 ## Ideas / TODO
 
