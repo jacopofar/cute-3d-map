@@ -14,15 +14,11 @@ const generateHash = (s: string): number => {
   return Math.abs(hash);
 };
 
-const GREENS = [
-  '#002000',
-	'#00340e',
-	'#106616',
-  '#147d3b',
-  '#0d8c42',
-]
+// medium greens: the darker end of the range used to come out black once the
+// vertex color was multiplied by the lighting and ACES tone mapping
+const GREENS = ["#2f7a33", "#3d8c3a", "#4a9a45", "#2c8a5b", "#5aa63f"];
 
-const TRUNK_COLOR = new THREE.Color('#6b4f2a');
+const TRUNK_COLOR = new THREE.Color("#6b4f2a");
 
 export function tree(
   originMeters: [number, number],

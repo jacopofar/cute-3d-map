@@ -1,7 +1,9 @@
 /* Without this maplibre maps will not show up */
 .maplibregl-map {
   width: 100%;
-  height: 80vh;
+  /* fill the window (dvh so mobile browser chrome does not crop the map) */
+  height: 100vh;
+  height: 100dvh;
 }
 
 #traffic-toggle,
@@ -16,6 +18,8 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.85);
   font: 13px sans-serif;
+  /* explicit, so the OS color scheme does not turn the labels white */
+  color: #213547;
   cursor: pointer;
   user-select: none;
 }
