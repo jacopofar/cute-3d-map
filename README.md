@@ -87,7 +87,7 @@ order of impact:
 | --- | --- |
 | rebuild the vehicle graphs only when the loaded paths change (was: every pan tick) | pan p90 285 -> 89 ms, 7.2 -> 11.8 fps |
 | index the tree geometry + coarser canopies (5x4 spheres, 5-sided cones, open trunks) | tree vertices 6.29M -> 1.38M, tree triangles 2.10M -> 1.24M, drawn triangles 475k -> 346k |
-| binary-search `pointAt`, reuse the per-frame vehicle lists, skip redundant instance colours | ~5% of main-thread JS |
+| binary-search `pointAt`, reuse the per-frame vehicle lists, skip redundant instance colors | ~5% of main-thread JS |
 
 The tree pass is what moved the frame time least on a software renderer (~5-9%
 idle/pan p50, `perf-results` A/B below) and the most on memory: the loaded

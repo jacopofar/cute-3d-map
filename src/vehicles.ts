@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 import { toModelCoords, type Road } from "./geojson_data";
 
-// tint applied to a vehicle's colour while braking
+// tint applied to a vehicle's color while braking
 const BRAKE_COLOR = new THREE.Color(0xff2a1a);
 
 // tuning for one fleet (cars on roads, trains on rails, ...)
@@ -16,14 +16,14 @@ export interface FleetConfig {
   speedMax: number;
   stopMin: number; // seconds paused when arriving at a crossing
   stopMax: number;
-  greyFraction: number; // fraction of vehicles using a grey shade
-  greyColors: number[];
+  grayFraction: number; // fraction of vehicles using a gray shade
+  grayColors: number[];
   colors: number[];
   minCycleCrossings: number; // a cycle must pass through this many crossings...
   maxCycleCrossings: number;
   minCycleLength: number; // ...and be at least this long
   minEdgeLength: number; // ignore degenerate edges (meters)
-  laneOffset: number; // meters to the right of the centreline (0 = on it)
+  laneOffset: number; // meters to the right of the centerline (0 = on it)
   accel: number; // m/s^2
   decel: number; // m/s^2 (braking)
   maxTurnRate: number; // radians/second the heading may change
@@ -39,8 +39,8 @@ export const CAR_FLEET: FleetConfig = {
   speedMax: 16,
   stopMin: 0.2,
   stopMax: 0.75,
-  greyFraction: 0.6,
-  greyColors: [0xe0e0e0, 0xb0b0b0, 0x888888, 0x555555, 0x333333, 0xa8a8a8],
+  grayFraction: 0.6,
+  grayColors: [0xe0e0e0, 0xb0b0b0, 0x888888, 0x555555, 0x333333, 0xa8a8a8],
   colors: [0xff5555, 0x5555ff, 0xffcc33, 0x33cc99],
   minCycleCrossings: 3,
   maxCycleCrossings: 10,
@@ -64,8 +64,8 @@ export const TRAIN_FLEET: FleetConfig = {
   speedMax: 20,
   stopMin: 0.8,
   stopMax: 3,
-  greyFraction: 0,
-  greyColors: [],
+  grayFraction: 0,
+  grayColors: [],
   colors: [0xff8c00],
   minCycleCrossings: 3,
   maxCycleCrossings: 10,
@@ -116,13 +116,13 @@ interface Vehicle {
   speed: number; // cruise speed (m/s)
   velocity: number; // current speed (m/s)
   heading: number; // current heading in model space (radians)
-  laneOffset: number; // meters to the right of the centreline (with jitter)
+  laneOffset: number; // meters to the right of the centerline (with jitter)
   leadGap: number; // meters to the vehicle ahead on the same edge/direction
   waitUntil: number; // ms timestamp: while in the future the vehicle is stopped
   color: THREE.Color;
   brakeColor: THREE.Color;
   // last braking state written to the instance buffer, so a steady car does not
-  // rewrite its colour (and re-upload the whole buffer) every frame
+  // rewrite its color (and re-upload the whole buffer) every frame
   lastBraking?: boolean;
 }
 
@@ -713,8 +713,8 @@ export class VehicleManager {
 
   private vehicleColor(id: string): THREE.Color {
     const palette =
-      this.hash01(`${id}gray`) < this.config.greyFraction
-        ? this.config.greyColors
+      this.hash01(`${id}gray`) < this.config.grayFraction
+        ? this.config.grayColors
         : this.config.colors;
     return new THREE.Color(
       palette[(this.hash01(`${id}c`) * palette.length) | 0],
@@ -878,7 +878,7 @@ export class VehicleManager {
       // steer smoothly toward the current tangent
       const target = headingAt(edge, distanceFromA, v.dir);
       v.heading = rotateToward(v.heading, target, this.config.maxTurnRate * dt);
-      // place slightly to the right of the centreline, fading the offset out
+      // place slightly to the right of the centerline, fading the offset out
       // near junctions so it doesn't swing the car around the corner
       const m = toModelCoords(
         pointAt(edge, distanceFromA),
@@ -899,7 +899,7 @@ export class VehicleManager {
       this.dummy.rotation.set(0, 0, v.heading);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(count, this.dummy.matrix);
-      // colour only changes when braking starts/stops, so skip the write (and
+      // color only changes when braking starts/stops, so skip the write (and
       // the instance buffer re-upload) for the cars that are just driving along
       if (v.lastBraking !== braking) {
         v.lastBraking = braking;

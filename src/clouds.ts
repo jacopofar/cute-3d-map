@@ -8,11 +8,11 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
  * into one lumpy cumulus — drawn with a translucent, flat-shaded material so the
  * overlapping blobs blend into a soft puff. Unlike a screen-space sprite it is
  * anchored in the world like the buildings: its position, its size and its
- * altitude are fixed in metres, so it scales with the zoom, slides with the pan
+ * altitude are fixed in meters, so it scales with the zoom, slides with the pan
  * and shifts with the tilt, and it drifts with the wind at a fixed ground speed.
  *
  * The clouds tile an infinite sky (a torus): each cloud is drawn from whichever
- * copy of itself is nearest the map centre, so panning anywhere always has sky
+ * copy of itself is nearest the map center, so panning anywhere always has sky
  * overhead without ever re-seeding, and a cloud only jumps to the next copy once
  * it is a full field away — off screen.
  *
@@ -35,24 +35,24 @@ const CLOUD_COUNT = CLOUD_COLUMNS * CLOUD_ROWS;
 // distinct cloud shapes; the clouds are dealt out over them
 const VARIANTS = 3;
 
-// The sky repeats every FIELD_SIZE, in EPSG:3857 metres: a cloud is always
-// drawn from whichever copy of itself is nearest the map centre (see the torus
+// The sky repeats every FIELD_SIZE, in EPSG:3857 meters: a cloud is always
+// drawn from whichever copy of itself is nearest the map center (see the torus
 // note above). 42000 m is ~30 km of ground at Milan, wider than the view at the
 // zooms the clouds are visible from, so the same copy is rarely seen twice.
 const FIELD_SIZE = 42000;
-// cloud width, in true metres, before the per-cloud scale below
+// cloud width, in true meters, before the per-cloud scale below
 const SIZE_METERS = 2400;
-// altitude of the cloud base above the ground, in true metres: high enough to
+// altitude of the cloud base above the ground, in true meters: high enough to
 // sit well clear of the buildings and give parallax when panning or pitching
 const ALTITUDE_MIN = 900;
 const ALTITUDE_MAX = 1900;
 // wind: every cloud travels the same way, its speed varying a little. The speed
-// is in EPSG:3857 metres per second (~0.7x that many true metres at Milan), and
+// is in EPSG:3857 meters per second (~0.7x that many true meters at Milan), and
 // slow enough that a cloud takes minutes to cross the view.
 const WIND_BEARING = 70; // degrees clockwise from north, the way the wind blows
 const WIND_SPEED = 26;
 
-// where the camera is looking: clouds need the map centre, in EPSG:3857 metres,
+// where the camera is looking: clouds need the map center, in EPSG:3857 meters,
 // to pick the nearest copy, plus the zoom for the fade and the time to drift
 export interface View {
   zoom: number;
@@ -61,12 +61,12 @@ export interface View {
 }
 
 interface Cloud {
-  x: number; // EPSG:3857 metres, kept inside [0, FIELD_SIZE)
+  x: number; // EPSG:3857 meters, kept inside [0, FIELD_SIZE)
   y: number;
-  vx: number; // EPSG:3857 metres per second
+  vx: number; // EPSG:3857 meters per second
   vy: number;
   scale: number;
-  altitude: number; // true metres
+  altitude: number; // true meters
   // baked orientation around the vertical, so identical shapes do not stack up
   spin: THREE.Quaternion;
   variant: number;
@@ -85,8 +85,8 @@ function wrap(x: number, size: number): number {
 }
 
 // One cloud shape: a few low-poly spheres (icosahedra, so the facets read as
-// hand-cut) merged into a lumpy mass, flattened and normalised so its width is
-// 1 and its base sits on z = 0 — the instance scale is then its width in metres.
+// hand-cut) merged into a lumpy mass, flattened and normalized so its width is
+// 1 and its base sits on z = 0 — the instance scale is then its width in meters.
 function cloudGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const blobs = 4 + Math.floor(Math.random() * 3);
@@ -129,7 +129,7 @@ export class CloudLayer {
     this.material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       // a little self-illumination so the shaded facets stay white rather than
-      // turning grey under the tone mapping
+      // turning gray under the tone mapping
       emissive: 0xdfe8ff,
       emissiveIntensity: 0.22,
       // facets, so the low-poly blobs read as cartoon cloud lumps
@@ -153,7 +153,7 @@ export class CloudLayer {
       perVariant[variant].push(i);
       this.clouds.push({
         // jitter across the whole cell, so the grid is not visible (and a cell
-        // can land on the map centre, unlike a cell-centre-only layout)
+        // can land on the map center, unlike a cell-center-only layout)
         x: ((column + Math.random()) / CLOUD_COLUMNS) * FIELD_SIZE,
         y: ((row + Math.random()) / CLOUD_ROWS) * FIELD_SIZE,
         vx: speed * Math.sin(wind),
@@ -228,7 +228,7 @@ export class CloudLayer {
       const cloud = this.clouds[i];
       cloud.x = wrap(cloud.x + cloud.vx * dt, FIELD_SIZE);
       cloud.y = wrap(cloud.y + cloud.vy * dt, FIELD_SIZE);
-      // the copy of the cloud nearest the map centre: this is what makes the
+      // the copy of the cloud nearest the map center: this is what makes the
       // sky seamless across the torus
       const worldX =
         cloud.x + FIELD_SIZE * Math.round((centerX - cloud.x) / FIELD_SIZE);
