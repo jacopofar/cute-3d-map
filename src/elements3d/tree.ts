@@ -40,16 +40,28 @@ export function tree(
       scaleFactor,
     );
     const trunkHeight = Math.max(1, radius * 0.8);
-    const trunk = new THREE.CylinderGeometry(0.12, 0.16, trunkHeight, 5);
+    // open-ended: the top cap is inside the canopy and the bottom cap sits on
+    // the ground, so both are invisible and would only add triangles
+    const trunk = new THREE.CylinderGeometry(
+      0.12,
+      0.16,
+      trunkHeight,
+      5,
+      1,
+      true,
+    );
     trunk.rotateX(Math.PI / 2); // stand the cylinder up (Z is up here)
     trunk.translate(pos[0], pos[1], trunkHeight / 2);
     applyVertexColor(trunk, TRUNK_COLOR);
 
-    // conifers are cones, broadleaf trees spheres, with the size from above
+    // conifers are cones, broadleaf trees spheres, with the size from above.
+    // Segment counts are deliberately low: at map zooms the canopy is a few
+    // pixels across, and trees are by far the most numerous object, so each
+    // extra ring costs its triangles thousands of times over.
     const conifer = treeType === "conifer";
     const canopy = conifer
-      ? new THREE.ConeGeometry(radius * 0.8, radius * 1.8, 6)
-      : new THREE.SphereGeometry(radius, 6, 5);
+      ? new THREE.ConeGeometry(radius * 0.8, radius * 1.8, 5)
+      : new THREE.SphereGeometry(radius, 5, 4);
     if (conifer) {
       const height = radius * 1.8;
       canopy.rotateX(Math.PI / 2);
@@ -59,13 +71,11 @@ export function tree(
     }
     applyVertexColor(canopy, new THREE.Color(GREENS[h % GREENS.length]));
 
-    // mergeGeometries wants matching attributes; non-indexed avoids the
-    // indexed/non-indexed mismatch with other kinds
-    const merged = BufferGeometryUtils.mergeGeometries([
-      trunk.toNonIndexed(),
-      canopy.toNonIndexed(),
-    ]);
-    return [merged ?? trunk.toNonIndexed()];
+    // merge trunk + canopy, keeping the index: un-indexing tripled the vertex
+    // count for no rendering benefit (the attributes are identical, so the two
+    // primitives merge fine)
+    const merged = BufferGeometryUtils.mergeGeometries([trunk, canopy]);
+    return [merged ?? trunk];
   }
 
   throw Error(`Cannot have tree of type ${f.geometry.type}`);

@@ -77,32 +77,68 @@ regenerate them as described below for other cities.
 
 ## Performance
 
-`npm run bench` runs `perf/frame_times.spec.ts` (its own Playwright config, so it
-is not part of `npm run test:e2e`). It drives the real app in Chromium with the
-MapTiler style mocked out, and reports:
+The map is CPU/bus-bound rather than triangle-bound: on the sample Milan tiles at
+zoom 16 it loads 49 tiles (~3.4M vertices after the tree pass below) and draws
+~300k triangles in ~18 draw calls per frame, so frustum culling already keeps
+off-screen tiles from being drawn. What has actually cost frames so far, in
+order of impact:
 
-- **startup**: tiles fetched/kept, meshes, loaded vertices and triangles (split
-  by kind: `building` / `tree`), draw calls, loaded roads/buildings, and the
-  fleet sizes;
-- **idle** and **pan**: frame-time percentiles, fps and main-thread long tasks
-  while the map is panned in a scripted drag;
-- the WebGL renderer string, so numbers from different machines can be told
-  apart (headless CI has no GPU and runs on SwiftShader — there the app is
-  rasterizer bound and the absolute fps is much lower than on a device).
+| change | effect |
+| --- | --- |
+| rebuild the vehicle graphs only when the loaded paths change (was: every pan tick) | pan p90 285 -> 89 ms, 7.2 -> 11.8 fps |
+| index the tree geometry + coarser canopies (5x4 spheres, 5-sided cones, open trunks) | tree vertices 6.29M -> 1.38M, tree triangles 2.10M -> 1.24M, drawn triangles 475k -> 346k |
+| binary-search `pointAt`, reuse the per-frame vehicle lists, skip redundant instance colours | ~5% of main-thread JS |
 
-The numbers are written to `perf-results/latest.json` (gitignored) so they can
-be diffed commit to commit. The assertions are deliberately loose and
-machine-independent: panning may not cost much more than sitting idle
-(`pan.p90 < 2.5 * idle.p90`, override with `PERF_MAX_PAN_P90_RATIO`), plus an
-absolute `PERF_MAX_IDLE_P50_MS` sanity bound. The per-move work (tile
-load/unload, vehicle graph rebuilds) is what that ratio catches.
+The tree pass is what moved the frame time least on a software renderer (~5-9%
+idle/pan p50, `perf-results` A/B below) and the most on memory: the loaded
+geometry drops from ~366 MB to ~165 MB of vertex+index buffers. See `notes.md`
+for what is still open (a `getBounds()`-driven tile window, spreading tile builds
+across frames).
 
-Measured on the sample Milan tiles at zoom 16 (SwiftShader, 1280x800): 49 tiles
-and ~8.3M vertices loaded, of which ~2.1M triangles are trees and ~0.7M
-buildings, drawn in ~18 draw calls (frustum culling drops the off-screen tiles).
-The first benchmark run caught a real regression, see `notes.md`: panning was
-7.2 fps with 285 ms p90 frame times because every move pass rebuilt both vehicle
-graphs.
+### Measuring performance
+
+```bash
+npm run bench                 # frame-time benchmark (own Playwright config)
+PERF_MAX_PAN_P90_RATIO=3 npm run bench   # loosen the gate
+```
+
+`npm run bench` runs `perf/frame_times.spec.ts` against a dev server it starts
+itself. It is deliberately *not* part of `npm run test:e2e`: it takes about a
+minute and its timings depend on the machine. It drives the real app in Chromium
+with the MapTiler style mocked out (no API key, no network), and goes through
+three phases:
+
+1. **startup** — waits for the initial tile burst, then records what is loaded:
+   tiles fetched and kept, meshes, vertices and triangles split by kind
+   (`building` / `tree`), draw calls, loaded roads/buildings, fleet sizes. These
+   numbers are deterministic for a given dataset, so they are the best thing to
+   compare between commits.
+2. **idle** — 3 s of frame times and main-thread long tasks with the map
+   untouched. The fleets animate, so this is not "0 fps": it is what the app
+   costs while the user does nothing, and it is the floor this machine's
+   rendering imposes.
+3. **pan** — 6 s of scripted pointer drag, sampled the same way, plus the number
+   of tile fetches it triggered. This is the phase that catches per-move work
+   (tile load/unload, vehicle graph rebuilds).
+
+Each phase is reported as frame-time p50/p90/p99/worst, fps, long-task count and
+total long-task time. The WebGL renderer string is recorded too: headless CI has
+no GPU and runs on SwiftShader, where the app is rasterizer bound and absolute
+fps is far lower than on a device — so read the numbers as relative, and compare
+like with like.
+
+Results are written to `perf-results/latest.json` (gitignored) as well as
+printed, so a run can be kept next to a commit. Two gotchas when comparing:
+
+- **This box is shared.** Absolute frame times drifted from ~75 ms to ~150 ms
+  p50 over one afternoon of other browsers/editors running. To compare two
+  revisions, run them *alternately* in the same session (A/B/A/B) and diff the
+  mins; that is how the tree change above was measured.
+- The assertions are loose sanity bounds, not budgets: panning may not cost much
+  more than idling (`pan.p90 < 2.5 * idle.p90`, override with
+  `PERF_MAX_PAN_P90_RATIO`) and idle must stay under `PERF_MAX_IDLE_P50_MS`
+  (default 250 ms). Regressions in the *ratio* are what the test is for; the
+  absolute numbers are for the human reading `perf-results`.
 
 ## Regenerating tiles
 
