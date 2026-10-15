@@ -68,11 +68,41 @@ npm run prettify     # prettier on src/*.ts
 
 npx playwright install   # once, for the e2e browser
 npm run test:e2e         # Playwright smoke tests
+npm run bench            # frame-time benchmark (see below)
 ```
 
 The app expects tiles under `public/tiles/` (fetch path is `tiles/{x}/{y}.json`
 relative to the app origin). A sample set covering Milan at zoom 15 is included;
 regenerate them as described below for other cities.
+
+## Performance
+
+`npm run bench` runs `perf/frame_times.spec.ts` (its own Playwright config, so it
+is not part of `npm run test:e2e`). It drives the real app in Chromium with the
+MapTiler style mocked out, and reports:
+
+- **startup**: tiles fetched/kept, meshes, loaded vertices and triangles (split
+  by kind: `building` / `tree`), draw calls, loaded roads/buildings, and the
+  fleet sizes;
+- **idle** and **pan**: frame-time percentiles, fps and main-thread long tasks
+  while the map is panned in a scripted drag;
+- the WebGL renderer string, so numbers from different machines can be told
+  apart (headless CI has no GPU and runs on SwiftShader — there the app is
+  rasterizer bound and the absolute fps is much lower than on a device).
+
+The numbers are written to `perf-results/latest.json` (gitignored) so they can
+be diffed commit to commit. The assertions are deliberately loose and
+machine-independent: panning may not cost much more than sitting idle
+(`pan.p90 < 2.5 * idle.p90`, override with `PERF_MAX_PAN_P90_RATIO`), plus an
+absolute `PERF_MAX_IDLE_P50_MS` sanity bound. The per-move work (tile
+load/unload, vehicle graph rebuilds) is what that ratio catches.
+
+Measured on the sample Milan tiles at zoom 16 (SwiftShader, 1280x800): 49 tiles
+and ~8.3M vertices loaded, of which ~2.1M triangles are trees and ~0.7M
+buildings, drawn in ~18 draw calls (frustum culling drops the off-screen tiles).
+The first benchmark run caught a real regression, see `notes.md`: panning was
+7.2 fps with 285 ms p90 frame times because every move pass rebuilt both vehicle
+graphs.
 
 ## Regenerating tiles
 

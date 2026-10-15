@@ -88,6 +88,9 @@ interface Edge {
   stops: number[]; // distances (meters from `a`) where vehicles pause, sorted
   forward: boolean; // may travel a -> b
   backward: boolean; // may travel b -> a (false on one-way=yes)
+  // bounding box of pts, so stop snapping can reject far-away edges without
+  // walking their segments
+  bounds: { minLon: number; maxLon: number; minLat: number; maxLat: number };
 }
 
 // one edge of a cycle, plus whether the node it arrives at is a crossing
@@ -118,11 +121,17 @@ interface Vehicle {
   waitUntil: number; // ms timestamp: while in the future the vehicle is stopped
   color: THREE.Color;
   brakeColor: THREE.Color;
+  // last braking state written to the instance buffer, so a steady car does not
+  // rewrite its colour (and re-upload the whole buffer) every frame
+  lastBraking?: boolean;
 }
 
 // cars always creep this fast when approaching a stop, so they actually reach
 // it (pure sqrt-braking would asymptote and stall)
 const MIN_CREEP = 1.5;
+
+// a tram stop is only snapped to a rail within this distance (meters)
+const MAX_STOP_DISTANCE = 20;
 
 // the lane offset fades to zero this many meters before a junction, so cars
 // don't swing sideways/backwards as they turn through it
@@ -147,10 +156,24 @@ function coordKey(c: [number, number]): string {
   return `${c[0].toFixed(6)},${c[1].toFixed(6)}`;
 }
 
+// index of the cumulative-length segment containing `distanceFromA`; `cum` is
+// ascending, so binary search instead of scanning (pointAt/headingAt run for
+// every vehicle, every frame). Returns the first i >= 1 with cum[i] >= d,
+// clamped to the last segment — same as the linear scan it replaces.
+function segmentIndex(edge: Edge, distanceFromA: number): number {
+  let lo = 1;
+  let hi = edge.cum.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (edge.cum[mid] < distanceFromA) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function pointAt(edge: Edge, distanceFromA: number): [number, number] {
   const clamped = Math.max(0, Math.min(edge.length, distanceFromA));
-  let i = 1;
-  while (i < edge.cum.length - 1 && edge.cum[i] < clamped) i++;
+  const i = segmentIndex(edge, clamped);
   const c0 = edge.cum[i - 1];
   const c1 = edge.cum[i];
   const t = c1 > c0 ? (clamped - c0) / (c1 - c0) : 0;
@@ -266,6 +289,8 @@ export class VehicleManager {
   private roadsDirty = false;
   private vehicles: Vehicle[] = [];
   private byId = new Map<string, Vehicle>();
+  // vehicle lists per `edgeKey|dir`, reused every frame (see update)
+  private groups = new Map<string, Vehicle[]>();
   private readonly dummy = new THREE.Object3D();
   private readonly timer = new THREE.Timer();
   private readonly config: FleetConfig;
@@ -299,6 +324,11 @@ export class VehicleManager {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     this.mesh.visible = enabled;
+  }
+
+  // live vehicle count, for the perf benchmark
+  get count(): number {
+    return this.vehicles.length;
   }
 
   setRoads(paths: Road[], stops: [number, number][] = []): void {
@@ -453,8 +483,17 @@ export class VehicleManager {
       const key = a < b ? `${a}|${b}` : `${b}|${a}`;
       if (this.edges.has(key)) continue;
       const cum = [0];
+      let minLon = pts[0][0];
+      let maxLon = pts[0][0];
+      let minLat = pts[0][1];
+      let maxLat = pts[0][1];
       for (let i = 1; i < pts.length; i++) {
         cum.push(cum[i - 1] + metersBetween(pts[i - 1], pts[i]));
+        const [lon, lat] = pts[i];
+        if (lon < minLon) minLon = lon;
+        else if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        else if (lat > maxLat) maxLat = lat;
       }
       const length = cum[cum.length - 1];
       if (length < this.config.minEdgeLength) continue;
@@ -470,6 +509,7 @@ export class VehicleManager {
         stops: [],
         forward: road.oneway !== "-1",
         backward: road.oneway !== "yes",
+        bounds: { minLon, maxLon, minLat, maxLat },
       });
       this.node(a).push(key);
       this.node(b).push(key);
@@ -480,10 +520,25 @@ export class VehicleManager {
   // the distance along that edge where vehicles should pause
   private snapStops(points: [number, number][]): void {
     for (const point of points) {
+      const cosLat = Math.cos((point[1] * Math.PI) / 180);
+      // reject edges whose bounding box is farther than the snap tolerance
+      // before walking their segments: a filtered rebuild is otherwise
+      // stops x (every rail segment in every loaded tile)
+      const padLat = MAX_STOP_DISTANCE / 110540;
+      const padLon = MAX_STOP_DISTANCE / (111320 * cosLat);
       let bestDistance = Infinity;
       let bestEdge: Edge | null = null;
       let bestAlong = 0;
       for (const edge of this.edges.values()) {
+        const b = edge.bounds;
+        if (
+          point[0] < b.minLon - padLon ||
+          point[0] > b.maxLon + padLon ||
+          point[1] < b.minLat - padLat ||
+          point[1] > b.maxLat + padLat
+        ) {
+          continue;
+        }
         const projection = projectOntoEdge(edge, point);
         if (projection.dist < bestDistance) {
           bestDistance = projection.dist;
@@ -492,7 +547,7 @@ export class VehicleManager {
         }
       }
       // only snap if the stop is actually next to a rail
-      if (bestEdge && bestDistance < 20) {
+      if (bestEdge && bestDistance < MAX_STOP_DISTANCE) {
         bestEdge.stops.push(bestAlong);
       }
     }
@@ -549,10 +604,18 @@ export class VehicleManager {
       let lca: string | null = v;
       while (lca && !ancestors.has(lca)) lca = parent.get(lca) ?? null;
       const keys: string[] = [];
-      for (let x: string | null = u; x && x !== lca; x = parent.get(x) ?? null) {
+      for (
+        let x: string | null = u;
+        x && x !== lca;
+        x = parent.get(x) ?? null
+      ) {
         keys.push(parentEdge.get(x)!);
       }
-      for (let x: string | null = v; x && x !== lca; x = parent.get(x) ?? null) {
+      for (
+        let x: string | null = v;
+        x && x !== lca;
+        x = parent.get(x) ?? null
+      ) {
         keys.push(parentEdge.get(x)!);
       }
       return keys;
@@ -653,7 +716,9 @@ export class VehicleManager {
       this.hash01(`${id}gray`) < this.config.greyFraction
         ? this.config.greyColors
         : this.config.colors;
-    return new THREE.Color(palette[(this.hash01(`${id}c`) * palette.length) | 0]);
+    return new THREE.Color(
+      palette[(this.hash01(`${id}c`) * palette.length) | 0],
+    );
   }
 
   private stopDelay(): number {
@@ -700,8 +765,11 @@ export class VehicleManager {
     const dt = Math.min(this.timer.getDelta(), 0.1);
 
     // group vehicles by edge+direction to find the gap to the one ahead (they
-    // are ordered by `s`, which increases with travel for both directions)
-    const groups = new Map<string, Vehicle[]>();
+    // are ordered by `s`, which increases with travel for both directions).
+    // The map and its lists are reused across frames: allocating them for a few
+    // thousand vehicles every frame was pure garbage.
+    const groups = this.groups;
+    for (const list of groups.values()) list.length = 0;
     for (const v of this.vehicles) {
       const key = `${v.edgeKey}|${v.dir}`;
       const list = groups.get(key);
@@ -709,6 +777,11 @@ export class VehicleManager {
       else groups.set(key, [v]);
     }
     for (const list of groups.values()) {
+      if (list.length === 0) continue;
+      if (list.length === 1) {
+        list[0].leadGap = Infinity;
+        continue;
+      }
       list.sort((a, b) => a.s - b.s);
       for (let i = 0; i < list.length; i++) {
         list[i].leadGap =
@@ -717,6 +790,7 @@ export class VehicleManager {
     }
 
     let count = 0;
+    let colorChanged = false;
     for (const v of this.vehicles) {
       let edge = this.edges.get(v.edgeKey);
       if (!edge) continue;
@@ -734,7 +808,10 @@ export class VehicleManager {
       if (Number.isFinite(obstacle)) {
         desired = Math.min(
           desired,
-          Math.max(MIN_CREEP, Math.sqrt(2 * this.config.decel * Math.max(0, obstacle))),
+          Math.max(
+            MIN_CREEP,
+            Math.sqrt(2 * this.config.decel * Math.max(0, obstacle)),
+          ),
         );
       }
       // follow the vehicle ahead (leave a car length + margin); this can stop
@@ -822,11 +899,19 @@ export class VehicleManager {
       this.dummy.rotation.set(0, 0, v.heading);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(count, this.dummy.matrix);
-      this.mesh.setColorAt(count, braking ? v.brakeColor : v.color);
+      // colour only changes when braking starts/stops, so skip the write (and
+      // the instance buffer re-upload) for the cars that are just driving along
+      if (v.lastBraking !== braking) {
+        v.lastBraking = braking;
+        this.mesh.setColorAt(count, braking ? v.brakeColor : v.color);
+        colorChanged = true;
+      }
       count++;
     }
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    if (colorChanged && this.mesh.instanceColor) {
+      this.mesh.instanceColor.needsUpdate = true;
+    }
   }
 }

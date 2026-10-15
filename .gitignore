@@ -23,6 +23,8 @@ dist-ssr
 test-results
 playwright-report
 blob-report
+# benchmark output
+perf-results
 
 # Editor directories and files
 .vscode/*

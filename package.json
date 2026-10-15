@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "prettify": "npx prettier src/**.ts --write",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "bench": "playwright test --config playwright.bench.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

@@ -637,8 +637,11 @@ class CoolMap {
       }
     });
     deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
-    // drop vehicles whose roads just went away
-    this.syncVehicleRoads();
+    // drop vehicles whose roads just went away. Only re-sync when the set of
+    // loaded paths actually changed: rebuilding the graph rebuilds every edge,
+    // re-snaps every tram stop and re-picks the whole fleet, which is far too
+    // expensive to redo on every move pass (it runs on each pan tick).
+    if (deleteUsKeys.length > 0) this.syncVehicleRoads();
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
     // above (|x - cx| <= margin), otherwise the +margin row/column is kept
@@ -729,6 +732,68 @@ class CoolMap {
     }
   }
 
+  // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
+  // app itself never calls this
+  stats(): {
+    tiles: number;
+    meshes: number;
+    vertices: number;
+    drawCalls: number;
+    triangles: number;
+    byKind: Record<
+      string,
+      { meshes: number; vertices: number; triangles: number }
+    >;
+    roads: number;
+    buildings: number;
+    vehicles: number;
+    trains: number;
+  } {
+    let meshes = 0;
+    let vertices = 0;
+    const byKind: Record<
+      string,
+      { meshes: number; vertices: number; triangles: number }
+    > = {};
+    for (const list of Object.values(this.loadedTiles)) {
+      meshes += list.length;
+      for (const object of list) {
+        if (!(object instanceof THREE.Mesh)) continue;
+        const kind = (object.userData.kind as string) ?? "other";
+        const bucket = (byKind[kind] ??= {
+          meshes: 0,
+          vertices: 0,
+          triangles: 0,
+        });
+        const position = object.geometry.getAttribute("position");
+        const count = position ? position.count : 0;
+        bucket.meshes += 1;
+        bucket.vertices += count;
+        bucket.triangles += object.geometry.index
+          ? object.geometry.index.count / 3
+          : count / 3;
+        vertices += count;
+      }
+    }
+    const renderInfo = this.customLayer.renderer?.info.render;
+    return {
+      tiles: Object.keys(this.loadedTiles).length,
+      meshes,
+      vertices,
+      // last frame, as reported by three's renderer
+      drawCalls: renderInfo?.calls ?? 0,
+      triangles: renderInfo?.triangles ?? 0,
+      byKind,
+      roads: Object.values(this.loadedRoads).reduce((n, r) => n + r.length, 0),
+      buildings: Object.values(this.loadedBuildings).reduce(
+        (n, b) => n + b.length,
+        0,
+      ),
+      vehicles: this.vehicles?.count ?? 0,
+      trains: this.trains?.count ?? 0,
+    };
+  }
+
   async getGLTF(): Promise<ArrayBuffer> {
     return new Promise<ArrayBuffer>((res, rej) => {
       const exporter = new GLTFExporter();
@@ -769,6 +834,12 @@ class CoolMap {
 }
 
 const c = new CoolMap([9.186, 45.497]);
+
+// dev-only handle for the perf benchmark (perf/frame_times.spec.ts); stripped
+// from production builds by the import.meta.env.DEV guard
+if (import.meta.env.DEV) {
+  (window as unknown as { __coolMap: CoolMap }).__coolMap = c;
+}
 // example of how to download GLTF file
 // setTimeout(async () => {
 //   const data = await c.getGLTF();
