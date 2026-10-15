@@ -21,6 +21,7 @@ import {
 } from "./geojson_data.ts";
 import type { Road, BuildingInfo } from "./geojson_data.ts";
 import { VehicleManager, CAR_FLEET, TRAIN_FLEET } from "./vehicles.ts";
+import { CloudLayer } from "./clouds.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -146,10 +147,13 @@ class CoolMap {
   private popup?: Popup;
   private vehicles?: VehicleManager;
   private trains?: VehicleManager;
+  private clouds?: CloudLayer;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
   // whether clicking a building inspects it
   private inspectEnabled = true;
+  // user toggle for the decorative cloud layer (also gated on the zoom)
+  private cloudsEnabled = true;
   // tiles with a fetch in flight; kept separate from loadedTiles so a failed
   // load does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
@@ -279,6 +283,10 @@ class CoolMap {
         // them; their positions are recomputed each frame
         coolMap.vehicles = new VehicleManager(this.scene, CAR_FLEET);
         coolMap.trains = new VehicleManager(this.scene, TRAIN_FLEET);
+        // decorative clouds, also added directly to the scene: their positions
+        // are relative to the visible area rather than to a tile
+        coolMap.clouds = new CloudLayer(this.scene);
+        coolMap.clouds.setEnabled(coolMap.cloudsEnabled);
         // tiles may already have loaded before this layer was added, so seed
         // the fleets with whatever paths are present
         coolMap.syncVehicleRoads();
@@ -339,6 +347,7 @@ class CoolMap {
         const scaleFactor = Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360);
         if (coolMap.vehicles) coolMap.vehicles.update(originMeters, scaleFactor);
         if (coolMap.trains) coolMap.trains.update(originMeters, scaleFactor);
+        coolMap.updateClouds(originMeters, scaleFactor);
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -399,6 +408,16 @@ class CoolMap {
         this.inspectEnabled = inspectToggle.checked;
         if (!this.inspectEnabled) this.clearSelection();
       });
+    }
+
+    const cloudsToggle = document.querySelector<HTMLInputElement>(
+      "#clouds-toggle input",
+    );
+    if (cloudsToggle) {
+      this.cloudsEnabled = cloudsToggle.checked;
+      cloudsToggle.addEventListener("change", () =>
+        this.setCloudsEnabled(cloudsToggle.checked),
+      );
     }
 
     this.map.on("click", (event) => this.onMapClick(event));
@@ -717,6 +736,27 @@ class CoolMap {
   setTrafficEnabled(enabled: boolean) {
     this.trafficEnabled = enabled;
     this.applyTrafficState();
+  }
+
+  setCloudsEnabled(enabled: boolean) {
+    this.cloudsEnabled = enabled;
+    // the layer may not exist yet (it is created when the style loads); onAdd
+    // seeds it from this flag
+    this.clouds?.setEnabled(enabled);
+  }
+
+  // the clouds are anchored in the world and fade out as the map zooms in;
+  // like the fleets they are recomputed every frame, in the same projection
+  private updateClouds(originMeters: [number, number], scaleFactor: number) {
+    if (!this.clouds) return;
+    this.clouds.update(originMeters, scaleFactor, {
+      zoom: this.map.getZoom(),
+      center: epsg4326toEpsg3857([
+        this.map.getCenter().lng,
+        this.map.getCenter().lat,
+      ]),
+      now: performance.now(),
+    });
   }
 
   // hand the union of the currently loaded tiles' paths to the fleet managers
