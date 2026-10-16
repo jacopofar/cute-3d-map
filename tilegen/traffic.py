@@ -214,11 +214,13 @@ class TrafficConfig:
     gray_colors: tuple[str, ...] = GRAY_COLORS
     gray_fraction: float = GRAY_FRACTION
     # traffic signals: a 16 s cycle (8 s green, 8 s red), the two approach axes
-    # alternating. Signals within `signal_radius` are one crossing; a car
-    # passing within that radius obeys it, and up to `queue_slots` cars queue
-    # `queue_seconds` apart behind the line.
+    # alternating. Signals within `signal_radius` are one crossing; a car whose
+    # path passes within `signal_stop_radius` of a crossing obeys it (wider than
+    # the merge radius so a car on an outer lane still catches the light), and
+    # up to `queue_slots` cars queue `queue_seconds` apart behind the line.
     signal_cycle: float = 16.0
     signal_radius: float = 40.0
+    signal_stop_radius: float = 60.0
     queue_slots: int = 5
     queue_seconds: float = 1.5
 
@@ -1029,7 +1031,7 @@ def _loop_to_tiles(
     vertices, speeds = _path_vertices(loop)
     base_times = _base_times(vertices, speeds)
     crossings = _path_crossings(
-        vertices, base_times, centroids, grid, cell, config.signal_radius
+        vertices, base_times, centroids, grid, cell, config.signal_stop_radius
     )
     runs = _path_runs(vertices, base_times, zoom)
     if not runs:
