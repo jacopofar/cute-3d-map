@@ -222,7 +222,7 @@ class TrafficConfig:
     signal_radius: float = 40.0
     signal_stop_radius: float = 60.0
     queue_slots: int = 5
-    queue_seconds: float = 1.5
+    queue_seconds: float = 0.6
 
 
 # cars: 1000 loops stitched through three random nodes. Random points are far

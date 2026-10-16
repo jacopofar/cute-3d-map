@@ -114,6 +114,22 @@ function sampleRun(
   return { lon, lat, heading };
 }
 
+// lon/lat at a base `time` along a run (used by the debug overlay)
+function interpolateAt(
+  times: number[],
+  coords: [number, number][],
+  value: number,
+): [number, number] {
+  let i = 1;
+  while (i < times.length - 1 && times[i] < value) i++;
+  const t0 = times[i - 1];
+  const t1 = times[i];
+  const f = t1 > t0 ? Math.max(0, Math.min(1, (value - t0) / (t1 - t0))) : 0;
+  const a = coords[i - 1];
+  const b = coords[i];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+}
+
 /**
  * Renders precomputed traffic: every vehicle is a pure function of wall-clock
  * time, so there is no simulation to advance, nothing to rebuild when a tile
@@ -121,13 +137,18 @@ function sampleRun(
  * which loops are present (setLoops).
  */
 export class TrafficRenderer {
+  private readonly scene: THREE.Scene;
   private readonly mesh: THREE.InstancedMesh;
   private readonly config: TrafficFleetConfig;
+  private readonly debug: boolean;
   private readonly dummy = new THREE.Object3D();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
   private readonly capacity: number;
   private readonly now: () => number;
   private vehicles: PreparedVehicle[] = [];
+  // debug (?debug=lights): the crossings the loaded cars obey, as lon/lat
+  private crossings: [number, number][] = [];
+  private points?: THREE.Points;
   // when disabled (map zoomed out) the mesh is hidden and the per-frame update
   // is skipped
   enabled = true;
@@ -136,9 +157,12 @@ export class TrafficRenderer {
     scene: THREE.Scene,
     config: TrafficFleetConfig,
     now: () => number = () => Date.now() / 1000,
+    debug = false,
   ) {
+    this.scene = scene;
     this.config = config;
     this.now = now;
+    this.debug = debug;
     this.capacity = Math.max(1, config.maxVehicles);
     const geometry = new THREE.BoxGeometry(
       config.length,
@@ -153,6 +177,19 @@ export class TrafficRenderer {
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
+    if (debug) {
+      const pointGeometry = new THREE.BufferGeometry();
+      this.points = new THREE.Points(
+        pointGeometry,
+        new THREE.PointsMaterial({
+          color: 0xff00ff,
+          size: 6,
+          sizeAttenuation: false,
+        }),
+      );
+      this.points.frustumCulled = false;
+      scene.add(this.points);
+    }
   }
 
   setEnabled(enabled: boolean): void {
@@ -216,6 +253,29 @@ export class TrafficRenderer {
         slot++;
       }
     }
+    if (this.debug) {
+      const seen = new Set<string>();
+      const crossings: [number, number][] = [];
+      for (const group of byId.values()) {
+        for (const entry of group.entries) {
+          for (let r = 0; r < entry.runs.length; r++) {
+            const base = entry.runs[r].times;
+            const coords = entry.runs[r].coords;
+            for (const vehicle of entry.vehicles) {
+              for (const window of vehicle.runs[r].windows) {
+                const point = interpolateAt(base, coords, window[1]);
+                const key = `${point[0].toFixed(5)},${point[1].toFixed(5)}`;
+                if (!seen.has(key)) {
+                  seen.add(key);
+                  crossings.push(point);
+                }
+              }
+            }
+          }
+        }
+      }
+      this.crossings = crossings;
+    }
     if (slot >= this.capacity) {
       console.warn("traffic: vehicle capacity exceeded, dropping routes");
     }
@@ -229,6 +289,19 @@ export class TrafficRenderer {
   update(originMeters: [number, number], scaleFactor: number): void {
     if (!this.enabled) return;
     const now = this.now();
+    if (this.debug && this.points) {
+      const positions = new Float32Array(this.crossings.length * 3);
+      for (let i = 0; i < this.crossings.length; i++) {
+        const m = toModelCoords(this.crossings[i], originMeters, scaleFactor);
+        positions[i * 3] = m[0];
+        positions[i * 3 + 1] = m[1];
+        positions[i * 3 + 2] = 8;
+      }
+      this.points.geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3),
+      );
+    }
     let count = 0;
     for (const vehicle of this.vehicles) {
       const period = vehicle.period;

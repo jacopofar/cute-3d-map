@@ -32,6 +32,10 @@ import "./map_style.css";
 // precomputed vehicles are only shown when the map is at least this zoomed in
 const VEHICLE_MIN_ZOOM = 15;
 
+// ?debug=lights draws a marker at every crossing the loaded cars obey, to check
+// the traffic-light logic
+const DEBUG_LIGHTS = new URLSearchParams(location.search).has("debug");
+
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -283,8 +287,18 @@ class CoolMap {
         // animated cars and trains, added to the scene directly — NOT via
         // loadedTiles — so the origin reset does not touch them; their
         // positions are recomputed each frame from the precomputed loops
-        coolMap.carsTraffic = new TrafficRenderer(this.scene, CAR_TRAFFIC);
-        coolMap.trainsTraffic = new TrafficRenderer(this.scene, TRAIN_TRAFFIC);
+        coolMap.carsTraffic = new TrafficRenderer(
+          this.scene,
+          CAR_TRAFFIC,
+          undefined,
+          DEBUG_LIGHTS,
+        );
+        coolMap.trainsTraffic = new TrafficRenderer(
+          this.scene,
+          TRAIN_TRAFFIC,
+          undefined,
+          DEBUG_LIGHTS,
+        );
         // decorative clouds, also added directly to the scene: their positions
         // are relative to the visible area rather than to a tile
         coolMap.clouds = new CloudLayer(this.scene);
@@ -879,7 +893,7 @@ class CoolMap {
   // }
 }
 
-const c = new CoolMap([9.195070, 45.495700]);
+const c = new CoolMap([9.19507, 45.4957]);
 
 // dev-only handle for the perf benchmark (perf/frame_times.spec.ts); stripped
 // from production builds by the import.meta.env.DEV guard
