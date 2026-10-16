@@ -39,3 +39,11 @@ test("loads 3D tiles for the initial view", async ({ page }) => {
     expect([200, 404]).toContain(status);
   }
 });
+
+test("boots in precomputed traffic mode (default)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  expect(errors).toEqual([]);
+});

@@ -1,6 +1,5 @@
 import json
 import logging
-import math
 import zlib
 from pathlib import Path
 
@@ -8,65 +7,24 @@ import click
 import duckdb
 import quackosm as qosm
 import shapely
-from shapely.geometry import GeometryCollection, LineString, MultiLineString
+from geo import TILE_ZOOM, coord_to_tile
+from shapely.geometry import LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
+from traffic import (
+    CAR_CONFIG,
+    DRIVABLE_HIGHWAYS,
+    RAILWAYS,
+    TRAIN_CONFIG,
+    Way,
+    build_traffic_tiles,
+    road_oneway,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-
-# Web-Mercator zoom at which tiles are generated. Must match TILE_ZOOM in
-# src/geojson_data.ts, since the frontend requests tiles/{x}/{y}.json at that
-# zoom.
-TILE_ZOOM = 15
-
-# highway values whose ways carry vehicles; used to emit "road" features that
-# the frontend drives cars along
-DRIVABLE_HIGHWAYS = frozenset(
-    {
-        "motorway",
-        "motorway_link",
-        "trunk",
-        "trunk_link",
-        "primary",
-        "primary_link",
-        "secondary",
-        "secondary_link",
-        "tertiary",
-        "tertiary_link",
-        "unclassified",
-        "residential",
-        "living_street",
-        "service",
-        "road",
-    }
-)
-
-# railway values whose ways carry trains/trams; used to emit "rail" features
-# the frontend drives trains along. Metros (railway=subway) are ignored.
-RAILWAYS = frozenset({"rail", "tram"})
-
-
-def coord_to_tile(lon: float, lat: float, zoom: float) -> tuple[int, int]:
-    """From EPSG:4326 to web mercator tiles using the"""
-    # from https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
-    return (
-        int((lon + 180) / 360 * (2**zoom)),
-        # int((2 ** zoom) - ((1-math.log(math.tan(lat * math.pi / 180) + 1 / math.cos(lat * math.pi / 180))/math.pi)/ 2 * (2 ** zoom))),
-        int(
-            (
-                1
-                - math.log(
-                    math.tan(lat * math.pi / 180) + 1 / math.cos(lat * math.pi / 180)
-                )
-                / math.pi
-            )
-            / 2
-            * (2**zoom)
-        ),
-    )
 
 
 def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -> Path:
@@ -191,113 +149,15 @@ def to_tree_row(feature_id, tags, s) -> dict | None:
     }
 
 
-def tile_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
-    """(min_lon, min_lat, max_lon, max_lat) of a slippy tile in EPSG:4326."""
-    n = 2**zoom
-    min_lon = x / n * 360 - 180
-    max_lon = (x + 1) / n * 360 - 180
-    max_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
-    min_lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
-    return min_lon, min_lat, max_lon, max_lat
-
-
-def merge_roads(
-    geometries: list[BaseGeometry],
-    box: BaseGeometry,
-) -> list[BaseGeometry]:
-    """Clip road ways to the tile and stitch consecutive segments into longer
-    lines. Short segments are kept: the minimum-length rule is applied to whole
-    cycles in the frontend, so dropping short connectors here would fragment
-    the road graph."""
-    clipped: list[LineString] = []
-    for g in geometries:
-        c = shapely.intersection(g, box)
-        if c.is_empty:
-            continue
-        if isinstance(c, LineString):
-            clipped.append(c)
-        elif isinstance(c, MultiLineString):
-            clipped.extend(c.geoms)
-        elif isinstance(c, GeometryCollection):
-            clipped.extend(p for p in c.geoms if isinstance(p, LineString))
-    if not clipped:
-        return []
-    merged = shapely.line_merge(shapely.union_all(clipped))
-    if isinstance(merged, MultiLineString):
-        lines = list(merged.geoms)
-    elif isinstance(merged, LineString):
-        lines = [merged]
-    else:
-        lines = []
-    return list(lines)
-
-
-def lines_to_features(
-    geometries: list[BaseGeometry],
-    box: BaseGeometry,
-    cmtype: str,
-    tile_x: int,
-    tile_y: int,
-) -> list[dict]:
-    """Clip + stitch the linear features of a tile into cmtype features."""
-    return [
-        {
-            "type": "feature",
-            "id": f"{tile_x}/{tile_y}/{cmtype}/{i}",
-            "geometry": json.loads(shapely.to_geojson(line)),
-            "properties": {"cmtype": cmtype},
-        }
-        for i, line in enumerate(merge_roads(geometries, box))
-    ]
-
-
-def road_oneway(tags) -> str | None:
-    """Normalized oneway direction of a highway way, or None if two-way."""
-    value = tags.get("oneway")
-    if value in ("yes", "true", "1"):
-        return "yes"
-    if value in ("-1", "reverse"):
-        return "-1"
-    if value in ("no", "false", "0"):
-        return None
-    if tags.get("junction") in ("roundabout", "circular"):
-        return "yes"
-    return None
-
-
-def clip_line(line: LineString, box: BaseGeometry) -> list[LineString]:
-    """Intersect a line with the tile box, keeping the line's own direction so
-    oneway semantics survive clipping."""
-    clipped = shapely.intersection(line, box)
-    if clipped.is_empty:
-        return []
-    if isinstance(clipped, LineString):
-        parts = [clipped]
-    elif isinstance(clipped, MultiLineString):
-        parts = list(clipped.geoms)
-    elif isinstance(clipped, GeometryCollection):
-        parts = [p for p in clipped.geoms if isinstance(p, LineString)]
-    else:
-        parts = []
-    start = shapely.Point(line.coords[0])
-    result = []
-    for part in parts:
-        first = shapely.Point(part.coords[0])
-        last = shapely.Point(part.coords[-1])
-        if first.distance(start) > last.distance(start):
-            part = shapely.reverse(part)
-        result.append(part)
-    return result
-
-
 def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
+    """Build the render features (buildings, trees) and the raw-tag features.
+
+    The road and rail network is deliberately not emitted: the vehicle routes
+    are precomputed wholesale in traffic.py (from the parquet), so the frontend
+    never needs the network lines.
+    """
     ret = []
     ret_raw = []
-    # two-way roads are merged into longer lines (direction does not matter);
-    # one-way roads are kept per way so their direction survives
-    bidir_roads: list[BaseGeometry] = []
-    oneway_roads: list[tuple[LineString, str]] = []
-    rail_geometries: list[BaseGeometry] = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
@@ -309,57 +169,51 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
             }
         )
         if "building" in tags:
-            c = to_building(feature_id, tags, s)
-            ret.append(c)
-        elif "natural" in tags and tags["natural"] == "tree":
-            c = to_tree(feature_id, tags, s)
-            ret.append(c)
-        elif "natural" in tags and tags["natural"] == "tree_row":
-            c = to_tree_row(feature_id, tags, s)
-            ret.append(c)
-            continue
-        elif tags.get("railway") == "tram_stop":
-            # tram stops are points the trams pause at (in addition to
-            # crossings); kept raw as cmtype "tram_stop"
-            if s.geom_type == "Point":
-                ret.append(
-                    {
-                        "type": "feature",
-                        "id": feature_id,
-                        "geometry": json.loads(shapely.to_geojson(s)),
-                        "properties": {"cmtype": "tram_stop"},
-                    }
-                )
-        elif tags.get("highway") in DRIVABLE_HIGHWAYS:
-            oneway = road_oneway(tags)
-            if oneway is None:
-                bidir_roads.append(s)
-            elif isinstance(s, LineString):
-                oneway_roads.append((s, oneway))
-            elif isinstance(s, MultiLineString):
-                oneway_roads.extend((part, oneway) for part in s.geoms)
-        elif tags.get("railway") in RAILWAYS:
-            rail_geometries.append(s)
-
-    if bidir_roads or oneway_roads or rail_geometries:
-        box = shapely.box(*tile_lonlat_bounds(tile_x, tile_y, zoom))
-        ret += lines_to_features(bidir_roads, box, "road", tile_x, tile_y)
-        ret += lines_to_features(rail_geometries, box, "rail", tile_x, tile_y)
-        # one-way roads: clipped per way so the direction is preserved
-        index = 0
-        for geom, oneway in oneway_roads:
-            for line in clip_line(geom, box):
-                ret.append(
-                    {
-                        "type": "feature",
-                        "id": f"{tile_x}/{tile_y}/oneway/{index}",
-                        "geometry": json.loads(shapely.to_geojson(line)),
-                        "properties": {"cmtype": "road", "oneway": oneway},
-                    }
-                )
-                index += 1
+            ret.append(to_building(feature_id, tags, s))
+        elif tags.get("natural") == "tree":
+            ret.append(to_tree(feature_id, tags, s))
+        elif tags.get("natural") == "tree_row":
+            ret.append(to_tree_row(feature_id, tags, s))
 
     return [r for r in ret if r is not None], ret_raw
+
+
+def load_ways(
+    input_parquet: Path,
+    tag_key: str = "highway",
+    allowed: frozenset[str] = DRIVABLE_HIGHWAYS,
+) -> list[Way]:
+    """Read every way with a `tag_key` value in `allowed` once from the parquet,
+    for the global traffic graph. The per-tile pipeline clips and stitches
+    independently, so it cannot be used here: loops must be found on the whole
+    network at once."""
+    rows = duckdb.execute(
+        f"""
+        select tags, ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['{tag_key}'] is not null
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    ways: list[Way] = []
+    for tags, wkb in rows:
+        value = tags.get(tag_key)
+        if value not in allowed:
+            continue
+        geometry = shapely.from_wkb(wkb)
+        parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
+        # oneway only means anything on the road network
+        oneway = road_oneway(tags) if tag_key == "highway" else None
+        for part in parts:
+            if isinstance(part, LineString):
+                ways.append(
+                    Way(
+                        coords=[(c[0], c[1]) for c in part.coords],
+                        oneway=oneway,
+                        highway=value,
+                    )
+                )
+    return ways
 
 
 def parquet_to_tiles(
@@ -367,6 +221,7 @@ def parquet_to_tiles(
     target_folder: Path,
     target_folder_raw: Path | None,
     borders_shape: shapely.Geometry | None = None,
+    traffic: bool = True,
 ) -> None:
     duckdb.load_extension("spatial")
     zoom_level = TILE_ZOOM
@@ -395,6 +250,22 @@ def parquet_to_tiles(
     min_x, max_y = coord_to_tile(minlon, minlat, zoom_level)
     max_x, min_y = coord_to_tile(maxlon, maxlat, zoom_level)
     logger.info(f"extent: {[min_x, min_y, max_x, max_y]}")
+    traffic_by_tile: dict[tuple[int, int], list[dict]] = {}
+    if traffic:
+        # traffic is global: one graph per fleet over the whole network, loops
+        # split per tile at the end (see tilegen/traffic.py)
+        logger.info("Building global traffic loops")
+        ways_by_kind = {
+            "car": load_ways(input_parquet, "highway", DRIVABLE_HIGHWAYS),
+            "train": load_ways(input_parquet, "railway", RAILWAYS),
+        }
+        configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
+        traffic_by_tile = build_traffic_tiles(ways_by_kind, zoom_level, configs)
+        logger.info(
+            "traffic: %s -> %d tiles with loops",
+            {kind: len(ways) for kind, ways in ways_by_kind.items()},
+            len(traffic_by_tile),
+        )
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
             logger.info(f"Generating tile {x}/{y}")
@@ -431,12 +302,16 @@ def parquet_to_tiles(
             features, raw_features = tile_to_geojson(
                 tile_data.fetchall(), x, y, zoom_level
             )
+            traffic_loops = traffic_by_tile.get((x, y))
             # compact JSON (indent=2 put every coordinate on its own line and
             # dominated the payload) and no files for empty tiles
-            if features:
+            if features or traffic_loops:
+                document: dict = {"type": "FeatureCollection", "features": features}
+                if traffic_loops:
+                    document["traffic"] = traffic_loops
                 (target_path / f"{y}.json").write_text(
                     json.dumps(
-                        {"type": "FeatureCollection", "features": features},
+                        document,
                         separators=(",", ":"),
                         ensure_ascii=False,
                     )
@@ -477,12 +352,18 @@ def parquet_to_tiles(
     default=True,
     help="Also write the raw-tag tiles (large).",
 )
+@click.option(
+    "--traffic/--no-traffic",
+    default=True,
+    help="Precompute vehicle routes (loops) and write them into the tiles.",
+)
 def main(
     input_pbf: Path,
     polygon_filter: Path | None,
     output: Path,
     raw_output: Path,
     raw: bool,
+    traffic: bool,
 ) -> None:
     logger.info(f"Processing {input_pbf}")
     # Note: you can reduce the file size using a border geojson:
@@ -498,6 +379,7 @@ def main(
         output,
         raw_output if raw else None,
         borders_shape=borders_shape,
+        traffic=traffic,
     )
 
 

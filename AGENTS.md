@@ -42,10 +42,17 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
-- `src/vehicles.ts` — car and train fleets driven along road / rail paths.
+- `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
+  routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
+- `tilegen/geo.py` — slippy-tile helpers shared by the generator.
+- `tilegen/traffic.py` — precomputes vehicle routes: global graph, planar-face
+  loops, per-tile split. Per-fleet configs (`CAR_CONFIG`, `TRAIN_CONFIG`) drive
+  cars and trains. Takes plain `Way` inputs and does no OSM I/O itself
+  (`main.load_ways` reads the parquet), so it is dependency-free and
+  unit-tested in `tilegen/tests/`.
 
 ## Domain lexicon
 
@@ -57,8 +64,20 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row`, `road`, `rail`, `tram_stop`.
-- **fleet** — a `VehicleManager` (cars on roads, trains on rails).
+  `tree_row` (the road/rail network is not emitted; routes come from
+  `traffic`).
+- **fleet** — a `TrafficRenderer`; everything the traffic block holds.
+- **loop** — a closed planar face of the road (or rail) graph; the unit of
+  precomputed traffic.
+- **kind** — a loop/vehicle tag, `car` or `train`; picks the fleet and body.
+- **run** — the piece of a loop that falls inside one tile, with `[t0, t1)`
+  seconds into the loop's `period`.
+- **phase** — a vehicle's 0..1 offset along its loop; vehicles are spread
+  `k/n` so spacing is even.
+- **period** — seconds for one lap of a loop (`length / speed`); the frontend
+  samples `s = v * ((t + phase * period) % period)`.
+- **precomputed traffic** — the route renderer (`src/traffic.ts`,
+  `tilegen/traffic.py`); there is no runtime simulation.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap
   that keeps sky overhead when panning; **variant / slot** — the shared cloud
   mesh shapes and their instance slots.

@@ -30,7 +30,6 @@ type Stats = {
     string,
     { meshes: number; vertices: number; triangles: number }
   >;
-  roads: number;
   buildings: number;
   vehicles: number;
   trains: number;

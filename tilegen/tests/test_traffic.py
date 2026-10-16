@@ -1,0 +1,219 @@
+import math
+from itertools import pairwise
+
+import geo
+import pytest
+import traffic
+from traffic import TrafficConfig, Way
+
+
+def square_ways(lon, lat, d, oneway=None, reverse=False):
+    """Four ways forming a closed square centred on (lon, lat)."""
+    corners = [
+        (lon - d, lat - d),
+        (lon + d, lat - d),
+        (lon + d, lat + d),
+        (lon - d, lat + d),
+    ]
+    if reverse:
+        corners = list(reversed(corners))
+    ways = []
+    for i in range(4):
+        a, b = corners[i], corners[(i + 1) % 4]
+        ways.append(Way([a, b], oneway=oneway, highway="residential"))
+    return ways
+
+
+def segs_to_coords(loop):
+    coords = []
+    for seg in loop.segs:
+        if coords and coords[-1] == seg[0]:
+            coords.extend(seg[1:])
+        else:
+            coords.extend(seg)
+    return coords
+
+
+def signed_area(coords):
+    lat0 = sum(c[1] for c in coords) / len(coords)
+    cos = math.cos(math.radians(lat0))
+    area = 0.0
+    for (x1, y1), (x2, y2) in zip(coords, coords[1:] + coords[:1]):
+        area += (x1 * cos) * y2 - (x2 * cos) * y1
+    return area / 2
+
+
+def find(ways, config=None):
+    graph = traffic.build_graph(ways)
+    loops = traffic.find_loops(graph, config or TrafficConfig())
+    return graph, loops
+
+
+def test_single_square_is_one_loop():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    assert len(loops) == 1
+    loop = loops[0]
+    corners = [
+        (9.179, 45.499),
+        (9.181, 45.499),
+        (9.181, 45.501),
+        (9.179, 45.501),
+    ]
+    expected = sum(
+        traffic.haversine_m(a, b) for a, b in zip(corners, corners[1:] + corners[:1])
+    )
+    assert loop.length == pytest.approx(expected, rel=0.01)
+    # the planar interior face winds counter-clockwise (positive area)
+    assert signed_area(segs_to_coords(loop)) > 0
+
+
+def test_two_squares_sharing_an_edge_are_two_loops():
+    lon, lat, d = 9.18, 45.5, 0.001
+    corners = [
+        (lon - d, lat - d),
+        (lon, lat - d),
+        (lon + d, lat - d),
+        (lon + d, lat + d),
+        (lon, lat + d),
+        (lon - d, lat + d),
+    ]
+    ways = []
+    for i in range(6):
+        ways.append(Way([corners[i], corners[(i + 1) % 6]], highway="residential"))
+    ways.append(Way([corners[1], corners[4]], highway="residential"))  # shared edge
+    _, loops = find(ways)
+    assert len(loops) == 2
+
+
+def test_dangling_edge_is_not_a_loop():
+    ways = square_ways(9.18, 45.5, 0.001)
+    ways.append(Way([(9.18, 45.5), (9.20, 45.5)], highway="residential"))
+    _, loops = find(ways)
+    assert len(loops) == 1
+
+
+def test_dual_carriageway_sliver_is_dropped():
+    # ~780 m long, ~0.8 m wide: a median, not a block
+    lon, lat = 9.18, 45.5
+    length, width = 0.01, 1e-5
+    corners = [
+        (lon, lat),
+        (lon + length, lat),
+        (lon + length, lat + width),
+        (lon, lat + width),
+    ]
+    ways = [
+        Way([corners[i], corners[(i + 1) % 4]], highway="primary") for i in range(4)
+    ]
+    _, loops = find(ways)
+    assert loops == []
+
+
+def test_short_loop_is_dropped():
+    _, loops = find(square_ways(9.18, 45.5, 0.00005))  # ~38 m perimeter
+    assert loops == []
+
+
+def test_oneway_loop_is_oriented_along_the_legal_direction():
+    # ways point clockwise; the legal traversal is the reverse of the planar
+    # (counter-clockwise) face
+    ways = square_ways(9.18, 45.5, 0.001, oneway="yes", reverse=True)
+    _, loops = find(ways)
+    assert len(loops) == 1
+    assert signed_area(segs_to_coords(loops[0])) < 0
+
+
+def test_oneway_loop_with_no_legal_direction_is_dropped():
+    # a cycle of one-way edges that all point the same way is not traversable
+    lon, lat, d = 9.18, 45.5, 0.001
+    corners = [
+        (lon - d, lat - d),
+        (lon + d, lat - d),
+        (lon + d, lat + d),
+        (lon - d, lat + d),
+    ]
+    # every edge points counter-clockwise, but as separate one-way ways the
+    # walk around the square is legal counter-clockwise, so make two edges
+    # fight each other instead
+    ways = [
+        Way([corners[0], corners[1]], oneway="yes"),
+        Way([corners[2], corners[1]], oneway="yes"),
+        Way([corners[2], corners[3]], oneway="yes"),
+        Way([corners[0], corners[3]], oneway="yes"),
+    ]
+    _, loops = find(ways)
+    assert loops == []
+
+
+def test_assign_vehicles_even_phases_and_period():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    loop = loops[0]
+    n = len(loop.vehicles)
+    assert n >= 2
+    assert [v["phase"] for v in loop.vehicles] == pytest.approx(
+        [k / n for k in range(n)]
+    )
+    assert loop.period == pytest.approx(loop.length / loop.v)
+
+
+def test_segment_pieces_split_at_tile_boundary():
+    # a tile boundary sits at this longitude
+    boundary = geo.tile_lonlat_bounds(17220, 11723, 15)[2]
+    p = (boundary - 0.001, 45.5)
+    q = (boundary + 0.001, 45.5)
+    pieces = traffic.segment_pieces(p, q, 15)
+    assert len(pieces) == 2
+    assert pieces[0][1] == pytest.approx(pieces[1][0])
+    assert pieces[0][1][0] == pytest.approx(boundary)
+
+
+def test_split_runs_are_contiguous_across_tiles():
+    boundary = geo.tile_lonlat_bounds(17220, 11723, 15)[2]
+    ways = square_ways(boundary, 45.5, 0.001)
+    _graph, loops = find(ways)
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    loop = loops[0]
+    runs = sorted(traffic.split_runs(loop, 15), key=lambda r: r[1])
+    # the square straddles the boundary, so it lands in two tiles
+    assert len({tile for tile, *_ in runs}) == 2
+    assert runs[0][1] == pytest.approx(0.0)
+    assert runs[-1][2] == pytest.approx(loop.period)
+    for before, after in pairwise(runs):
+        assert before[2] == pytest.approx(after[1])
+        # geometry is continuous through the seam
+        assert before[3][-1] == after[3][0]
+    # the seam closes the loop
+    assert runs[-1][3][-1] == runs[0][3][0]
+
+
+def test_loops_to_tiles_shares_geometry_and_vehicles():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    by_tile = traffic.loops_to_tiles(loops, 15)
+    assert len(by_tile) == 1
+    entry = next(iter(by_tile.values()))[0]
+    assert entry["id"] == loops[0].id
+    assert entry["v"] == pytest.approx(round(loops[0].v, 3))
+    assert len(entry["vehicles"]) == len(loops[0].vehicles)
+    assert entry["runs"][0]["t0"] == 0.0
+
+
+def test_global_budget_raises_spacing():
+    ways = square_ways(9.18, 45.5, 0.001)
+    _graph, loops = find(ways)
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=10.0, max_vehicles=1))
+    assert sum(len(loop.vehicles) for loop in loops) == 1
+
+
+def test_build_traffic_tiles_tags_each_fleet():
+    ways_by_kind = {
+        "car": square_ways(9.18, 45.5, 0.001),
+        "train": square_ways(9.18, 45.5005, 0.001),
+    }
+    config = TrafficConfig(min_loop_length=80.0, spacing=50.0)
+    by_tile = traffic.build_traffic_tiles(
+        ways_by_kind, 15, {"car": config, "train": config}
+    )
+    kinds = {entry["kind"] for entries in by_tile.values() for entry in entries}
+    assert kinds == {"car", "train"}

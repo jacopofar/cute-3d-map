@@ -21,14 +21,10 @@ The project has two halves:
      height falls back to `building:levels * 3` or 10 m;
    - `cmtype: "tree"` (point) — with `type` (broadleaf/conifer) and `size`
      (crown radius, m) derived from OSM tags or a hash;
-   - `cmtype: "tree_row"` (LineString) — one shared type/size for the row;
-   - `cmtype: "road"` (LineString, drivable highways only) — two-way ways are
-     clipped and stitched; one-way ways (`oneway=yes`/`-1`, roundabouts) are
-     kept per way with an `oneway` property so their direction survives;
-   - `cmtype: "rail"` (LineString, `railway=rail`/`tram` only, no metros) —
-     clipped and stitched the same way;
-   - `cmtype: "tram_stop"` (Point, `railway=tram_stop`) — the rail fleet pauses
-     there in addition to crossings.
+   - `cmtype: "tree_row"` (LineString) — one shared type/size for the row.
+
+   A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
+   the precomputed vehicle routes that fall inside the tile. See below.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads
@@ -40,12 +36,26 @@ The project has two halves:
    MapLibre's projection matrix. There is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
 
-   Drivable-`highway` and `railway` features (also `cmtype: "road"`/`"rail"`)
-   are not rendered; instead `src/vehicles.ts` drives fleets along them: cars
-   on roads and longer, less frequent trains/trams on rails. Each fleet builds
-   one graph (and closed cycles) over all loaded tiles, renders as a single
-   `InstancedMesh` (per-instance color), and is only shown above a minimum
-   zoom.
+### Precomputed traffic
+
+Every vehicle is precomputed offline in `tilegen/traffic.py`; `src/traffic.ts`
+is a stateless renderer that samples it. There is no runtime simulation.
+
+- A **loop** is a planar face of the whole road (or rail) graph (found
+  globally, so no vehicle is emitted twice and cycles are correct across tile
+  boundaries). Vehicles are spread evenly along it by `phase` and travel at one
+  constant speed, so arc-length is `s(t) = v * ((t + phase * period) % period)`.
+- Each loop is split per tile at tile boundaries. A tile stores the pieces
+  that fall inside it (`runs`, with `t0`/`t1` seconds into `period`) plus the
+  `vehicles` (`phase` + color) on those loops; each entry is tagged `kind`
+  (`car` or `train`) and the renderer merges pieces that share a loop `id`.
+  Nothing simulates, nothing rebuilds when a tile arrives, and a piece is drawn
+  only while its half-open `[t0, t1)` contains the phase.
+- Two fleets come out of the same machinery: cars on drivable highways (spacing
+  18 m) and trains/trams on `railway=rail`/`tram` (spacing 800 m, orange).
+  Small loops are dropped (200 m for cars, 500 m for trains) so nothing circles
+  a single building or a roundabout.
+- Vehicles are gated on the zoom (and the traffic checkbox) as before.
 
 `src/maplibre_setup.ts` fixes a MapLibre v6 issue where the web worker URL is
 resolved dynamically and doesn't survive `vite build` — it wires the worker
@@ -79,15 +89,19 @@ regenerate them as described below for other cities.
 
 The map is CPU/bus-bound rather than triangle-bound: on the sample Milan tiles at
 zoom 16 it loads 49 tiles (~3.4M vertices after the tree pass below) and draws
-~300k triangles in ~18 draw calls per frame, so frustum culling already keeps
-off-screen tiles from being drawn. What has actually cost frames so far, in
-order of impact:
+them plus the vehicles in ~18 draw calls per frame, so frustum culling already
+keeps off-screen tiles from being drawn. What has actually cost frames so far,
+in order of impact:
 
 | change | effect |
 | --- | --- |
-| rebuild the vehicle graphs only when the loaded paths change (was: every pan tick) | pan p90 285 -> 89 ms, 7.2 -> 11.8 fps |
 | index the tree geometry + coarser canopies (5x4 spheres, 5-sided cones, open trunks) | tree vertices 6.29M -> 1.38M, tree triangles 2.10M -> 1.24M, drawn triangles 475k -> 346k |
-| binary-search `pointAt`, reuse the per-frame vehicle lists, skip redundant instance colors | ~5% of main-thread JS |
+| precompute the vehicle routes (`tilegen/traffic.py`) instead of simulating them | removes the runtime graph and car-following; the fleet cost is now only placing and drawing the instances |
+
+The car count is a generation knob (`CAR_CONFIG.spacing` in `tilegen/traffic.py`),
+and it is the main lever on frame time: the ~16k cars in the loaded window roughly
+double the drawn triangles on a software rasterizer. On a GPU 16k instanced boxes
+are cheap; in headless SwiftShader they are not.
 
 The tree pass is what moved the frame time least on a software renderer (~5-9%
 idle/pan p50, `perf-results` A/B below) and the most on memory: the loaded
@@ -110,16 +124,16 @@ three phases:
 
 1. **startup** — waits for the initial tile burst, then records what is loaded:
    tiles fetched and kept, meshes, vertices and triangles split by kind
-   (`building` / `tree`), draw calls, loaded roads/buildings, fleet sizes. These
-   numbers are deterministic for a given dataset, so they are the best thing to
-   compare between commits.
+   (`building` / `tree`), draw calls, loaded buildings and the vehicle count.
+   These numbers are deterministic for a given dataset, so they are the best
+   thing to compare between commits.
 2. **idle** — 3 s of frame times and main-thread long tasks with the map
-   untouched. The fleets animate, so this is not "0 fps": it is what the app
+   untouched. The vehicles animate, so this is not "0 fps": it is what the app
    costs while the user does nothing, and it is the floor this machine's
    rendering imposes.
 3. **pan** — 6 s of scripted pointer drag, sampled the same way, plus the number
    of tile fetches it triggered. This is the phase that catches per-move work
-   (tile load/unload, vehicle graph rebuilds).
+   (tile load/unload).
 
 Each phase is reported as frame-time p50/p90/p99/worst, fps, long-task count and
 total long-task time. The WebGL renderer string is recorded too: headless CI has
@@ -156,6 +170,10 @@ with all OSM tags to `tilegen/raw_tiles/` (useful for future renderers).
 Copy/move the `tiles/` output into `public/tiles/` so the frontend can fetch it,
 or write it there directly with `--output ../public/tiles` (and `--no-raw` to
 skip the raw tiles).
+
+By default the run also precomputes the vehicle routes (see "Precomputed
+traffic" above) and writes them into the tiles; pass `--no-traffic` to skip
+that step and emit only the geometry tiles.
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,
@@ -194,9 +212,10 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
 
 See `notes.md` for the working list. Highlights:
 
-- merge geometries and use vertex colors to cut draw calls massively
-- debounce/async-robust tile load & unload
+- dwells at tram stops and junctions (a time keyframe table instead of a single
+  constant speed per loop)
+- more rail coverage: rails form few closed loops, so most track (lines and
+  termini) carries no train; a there-and-back route would cover it
+- drive speeds and volumes from data (census counts, GTFS schedules)
 - a server that generates tiles on demand with a backing database
   (pyosmium/quackosm + SQLite/JSON), or shortbread/vector tiles
-- moving vehicles following paths
-- e2e tests

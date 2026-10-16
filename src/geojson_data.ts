@@ -24,7 +24,9 @@ import { tree_row } from "./elements3d/tree_row";
 // tilegen/main.py
 export const TILE_ZOOM = 15;
 
-export function epsg4326toEpsg3857(coordinates: [number, number]): [number, number] {
+export function epsg4326toEpsg3857(
+  coordinates: [number, number],
+): [number, number] {
   let x = (coordinates[0] * 20037508.34) / 180;
   let y =
     Math.log(Math.tan(((90 + coordinates[1]) * Math.PI) / 360)) /
@@ -72,13 +74,17 @@ export function geoJSONtoGeometries(
     return [];
   }
   if (f.properties.cmtype === "building") {
-    return [{ kind: "building", geometries: building(originMeters, scaleFactor, f) }];
+    return [
+      { kind: "building", geometries: building(originMeters, scaleFactor, f) },
+    ];
   }
   if (f.properties.cmtype === "tree") {
     return [{ kind: "tree", geometries: tree(originMeters, scaleFactor, f) }];
   }
   if (f.properties.cmtype === "tree_row") {
-    return [{ kind: "tree", geometries: tree_row(originMeters, scaleFactor, f) }];
+    return [
+      { kind: "tree", geometries: tree_row(originMeters, scaleFactor, f) },
+    ];
   }
 
   console.error("Cannot handle feature:", f);
@@ -92,14 +98,29 @@ const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 // trees are lit too, so they shade with the sun instead of being flat
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
-// a road or rail line, kept as lng/lat so fleets can be placed against the
-// current projection origin every frame (see VehicleManager)
-export interface Road {
+// one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
+// `period`; the piece is drawn while phase is in [t0, t1). See tilegen/traffic.py.
+export interface TrafficRun {
+  t0: number;
+  t1: number;
+  coords: [number, number][];
+}
+
+export interface TrafficVehicle {
+  phase: number; // 0..1 offset along the loop
+  color: number; // parsed from the tile's "rrggbb"
+}
+
+// a loop as stored in one tile: the pieces of it that fall in this tile, plus
+// the vehicles on it. The same loop id appears in every tile it spans, with
+// disjoint run sets; the renderer merges them.
+export interface TrafficLoop {
+  kind: "car" | "train";
   id: string;
-  highway?: string;
-  // "yes" = one-way along the coordinate order, "-1" = against it
-  oneway?: string;
-  coordinates: [number, number][];
+  v: number; // cruise speed, m/s
+  period: number; // seconds for one lap
+  runs: TrafficRun[];
+  vehicles: TrafficVehicle[];
 }
 
 // a building footprint for click-picking + info (outer rings only)
@@ -114,10 +135,8 @@ export interface BuildingInfo {
 
 export interface TileObjects {
   meshes: THREE.Object3D[];
-  roads: Road[];
-  rails: Road[];
-  stops: [number, number][];
   buildings: BuildingInfo[];
+  traffic: TrafficLoop[];
 }
 
 export async function objectsAt(
@@ -133,29 +152,24 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], roads: [], rails: [], stops: [], buildings: [] };
+    return { meshes: [], buildings: [], traffic: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
   }
   let myGeoJSON: Geojson.FeatureCollection = await response.json();
 
+  const traffic = trafficIn(
+    myGeoJSON as unknown as { traffic?: RawTrafficLoop[] },
+  );
+
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
-  const roads: Road[] = [];
-  const rails: Road[] = [];
-  const stops: [number, number][] = [];
   const buildings: BuildingInfo[] = [];
-  myGeoJSON.features.forEach((f, index) => {
+  myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
-    if (cmtype === "road" || cmtype === "rail") {
-      // not rendered; used as paths for the vehicle/train fleets
-      const target = cmtype === "road" ? roads : rails;
-      target.push(...roadsIn(f, `${x}/${y}/${index}`));
-      return;
-    }
-    if (cmtype === "tram_stop" && f.geometry.type === "Point") {
-      // tram stops the rail fleet pauses at
-      stops.push(f.geometry.coordinates as [number, number]);
+    if (cmtype === "road" || cmtype === "rail" || cmtype === "tram_stop") {
+      // the traffic routes are precomputed into `traffic`; the network
+      // features are not rendered (older tiles still carry them)
       return;
     }
     if (cmtype === "building") {
@@ -186,7 +200,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, roads, rails, stops, buildings };
+  return { meshes, buildings, traffic };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -210,27 +224,29 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
   };
 }
 
-function roadsIn(f: Geojson.Feature, idPrefix: string): Road[] {
-  const highway = (f.properties?.highway as string | undefined) ?? undefined;
-  const oneway = (f.properties?.oneway as string | undefined) ?? undefined;
-  const geom = f.geometry;
-  if (geom.type === "LineString") {
-    return [
-      {
-        id: idPrefix,
-        highway,
-        oneway,
-        coordinates: geom.coordinates as [number, number][],
-      },
-    ];
-  }
-  if (geom.type === "MultiLineString") {
-    return geom.coordinates.map((coordinates, i) => ({
-      id: `${idPrefix}/${i}`,
-      highway,
-      oneway,
-      coordinates: coordinates as [number, number][],
-    }));
-  }
-  return [];
+// the traffic block as written by tilegen (colors are "rrggbb" strings there,
+// because JSON has no integer colors)
+interface RawTrafficLoop {
+  kind: "car" | "train";
+  id: string;
+  v: number;
+  period: number;
+  runs: TrafficRun[];
+  vehicles: { phase: number; color: string }[];
+}
+
+function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
+  const loops = document.traffic;
+  if (!Array.isArray(loops)) return [];
+  return loops.map((loop) => ({
+    kind: loop.kind,
+    id: loop.id,
+    v: loop.v,
+    period: loop.period,
+    runs: loop.runs,
+    vehicles: loop.vehicles.map((vehicle) => ({
+      phase: vehicle.phase,
+      color: parseInt(vehicle.color, 16),
+    })),
+  }));
 }

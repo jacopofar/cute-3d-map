@@ -19,8 +19,8 @@ import {
   epsg4326toEpsg3857,
   toModelCoords,
 } from "./geojson_data.ts";
-import type { Road, BuildingInfo } from "./geojson_data.ts";
-import { VehicleManager, CAR_FLEET, TRAIN_FLEET } from "./vehicles.ts";
+import type { BuildingInfo, TrafficLoop } from "./geojson_data.ts";
+import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
 
 import "./style.css";
@@ -29,8 +29,7 @@ import "./style.css";
 
 import "./map_style.css";
 
-// vehicles are only shown (and their graph built) when the map is at least
-// this zoomed in
+// precomputed vehicles are only shown when the map is at least this zoomed in
 const VEHICLE_MIN_ZOOM = 15;
 
 const HTML_ENTITIES: Record<string, string> = {
@@ -78,9 +77,13 @@ function ringDistance(
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
     const len2 = dx * dx + dy * dy;
-    const t = len2 > 0
-      ? Math.max(0, Math.min(1, ((point.x - a[0]) * dx + (point.y - a[1]) * dy) / len2))
-      : 0;
+    const t =
+      len2 > 0
+        ? Math.max(
+            0,
+            Math.min(1, ((point.x - a[0]) * dx + (point.y - a[1]) * dy) / len2),
+          )
+        : 0;
     const px = a[0] + t * dx;
     const py = a[1] + t * dy;
     best = Math.min(best, Math.hypot(point.x - px, point.y - py));
@@ -136,17 +139,14 @@ class CoolMap {
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
   private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
-  // roads/rails per loaded tile, kept as lng/lat for the fleet managers
-  private loadedRoads: { [key: string]: Road[] } = {};
-  private loadedRails: { [key: string]: Road[] } = {};
-  // tram stop points per loaded tile (the rail fleet pauses at them)
-  private loadedStops: { [key: string]: [number, number][] } = {};
+  // precomputed loops per loaded tile
+  private loadedTraffic: { [key: string]: TrafficLoop[] } = {};
   // building footprints per loaded tile, for click-picking
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   private highlight?: THREE.Object3D;
   private popup?: Popup;
-  private vehicles?: VehicleManager;
-  private trains?: VehicleManager;
+  private carsTraffic?: TrafficRenderer;
+  private trainsTraffic?: TrafficRenderer;
   private clouds?: CloudLayer;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
@@ -278,18 +278,19 @@ class CoolMap {
         this.renderer.toneMappingExposure = 1.0;
 
         this.renderer.autoClear = false;
-        // animated cars (on roads) and trains (on rails), added to the scene
-        // directly — NOT via loadedTiles — so the origin reset does not touch
-        // them; their positions are recomputed each frame
-        coolMap.vehicles = new VehicleManager(this.scene, CAR_FLEET);
-        coolMap.trains = new VehicleManager(this.scene, TRAIN_FLEET);
+        // animated cars and trains, added to the scene directly — NOT via
+        // loadedTiles — so the origin reset does not touch them; their
+        // positions are recomputed each frame from the precomputed loops
+        coolMap.carsTraffic = new TrafficRenderer(this.scene, CAR_TRAFFIC);
+        coolMap.trainsTraffic = new TrafficRenderer(this.scene, TRAIN_TRAFFIC);
         // decorative clouds, also added directly to the scene: their positions
         // are relative to the visible area rather than to a tile
         coolMap.clouds = new CloudLayer(this.scene);
         coolMap.clouds.setEnabled(coolMap.cloudsEnabled);
         // tiles may already have loaded before this layer was added, so seed
-        // the fleets with whatever paths are present
-        coolMap.syncVehicleRoads();
+        // the renderer with whatever routes are present
+        coolMap.syncTraffic();
+        coolMap.syncTraffic();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -344,9 +345,15 @@ class CoolMap {
           .copy(this.camera.projectionMatrix)
           .invert();
         const originMeters = epsg4326toEpsg3857(coolMap.tileCenter);
-        const scaleFactor = Math.cos((2 * Math.PI * coolMap.tileCenter[1]) / 360);
-        if (coolMap.vehicles) coolMap.vehicles.update(originMeters, scaleFactor);
-        if (coolMap.trains) coolMap.trains.update(originMeters, scaleFactor);
+        const scaleFactor = Math.cos(
+          (2 * Math.PI * coolMap.tileCenter[1]) / 360,
+        );
+        if (coolMap.carsTraffic) {
+          coolMap.carsTraffic.update(originMeters, scaleFactor);
+        }
+        if (coolMap.trainsTraffic) {
+          coolMap.trainsTraffic.update(originMeters, scaleFactor);
+        }
         coolMap.updateClouds(originMeters, scaleFactor);
         if (this.renderer) {
           this.renderer.resetState();
@@ -461,7 +468,9 @@ class CoolMap {
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
     const candidates = this.loadedBuildings[tileKey ?? ""] ?? [];
     let building = candidates.find((b) =>
-      b.rings.some((ring) => ringContains(ring, point, originMeters, scaleFactor)),
+      b.rings.some((ring) =>
+        ringContains(ring, point, originMeters, scaleFactor),
+      ),
     );
     if (!building) {
       // a roof/side hit can land just outside the footprint; take the nearest
@@ -648,19 +657,16 @@ class CoolMap {
           // module-level singletons, so dispose only the geometry
           if (m instanceof THREE.Mesh) m.geometry.dispose();
         });
-        delete this.loadedRoads[k];
-        delete this.loadedRails[k];
-        delete this.loadedStops[k];
+        delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
         deleteUsKeys.push(k);
       }
     });
     deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
-    // drop vehicles whose roads just went away. Only re-sync when the set of
-    // loaded paths actually changed: rebuilding the graph rebuilds every edge,
-    // re-snaps every tram stop and re-picks the whole fleet, which is far too
-    // expensive to redo on every move pass (it runs on each pan tick).
-    if (deleteUsKeys.length > 0) this.syncVehicleRoads();
+    // the routes of an unloaded tile are gone; hand the renderer the remaining
+    // ones. setLoops only reprepares plain data, so this is cheap enough to run
+    // on the moves that actually unload a tile.
+    if (deleteUsKeys.length > 0) this.syncTraffic();
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
     // above (|x - cx| <= margin), otherwise the +margin row/column is kept
@@ -687,7 +693,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, roads, rails, stops, buildings } = await objectsAt(
+      const { meshes, buildings, traffic } = await objectsAt(
         this.tileCenter,
         x,
         y,
@@ -709,11 +715,9 @@ class CoolMap {
       }
       this.loadedTiles[tileKey] = meshes;
       meshes.forEach((m) => this.customLayer.scene.add(m));
-      this.loadedRoads[tileKey] = roads;
-      this.loadedRails[tileKey] = rails;
-      this.loadedStops[tileKey] = stops;
+      this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
-      this.syncVehicleRoads();
+      this.syncTraffic();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
       console.warn("failed to load tile", tileKey, e);
@@ -722,15 +726,14 @@ class CoolMap {
     }
   }
 
-  // enable/disable the fleets from the traffic toggle and the current zoom;
-  // when they turn on, (re)build them from the paths already loaded
+  // show/hide the traffic renderers from the toggle and the current zoom
   private applyTrafficState() {
-    if (!this.vehicles || !this.trains) return;
+    if (!this.carsTraffic || !this.trainsTraffic) return;
     const on = this.trafficEnabled && this.map.getZoom() >= VEHICLE_MIN_ZOOM;
-    if (on === this.vehicles.enabled) return;
-    this.vehicles.setEnabled(on);
-    this.trains.setEnabled(on);
-    if (on) this.syncVehicleRoads();
+    if (on === this.carsTraffic.enabled) return;
+    this.carsTraffic.setEnabled(on);
+    this.trainsTraffic.setEnabled(on);
+    if (on) this.syncTraffic();
   }
 
   setTrafficEnabled(enabled: boolean) {
@@ -759,17 +762,12 @@ class CoolMap {
     });
   }
 
-  // hand the union of the currently loaded tiles' paths to the fleet managers
-  private syncVehicleRoads() {
-    if (this.vehicles) {
-      this.vehicles.setRoads(Object.values(this.loadedRoads).flat());
-    }
-    if (this.trains) {
-      this.trains.setRoads(
-        Object.values(this.loadedRails).flat(),
-        Object.values(this.loadedStops).flat(),
-      );
-    }
+  // hand the union of the loaded tiles' precomputed loops to the renderers,
+  // split by kind
+  private syncTraffic() {
+    const loops = Object.values(this.loadedTraffic).flat();
+    this.carsTraffic?.setLoops(loops.filter((loop) => loop.kind === "car"));
+    this.trainsTraffic?.setLoops(loops.filter((loop) => loop.kind === "train"));
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
@@ -784,7 +782,6 @@ class CoolMap {
       string,
       { meshes: number; vertices: number; triangles: number }
     >;
-    roads: number;
     buildings: number;
     vehicles: number;
     trains: number;
@@ -824,13 +821,12 @@ class CoolMap {
       drawCalls: renderInfo?.calls ?? 0,
       triangles: renderInfo?.triangles ?? 0,
       byKind,
-      roads: Object.values(this.loadedRoads).reduce((n, r) => n + r.length, 0),
       buildings: Object.values(this.loadedBuildings).reduce(
         (n, b) => n + b.length,
         0,
       ),
-      vehicles: this.vehicles?.count ?? 0,
-      trains: this.trains?.count ?? 0,
+      vehicles: this.carsTraffic?.count ?? 0,
+      trains: this.trainsTraffic?.count ?? 0,
     };
   }
 
