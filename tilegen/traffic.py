@@ -214,13 +214,12 @@ class TrafficConfig:
     gray_colors: tuple[str, ...] = GRAY_COLORS
     gray_fraction: float = GRAY_FRACTION
     # traffic signals: a 16 s cycle (8 s green, 8 s red), the two approach axes
-    # alternating. Signals within `signal_radius` are one crossing; a car whose
-    # path passes within `signal_stop_radius` of a crossing obeys it (wider than
-    # the merge radius so a car on an outer lane still catches the light), and
-    # up to `queue_slots` cars queue `queue_seconds` apart behind the line.
+    # alternating. Nearby signals merge into one crossing; a car obeys a
+    # crossing only when its path passes very close to it (a generous radius
+    # made loops obey signals on parallel streets they never cross).
     signal_cycle: float = 16.0
-    signal_radius: float = 40.0
-    signal_stop_radius: float = 60.0
+    signal_radius: float = 25.0
+    signal_stop_radius: float = 20.0
     queue_slots: int = 5
     queue_seconds: float = 0.6
 
