@@ -51,15 +51,18 @@ interface Stop {
 interface PreparedVehicle {
   phase: number;
   period: number;
-  // the loop's shared runs (coords + base times); cars differ by their stops
   runs: PreparedRun[];
   stops: Stop[];
   // wait accrued before the earliest loaded run (stops off-screen)
   baseCarry: number;
+  color: THREE.Color;
 }
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
+
+// ?debug=lights tints vehicles that are standing at a light
+const DEBUG_HOLD = new THREE.Color(0xff2020);
 
 // the stop that contains `tau`, if any
 function findStop(stops: Stop[], tau: number): Stop | undefined {
@@ -291,6 +294,7 @@ export class TrafficRenderer {
           runs,
           stops,
           baseCarry,
+          color: new THREE.Color(source[index].color),
         });
         slot++;
       }
@@ -337,6 +341,7 @@ export class TrafficRenderer {
       );
     }
     let count = 0;
+    let colorChanged = false;
     for (const vehicle of this.vehicles) {
       const period = vehicle.period;
       let tau = (now + vehicle.phase * period) % period;
@@ -368,6 +373,11 @@ export class TrafficRenderer {
         }
         ({ lon, lat, heading } = sampleRun(run, base));
       }
+      if (this.debug) {
+        // tint whoever is standing at a light
+        this.mesh.setColorAt(count, stop ? DEBUG_HOLD : vehicle.color);
+        colorChanged = true;
+      }
       const m = toModelCoords([lon, lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, heading);
@@ -377,5 +387,8 @@ export class TrafficRenderer {
     }
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
+    if (colorChanged && this.mesh.instanceColor) {
+      this.mesh.instanceColor.needsUpdate = true;
+    }
   }
 }

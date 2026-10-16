@@ -933,8 +933,9 @@ def _car_events(
         key = (index, window)
         rank = counters.get(key, 0)
         counters[key] = rank + 1
-        slot = min(rank, config.queue_slots)
-        gate = line_time - config.queue_seconds * (slot + 1)
+        # unbounded rank: every car that stops in the same red window gets its
+        # own position, so they queue instead of collapsing onto one spot
+        gate = line_time - config.queue_seconds * (rank + 1)
         events.append((max(0.0, gate), wait))
         delay += wait
     return events
