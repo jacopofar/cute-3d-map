@@ -988,6 +988,24 @@ def _path_runs(
     return runs
 
 
+def _time_to_arc(
+    time: float, base_times: list[float], cumulative: list[float]
+) -> float:
+    """Arc length (meters) at a base `time` along the path."""
+    lo, hi = 1, len(base_times) - 1
+    while lo < hi:
+        mid = (lo + hi) >> 1
+        if base_times[mid] < time:
+            lo = mid + 1
+        else:
+            hi = mid
+    i = lo
+    t0, t1 = base_times[i - 1], base_times[i]
+    f = (time - t0) / (t1 - t0) if t1 > t0 else 0.0
+    f = max(0.0, min(1.0, f))
+    return cumulative[i - 1] + (cumulative[i] - cumulative[i - 1]) * f
+
+
 def _loop_to_tiles(
     loop: Loop,
     zoom: int,
@@ -997,8 +1015,12 @@ def _loop_to_tiles(
     ],
     counters: dict[tuple[int, int], int],
 ) -> dict[tuple[int, int], dict]:
-    """Serialize one loop: the shared run geometry, plus each car's own times
-    (which include its signal waits)."""
+    """Serialize one loop as a route: its closed geometry with per-segment
+    speeds and the crossings on it (arc length + approach axis). The client
+    simulates the vehicles along it, so no trajectory is stored.
+
+    A loop is written into every tile it touches; the client keeps one copy per
+    id."""
     if not loop.vehicles or not loop.segs:
         return {}
     centroids, grid, cell = crossings_index
@@ -1007,102 +1029,28 @@ def _loop_to_tiles(
     crossings = _path_crossings(
         vertices, base_times, centroids, grid, cell, config.signal_stop_radius
     )
-    runs = _path_runs(vertices, base_times, zoom)
-    if not runs:
-        return {}
-
-    cycle = config.signal_cycle
-    base_period = base_times[-1]
-    stops = bool(crossings)
-
-    per_tile: dict[tuple[int, int], list[int]] = defaultdict(list)
-    for index, run in enumerate(runs):
-        per_tile[run["tile"]].append(index)
-    run_starts = [run["base"][0] for run in runs]
-    run_ends = [run["base"][-1] for run in runs]
-
-    vehicle_entries: list[dict] = []
-    for vehicle in loop.vehicles:
-        phase = vehicle["phase"]
-        events: list[tuple[float, float]] = []
-        if not stops:
-            period = base_period
-        else:
-            # each car keeps its own period, quantized to the cycle so its light
-            # alignment repeats each lap
-            period = math.ceil(base_period / cycle) * cycle
-            for _ in range(4):
-                trial = _car_events(crossings, phase, period, config, {})
-                lap = base_period + sum(wait for _, wait in trial)
-                candidate = math.ceil(lap / cycle - 1e-9) * cycle
-                if candidate == period:
-                    break
-                period = candidate
-            events = _car_events(crossings, phase, period, config, counters)
-            if events:
-                lap = base_period + sum(wait for _, wait in events)
-                pad = period - lap  # in [0, cycle)
-                if pad > 1e-6:
-                    # put the pad on the LAST stop: it only shifts times after
-                    # the final crossing, so it cannot invalidate any stop
-                    # decision (adding it up front did exactly that)
-                    events[-1] = (events[-1][0], events[-1][1] + pad)
-            else:
-                period = base_period  # nothing to wait for, no alignment needed
-        # each stop is stored in the run its gate falls in, with the wait
-        # already accrued at the run's start, so it is written once per loop
-        per_run = []
-        for start, end in zip(run_starts, run_ends):
-            per_run.append(
-                {
-                    "carry": round(
-                        sum(wait for gate, wait in events if gate < start - 1e-6), 3
-                    ),
-                    "events": [
-                        [round(gate, 3), round(wait, 3)]
-                        for gate, wait in events
-                        if start - 1e-6 <= gate <= end + 1e-6
-                    ],
-                }
-            )
-        vehicle_entries.append(
-            {
-                "phase": round(phase, 6),
-                "color": vehicle["color"],
-                "period": round(period, 3),
-                "runs": per_run,
-            }
-        )
-
-    loop_period = max(
-        (vehicle["period"] for vehicle in vehicle_entries), default=base_period
+    cumulative = [0.0]
+    for i in range(1, len(vertices)):
+        cumulative.append(cumulative[-1] + haversine_m(vertices[i - 1], vertices[i]))
+    arc_crossings = sorted(
+        [round(_time_to_arc(time, base_times, cumulative), 2), group]
+        for time, group, _index in crossings
     )
-    return {
-        tile: {
-            "kind": loop.kind,
-            "id": loop.id,
-            "period": round(loop_period, 3),
-            "runs": [
-                {
-                    "coords": [
-                        [round(c[0], 7), round(c[1], 7)] for c in runs[i]["coords"]
-                    ],
-                    "times": [round(base, 3) for base in runs[i]["base"]],
-                }
-                for i in indices
-            ],
-            "vehicles": [
-                {
-                    "phase": vehicle["phase"],
-                    "color": vehicle["color"],
-                    "period": vehicle["period"],
-                    "runs": [vehicle["runs"][i] for i in indices],
-                }
-                for vehicle in vehicle_entries
-            ],
-        }
-        for tile, indices in per_tile.items()
+    entry = {
+        "kind": loop.kind,
+        "id": loop.id,
+        "coords": [[round(c[0], 7), round(c[1], 7)] for c in vertices],
+        "cum": [round(distance, 2) for distance in cumulative],
+        "speeds": [round(speed, 2) for speed in speeds],
+        "crossings": arc_crossings,
+        "vehicles": [
+            {"phase": round(v["phase"], 6), "color": v["color"]} for v in loop.vehicles
+        ],
     }
+    # the whole loop is needed to simulate its cars, so it is stored once, in
+    # the tile of its start; the client keeps one copy per id
+    home = coord_to_tile(vertices[0][0], vertices[0][1], zoom)
+    return {home: entry}
 
 
 def loops_to_tiles(
