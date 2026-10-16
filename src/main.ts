@@ -147,6 +147,8 @@ class CoolMap {
   private popup?: Popup;
   private carsTraffic?: TrafficRenderer;
   private trainsTraffic?: TrafficRenderer;
+  // set when a tile load/unload changes the routes; applied once per frame
+  private trafficDirty = false;
   private clouds?: CloudLayer;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
@@ -177,7 +179,7 @@ class CoolMap {
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
-      zoom: 16,
+      zoom: 17,
       pitch: 30,
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });
@@ -290,7 +292,6 @@ class CoolMap {
         // tiles may already have loaded before this layer was added, so seed
         // the renderer with whatever routes are present
         coolMap.syncTraffic();
-        coolMap.syncTraffic();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -348,6 +349,10 @@ class CoolMap {
         const scaleFactor = Math.cos(
           (2 * Math.PI * coolMap.tileCenter[1]) / 360,
         );
+        if (coolMap.trafficDirty) {
+          coolMap.trafficDirty = false;
+          coolMap.applyTrafficLoops();
+        }
         if (coolMap.carsTraffic) {
           coolMap.carsTraffic.update(originMeters, scaleFactor);
         }
@@ -763,8 +768,13 @@ class CoolMap {
   }
 
   // hand the union of the loaded tiles' precomputed loops to the renderers,
-  // split by kind
+  // split by kind. Marked dirty here and applied at most once per frame: a tile
+  // burst would otherwise rebuild every car's schedule ~49 times over.
   private syncTraffic() {
+    this.trafficDirty = true;
+  }
+
+  private applyTrafficLoops() {
     const loops = Object.values(this.loadedTraffic).flat();
     this.carsTraffic?.setLoops(loops.filter((loop) => loop.kind === "car"));
     this.trainsTraffic?.setLoops(loops.filter((loop) => loop.kind === "train"));
@@ -869,7 +879,7 @@ class CoolMap {
   // }
 }
 
-const c = new CoolMap([9.186, 45.497]);
+const c = new CoolMap([9.195070, 45.495700]);
 
 // dev-only handle for the perf benchmark (perf/frame_times.spec.ts); stripped
 // from production builds by the import.meta.env.DEV guard

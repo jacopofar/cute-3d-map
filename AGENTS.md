@@ -82,6 +82,13 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   period`.
 - **speed** — per edge: the `maxspeed` tag when present, else the highway-class
   default; clamped to a sane range.
+- **signal / crossing / window** — signals (`highway=traffic_signals`) within
+  `signal_radius` are merged into one **crossing** (a junction has a signal per
+  lane); a car obeys a crossing by proximity and gets a `window`
+  `[slot, line, wait]`, stored in the run its `slot` falls in (with a per-run
+  `carry`), so it is written once per loop.
+- **cycle** — the signal cycle (16 s, 8 s per axis); loop periods are
+  quantized to it so a car's light alignment repeats each lap.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap

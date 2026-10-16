@@ -52,6 +52,14 @@ is a stateless renderer that samples it. There is no runtime simulation.
   keyframes and the vehicle is placed by phase, so it speeds up and slows down
   as it moves between road classes. Vehicles are spread evenly in time by
   `phase`.
+- Traffic lights (`highway=traffic_signals`) run a 16 s cycle (8 s green, 8 s
+  red) with the two approach axes alternating. Signals within ~40 m are merged
+  into **one crossing** (a junction has a signal per lane), and a car obeys a
+  crossing by **proximity** to it, so every approach shares the same light. A
+  car that reaches a light on red slows, waits and pulls away; the wait is
+  stored per vehicle as small per-run `carry` + `windows` (base-time, wait), so
+  each stop is written once. Cars queue behind the line, and a loop's `period`
+  is quantized to the cycle so lights stay consistent lap after lap.
 - Each loop is split per tile at tile boundaries. A tile stores the pieces
   that fall inside it (`runs`, with `t0`/`t1` seconds into `period`) plus the
   `vehicles` (`phase` + color) on those loops; each entry is tagged `kind`

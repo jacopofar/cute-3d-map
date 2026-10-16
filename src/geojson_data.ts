@@ -98,13 +98,10 @@ const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 // trees are lit too, so they shade with the sun instead of being flat
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
-// one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
-// `period`; the piece is drawn while the phase is in [t0, t1). `times[i]` is
-// the seconds from the run's start to `coords[i]` (times[0] is 0), so the
-// speed may vary along the run. See tilegen/traffic.py.
+// a loop's geometry is stored once per loop (`coords`) with its base (no-signal)
+// times; each vehicle carries the small list of signal `windows` that delay it,
+// and the client materializes its times. See tilegen/traffic.py.
 export interface TrafficRun {
-  t0: number;
-  t1: number;
   coords: [number, number][];
   times: number[];
 }
@@ -112,6 +109,10 @@ export interface TrafficRun {
 export interface TrafficVehicle {
   phase: number; // 0..1 offset along the loop
   color: number; // parsed from the tile's "rrggbb"
+  period: number; // the car's own lap time (waits differ per car)
+  // per-run schedule: `carry` is the delay accrued before the run, and
+  // `windows` are the stops whose line falls in the run
+  runs: { carry: number; windows: number[][] }[];
 }
 
 // a loop as stored in one tile: the pieces of it that fall in this tile, plus
@@ -120,7 +121,6 @@ export interface TrafficVehicle {
 export interface TrafficLoop {
   kind: "car" | "train";
   id: string;
-  v: number; // cruise speed, m/s
   period: number; // seconds for one lap
   runs: TrafficRun[];
   vehicles: TrafficVehicle[];
@@ -232,10 +232,14 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
 interface RawTrafficLoop {
   kind: "car" | "train";
   id: string;
-  v: number;
   period: number;
   runs: TrafficRun[];
-  vehicles: { phase: number; color: string }[];
+  vehicles: {
+    phase: number;
+    color: string;
+    period: number;
+    runs: { carry: number; windows: number[][] }[];
+  }[];
 }
 
 function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
@@ -244,12 +248,13 @@ function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
   return loops.map((loop) => ({
     kind: loop.kind,
     id: loop.id,
-    v: loop.v,
     period: loop.period,
     runs: loop.runs,
     vehicles: loop.vehicles.map((vehicle) => ({
       phase: vehicle.phase,
       color: parseInt(vehicle.color, 16),
+      period: vehicle.period,
+      runs: vehicle.runs,
     })),
   }));
 }

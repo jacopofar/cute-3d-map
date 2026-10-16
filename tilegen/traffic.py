@@ -213,6 +213,14 @@ class TrafficConfig:
     colors: tuple[str, ...] = CAR_COLORS
     gray_colors: tuple[str, ...] = GRAY_COLORS
     gray_fraction: float = GRAY_FRACTION
+    # traffic signals: a 16 s cycle (8 s green, 8 s red), the two approach axes
+    # alternating. Signals within `signal_radius` are one crossing; a car
+    # passing within that radius obeys it, and up to `queue_slots` cars queue
+    # `queue_seconds` apart behind the line.
+    signal_cycle: float = 16.0
+    signal_radius: float = 40.0
+    queue_slots: int = 5
+    queue_seconds: float = 1.5
 
 
 # cars: 1000 loops stitched through three random nodes. Random points are far
@@ -745,44 +753,400 @@ def split_runs(
     return runs
 
 
-def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[dict]]:
-    """Group every loop's runs by tile. Each tile entry carries the loop
-    identity, speed and period (so the client can merge the pieces of one loop
-    across the tiles that hold them) and the phases/colors of its vehicles."""
-    by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
-    for loop in loops:
-        per_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
-        for tile, t0, t1, coords, times in split_runs(loop, zoom):
-            per_tile[tile].append(
+def cluster_signals(points, radius: float = 40.0) -> list[tuple[float, float]]:
+    """Merge signal points within `radius` into one crossing.
+
+    A junction carries a signal per lane, so keying each signal separately makes
+    the approaches disagree about the light; they have to share one."""
+    if not points:
+        return []
+    cell = radius / 90000.0  # ~degrees
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+    centroids: list[tuple[float, float, int]] = []
+    for lon, lat in points:
+        cx, cy = int(lon / cell), int(lat / cell)
+        merged = False
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for index in grid.get((cx + dx, cy + dy), ()):
+                    clon, clat, count = centroids[index]
+                    if haversine_m((lon, lat), (clon, clat)) <= radius:
+                        centroids[index] = (
+                            (clon * count + lon) / (count + 1),
+                            (clat * count + lat) / (count + 1),
+                            count + 1,
+                        )
+                        merged = True
+                        break
+                if merged:
+                    break
+            if merged:
+                break
+        if not merged:
+            grid[(cx, cy)].append(len(centroids))
+            centroids.append((lon, lat, 1))
+    return [(lon, lat) for lon, lat, _ in centroids]
+
+
+def crossing_grid(
+    centroids: list[tuple[float, float]], radius: float
+) -> tuple[dict[tuple[int, int], list[int]], float]:
+    cell = radius / 90000.0
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index, (lon, lat) in enumerate(centroids):
+        grid[(int(lon / cell), int(lat / cell))].append(index)
+    return grid, cell
+
+
+def _closest_on_segment(
+    a: tuple[float, float], b: tuple[float, float], p: tuple[float, float]
+) -> tuple[float, float]:
+    """(fraction along a->b, distance in meters) of the closest point to p."""
+    coslat = math.cos(math.radians(p[1]))
+    ax = (a[0] - p[0]) * coslat * 111320
+    ay = (a[1] - p[1]) * 110540
+    bx = (b[0] - p[0]) * coslat * 111320
+    by = (b[1] - p[1]) * 110540
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    t = 0.0 if length2 <= 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / length2))
+    return t, math.hypot(ax + t * dx, ay + t * dy)
+
+
+def _bearing(a: tuple[float, float], b: tuple[float, float]) -> float:
+    coslat = math.cos(math.radians((a[1] + b[1]) / 2))
+    return math.degrees(math.atan2(b[1] - a[1], (b[0] - a[0]) * coslat))
+
+
+def _approach_group(a: tuple[float, float], b: tuple[float, float]) -> int:
+    """The approach axis (0 or 1) of a segment, so perpendicular approaches
+    alternate. Folding the bearing into [0, 180) and taking the half handles
+    diagonal streets, which `round(bearing / 90)` would collapse onto one group."""
+    return int((_bearing(a, b) % 180.0) // 90.0)
+
+
+def _path_vertices(
+    loop: Loop,
+) -> tuple[list[tuple[float, float]], list[float]]:
+    """Flatten the loop into a closed vertex list plus the speed of the segment
+    between consecutive vertices."""
+    vertices: list[tuple[float, float]] = [loop.segs[0][0]]
+    speeds: list[float] = []
+    for seg, speed in zip(loop.segs, loop.seg_speeds):
+        points = seg[1:] if vertices[-1] == seg[0] else seg
+        for point in points:
+            vertices.append(point)
+            speeds.append(speed)
+    return vertices, speeds
+
+
+def _base_times(
+    vertices: list[tuple[float, float]], speeds: list[float]
+) -> list[float]:
+    """Cruise time (no signals) at each vertex, from the loop start."""
+    times = [0.0]
+    for i, speed in enumerate(speeds):
+        length = haversine_m(vertices[i], vertices[i + 1])
+        times.append(times[-1] + (length / speed if speed > 0 else 0.0))
+    return times
+
+
+def _path_crossings(
+    vertices: list[tuple[float, float]],
+    base_times: list[float],
+    centroids: list[tuple[float, float]],
+    grid: dict[tuple[int, int], list[int]],
+    cell: float,
+    radius: float,
+) -> list[tuple[float, int, int]]:
+    """Where the path passes within `radius` of a crossing, as (base time,
+    approach group, crossing index). Repeated grazes of one crossing are merged
+    (the path is within range over several vertices), keeping the closest."""
+    found: list[tuple[float, int, int, float]] = []
+    for i in range(len(vertices) - 1):
+        a, b = vertices[i], vertices[i + 1]
+        if a == b:
+            continue
+        pad = radius / 90000.0
+        x0 = int((min(a[0], b[0]) - pad) / cell)
+        x1 = int((max(a[0], b[0]) + pad) / cell)
+        y0 = int((min(a[1], b[1]) - pad) / cell)
+        y1 = int((max(a[1], b[1]) + pad) / cell)
+        for cx in range(x0, x1 + 1):
+            for cy in range(y0, y1 + 1):
+                for index in grid.get((cx, cy), ()):
+                    fraction, distance = _closest_on_segment(a, b, centroids[index])
+                    if distance > radius:
+                        continue
+                    time = (
+                        base_times[i] + (base_times[i + 1] - base_times[i]) * fraction
+                    )
+                    group = _approach_group(a, b)
+                    found.append((time, group, index, distance))
+    found.sort()
+    merged: list[tuple[float, int, int, float]] = []
+    for record in found:
+        if merged and merged[-1][2] == record[2] and record[0] - merged[-1][0] <= 10.0:
+            if record[3] < merged[-1][3]:
+                merged[-1] = record
+        else:
+            merged.append(record)
+    # the loop start is also its end, so a crossing there shows up at both ends
+    # of the seam; keep the closer one
+    if len(merged) >= 2:
+        first, last = merged[0], merged[-1]
+        total = base_times[-1]
+        if first[2] == last[2] and (total - last[0]) + first[0] <= 10.0:
+            if first[3] <= last[3]:
+                merged.pop()
+            else:
+                merged.pop(0)
+    return [(time, group, index) for time, group, index, _ in merged]
+
+
+def _car_windows(
+    crossings: list[tuple[float, int, int]],
+    phase: float,
+    period: float,
+    config: TrafficConfig,
+    counters: dict[tuple[int, int], int],
+) -> list[tuple[float, float, float]]:
+    """The stops this car must make, as (slot time, line time, wait).
+
+    A car arriving on red waits for its group's green. Its queue slot is a
+    little earlier on the approach, and the queue is counted per crossing and
+    half-cycle, so it stays short instead of growing with the number of loops."""
+    cycle = config.signal_cycle
+    half = cycle / 2
+    delta = (-phase * period) % cycle
+    delay = 0.0
+    windows: list[tuple[float, float, float]] = []
+    for line_time, group, index in crossings:
+        arrival = line_time + delay
+        cycle_time = (arrival + delta) % cycle
+        if int(cycle_time // half) % 2 == group:
+            continue  # green for this approach
+        wait = (group * half - cycle_time) % cycle
+        window = int((arrival + delta) // half)
+        key = (index, window)
+        rank = counters.get(key, 0)
+        counters[key] = rank + 1
+        slot_time = max(
+            0.0, line_time - config.queue_seconds * (min(rank, config.queue_slots) + 1)
+        )
+        windows.append((slot_time, line_time, wait))
+        delay += wait
+    return windows
+
+
+def _delay_at(time: float, windows: list[tuple[float, float, float]]) -> float:
+    """Time lost up to `time`: each stop ramps the delay in over its approach
+    (the slowdown) and keeps it after the line."""
+    delay = 0.0
+    for slot_time, line_time, wait in windows:
+        if time <= slot_time:
+            continue
+        if time >= line_time or line_time <= slot_time:
+            delay += wait
+        else:
+            delay += wait * (time - slot_time) / (line_time - slot_time)
+    return delay
+
+
+def _distribute_pad(
+    windows: list[tuple[float, float, float]], pad: float
+) -> list[tuple[float, float, float]]:
+    """Spread the period padding across the car's waits, so the loop period can
+    be a multiple of the signal cycle."""
+    if pad <= 0 or not windows:
+        return windows
+    share = pad / len(windows)
+    return [(slot, line, wait + share) for slot, line, wait in windows]
+
+
+def _split_segment_t(
+    a: tuple[float, float],
+    ta: float,
+    b: tuple[float, float],
+    tb: float,
+    zoom: int,
+) -> list[tuple[tuple[float, float], float, tuple[float, float], float]]:
+    """Split a segment at tile boundaries, interpolating its (linear) time."""
+    pieces = segment_pieces(a, b, zoom)
+    total = sum(haversine_m(p, q) for p, q in pieces) or 1.0
+    out: list[tuple[tuple[float, float], float, tuple[float, float], float]] = []
+    acc = 0.0
+    for p, q in pieces:
+        tp = ta + (tb - ta) * (acc / total)
+        acc += haversine_m(p, q)
+        tq = ta + (tb - ta) * (acc / total)
+        out.append((p, tp, q, tq))
+    return out
+
+
+def _path_runs(
+    vertices: list[tuple[float, float]], base_times: list[float], zoom: int
+) -> list[dict]:
+    """Split the path into runs of constant tile, keeping the base time at each
+    coordinate (so per-car times can be computed afterwards)."""
+    runs: list[dict] = []
+    current: dict | None = None
+    for i in range(len(vertices) - 1):
+        for p, tp, q, tq in _split_segment_t(
+            vertices[i], base_times[i], vertices[i + 1], base_times[i + 1], zoom
+        ):
+            tile = _tile_of_mid(p, q, zoom)
+            if (
+                current is not None
+                and current["tile"] == tile
+                and current["coords"][-1] == p
+            ):
+                current["coords"].append(q)
+                current["base"].append(tq)
+            else:
+                if current is not None and len(current["coords"]) >= 2:
+                    runs.append(current)
+                current = {"tile": tile, "coords": [p, q], "base": [tp, tq]}
+    if current is not None and len(current["coords"]) >= 2:
+        runs.append(current)
+    return runs
+
+
+def _loop_to_tiles(
+    loop: Loop,
+    zoom: int,
+    config: TrafficConfig,
+    crossings_index: tuple[
+        list[tuple[float, float]], dict[tuple[int, int], list[int]], float
+    ],
+    counters: dict[tuple[int, int], int],
+) -> dict[tuple[int, int], dict]:
+    """Serialize one loop: the shared run geometry, plus each car's own times
+    (which include its signal waits)."""
+    if not loop.vehicles or not loop.segs:
+        return {}
+    centroids, grid, cell = crossings_index
+    vertices, speeds = _path_vertices(loop)
+    base_times = _base_times(vertices, speeds)
+    crossings = _path_crossings(
+        vertices, base_times, centroids, grid, cell, config.signal_radius
+    )
+    runs = _path_runs(vertices, base_times, zoom)
+    if not runs:
+        return {}
+
+    cycle = config.signal_cycle
+    base_period = base_times[-1]
+    stops = bool(crossings)
+
+    run_starts = [run["base"][0] for run in runs]
+    run_ends = [run["base"][-1] for run in runs]
+    per_tile: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for index, run in enumerate(runs):
+        per_tile[run["tile"]].append(index)
+
+    # each car keeps its own period: quantized to the cycle when it waits at
+    # lights (so its light alignment repeats), else its own lap. Sharing one
+    # period across cars would pad the quicker cars by minutes.
+    vehicle_entries: list[dict] = []
+    for vehicle in loop.vehicles:
+        phase = vehicle["phase"]
+        period = base_period if not stops else math.ceil(base_period / cycle) * cycle
+        for _ in range(4):
+            trial = _car_windows(crossings, phase, period, config, {})
+            lap = base_period + sum(wait for *_, wait in trial)
+            candidate = math.ceil(lap / cycle - 1e-9) * cycle if stops else lap
+            if candidate == period:
+                break
+            period = candidate
+        windows = _car_windows(crossings, phase, period, config, counters)
+        lap = base_period + sum(wait for *_, wait in windows)
+        pad = period - lap  # in [0, cycle), so no car is padded by much
+        padded = _distribute_pad(windows, pad)
+        creep = pad if not padded else 0.0
+        full = ([(0.0, 0.0, creep)] if creep else []) + list(padded)
+        # each window is stored in the run its slot falls in; a run carries the
+        # delay already accrued at its start, so no stop is duplicated across
+        # the tiles a loop spans
+        per_run = []
+        for start, end in zip(run_starts, run_ends):
+            per_run.append(
                 {
-                    "t0": round(t0, 3),
-                    "t1": round(t1, 3),
-                    "coords": [[round(c[0], 7), round(c[1], 7)] for c in coords],
-                    "times": [round(t, 3) for t in times],
-                }
-            )
-        for tile, runs in per_tile.items():
-            by_tile[tile].append(
-                {
-                    "kind": loop.kind,
-                    "id": loop.id,
-                    "v": round(loop.v, 3),
-                    "period": round(loop.period, 3),
-                    "runs": runs,
-                    "vehicles": [
-                        {"phase": round(v["phase"], 6), "color": v["color"]}
-                        for v in loop.vehicles
+                    "carry": round(_delay_at(start, full), 3),
+                    "windows": [
+                        [round(slot, 3), round(line, 3), round(wait, 3)]
+                        for slot, line, wait in full
+                        if start <= slot <= end
                     ],
                 }
             )
+        vehicle_entries.append(
+            {
+                "phase": round(phase, 6),
+                "color": vehicle["color"],
+                "period": round(period, 3),
+                "runs": per_run,
+            }
+        )
+
+    loop_period = max(
+        (vehicle["period"] for vehicle in vehicle_entries), default=base_period
+    )
+    return {
+        tile: {
+            "kind": loop.kind,
+            "id": loop.id,
+            "period": round(loop_period, 3),
+            "runs": [
+                {
+                    "coords": [
+                        [round(c[0], 7), round(c[1], 7)] for c in runs[i]["coords"]
+                    ],
+                    "times": [round(base, 3) for base in runs[i]["base"]],
+                }
+                for i in indices
+            ],
+            "vehicles": [
+                {
+                    "phase": vehicle["phase"],
+                    "color": vehicle["color"],
+                    "period": vehicle["period"],
+                    "runs": [vehicle["runs"][i] for i in indices],
+                }
+                for vehicle in vehicle_entries
+            ],
+        }
+        for tile, indices in per_tile.items()
+    }
+
+
+def loops_to_tiles(
+    loops: list[Loop],
+    zoom: int,
+    config: TrafficConfig,
+    crossings_index: tuple[
+        list[tuple[float, float]], dict[tuple[int, int], list[int]], float
+    ]
+    | None = None,
+) -> dict[tuple[int, int], list[dict]]:
+    """Group the loops' runs by tile. Queues are counted across the loops passed
+    here, so a whole fleet should be passed at once."""
+    by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    counters: dict[tuple[int, int], int] = {}
+    index = crossings_index or ([], {}, 1.0)
+    for loop in loops:
+        for tile, entry in _loop_to_tiles(loop, zoom, config, index, counters).items():
+            by_tile[tile].append(entry)
     return by_tile
 
 
 def build_fleets(
     ways_by_kind: dict[str, list[Way]],
     configs: dict[str, TrafficConfig] | None = None,
-) -> dict[str, list[Loop]]:
-    """Build one fleet of loops per kind ("car", "train").
+    signal_points=None,
+) -> tuple[dict[str, list[Loop]], list[tuple[float, float]]]:
+    """Build one fleet of loops per kind ("car", "train"), plus the clustered
+    crossings (signals within `signal_radius` merged into one light).
 
     Kept separate from the tile serialization so the loops themselves are
     available for the report and the troubleshooting GeoJSON."""
@@ -795,16 +1159,23 @@ def build_fleets(
         loops = build_loops(graph, config, kind)
         assign_vehicles(loops, config)
         fleets[kind] = loops
-    return fleets
+    radius = configs["car"].signal_radius if "car" in configs else 40.0
+    return fleets, cluster_signals(signal_points or [], radius)
 
 
 def fleets_to_tiles(
-    fleets: dict[str, list[Loop]], zoom: int
+    fleets: dict[str, list[Loop]],
+    zoom: int,
+    configs: dict[str, TrafficConfig],
+    centroids: list[tuple[float, float]] | None = None,
 ) -> dict[tuple[int, int], list[dict]]:
     """Merge every fleet's per-tile route entries into one traffic block."""
     by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
-    for loops in fleets.values():
-        for tile, entries in loops_to_tiles(loops, zoom).items():
+    radius = configs["car"].signal_radius if "car" in configs else 40.0
+    grid, cell = crossing_grid(centroids or [], radius)
+    index = (centroids or [], grid, cell)
+    for kind, loops in fleets.items():
+        for tile, entries in loops_to_tiles(loops, zoom, configs[kind], index).items():
             by_tile[tile].extend(entries)
     return by_tile
 
@@ -813,9 +1184,13 @@ def build_traffic_tiles(
     ways_by_kind: dict[str, list[Way]],
     zoom: int,
     configs: dict[str, TrafficConfig] | None = None,
+    signal_points=None,
 ) -> dict[tuple[int, int], list[dict]]:
     """Convenience entry point: ways -> per-tile serialized traffic."""
-    return fleets_to_tiles(build_fleets(ways_by_kind, configs), zoom)
+    if configs is None:
+        configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
+    fleets, centroids = build_fleets(ways_by_kind, configs, signal_points)
+    return fleets_to_tiles(fleets, zoom, configs, centroids)
 
 
 def loop_coords(loop: Loop) -> list[tuple[float, float]]:

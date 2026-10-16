@@ -205,14 +205,21 @@ def test_split_runs_are_contiguous_across_tiles():
 
 def test_loops_to_tiles_shares_geometry_and_vehicles():
     _, loops = find(square_ways(9.18, 45.5, 0.001))
-    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
-    by_tile = traffic.loops_to_tiles(loops, 15)
+    config = TrafficConfig(spacing=50.0)
+    traffic.assign_vehicles(loops, config)
+    by_tile = traffic.loops_to_tiles(loops, 15, config)
     assert len(by_tile) == 1
     entry = next(iter(by_tile.values()))[0]
     assert entry["id"] == loops[0].id
-    assert entry["v"] == pytest.approx(round(loops[0].v, 3))
     assert len(entry["vehicles"]) == len(loops[0].vehicles)
-    assert entry["runs"][0]["t0"] == 0.0
+    # coords are shared per run; each vehicle carries only its signal windows
+    for run in entry["runs"]:
+        assert len(run["times"]) == len(run["coords"])
+    for vehicle in entry["vehicles"]:
+        assert len(vehicle["runs"]) == len(entry["runs"])
+        for per_run in vehicle["runs"]:
+            assert per_run["windows"] == []  # no signals here
+            assert per_run["carry"] == 0.0
 
 
 def test_global_budget_raises_spacing():
@@ -341,3 +348,74 @@ def test_split_runs_times_follow_segment_speeds():
         assert times == sorted(times)  # never goes back in time
         assert t1 - t0 == pytest.approx(times[-1])
     assert runs[-1][2] == pytest.approx(loop.period)
+
+
+def test_cluster_signals_merges_nearby():
+    points = [(9.1800, 45.5000), (9.1802, 45.5001), (9.20, 45.52)]
+    clusters = traffic.cluster_signals(points, 40.0)
+    assert len(clusters) == 2  # the first two are one crossing
+    assert traffic.cluster_signals([], 40.0) == []
+
+
+def test_path_crossings_by_proximity():
+    graph = traffic.build_graph(square_ways(9.18, 45.5, 0.001))
+    loop = traffic.find_loops(graph, TrafficConfig(min_loop_length=80.0))[0]
+    vertices, speeds = traffic._path_vertices(loop)
+    base_times = traffic._base_times(vertices, speeds)
+    # a crossing sitting on a corner of the loop
+    centroids = [vertices[0]]
+    grid, cell = traffic.crossing_grid(centroids, 40.0)
+    crossings = traffic._path_crossings(
+        vertices, base_times, centroids, grid, cell, 40.0
+    )
+    assert len(crossings) == 1
+    # a far-away crossing is ignored
+    far = [(9.5, 45.9)]
+    far_grid, far_cell = traffic.crossing_grid(far, 40.0)
+    assert (
+        traffic._path_crossings(vertices, base_times, far, far_grid, far_cell, 40.0)
+        == []
+    )
+
+
+def test_approach_group_handles_diagonals():
+    assert traffic._approach_group((9.18, 45.5), (9.181, 45.5)) == 0  # east
+    assert traffic._approach_group((9.18, 45.5), (9.18, 45.501)) == 1  # north
+    # perpendicular diagonals must not collapse onto one group (the round(x/90)
+    # / %2 mapping put both at 0, so they never alternated)
+    north_east = traffic._approach_group((9.18, 45.5), (9.181, 45.501))
+    south_east = traffic._approach_group((9.18, 45.5), (9.181, 45.499))
+    assert north_east != south_east
+
+
+def test_car_windows_green_and_red():
+    config = TrafficConfig(signal_cycle=16.0, queue_slots=5, queue_seconds=1.5)
+    # arrival 10 -> second half -> red for group 0, green at 16 (wait 6)
+    red = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, {})
+    assert len(red) == 1
+    assert red[0][2] == pytest.approx(6.0)
+    # arrival 2 -> first half -> green for group 0
+    assert traffic._car_windows([(2.0, 0, 0)], 0.0, 0.0, config, {}) == []
+
+
+def test_car_windows_queue_the_same_window():
+    config = TrafficConfig(signal_cycle=16.0, queue_slots=5, queue_seconds=1.5)
+    counters: dict = {}
+    first = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, counters)
+    second = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, counters)
+    assert len(first) == 1 and len(second) == 1
+    # the second car stops further back on the approach
+    assert second[0][0] < first[0][0]
+
+
+def test_loop_period_is_a_multiple_of_the_cycle_with_signals():
+    graph = traffic.build_graph(square_ways(9.18, 45.5, 0.001))
+    loops = traffic.find_loops(graph, TrafficConfig(min_loop_length=80.0))
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=30.0))
+    vertices, _ = traffic._path_vertices(loops[0])
+    centroids = [vertices[0]]
+    grid, cell = traffic.crossing_grid(centroids, 40.0)
+    config = TrafficConfig(signal_cycle=16.0)
+    by_tile = traffic.loops_to_tiles(loops, 15, config, (centroids, grid, cell))
+    entry = next(iter(by_tile.values()))[0]
+    assert entry["period"] % 16.0 == pytest.approx(0.0)

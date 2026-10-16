@@ -231,6 +231,24 @@ def load_ways(
     return ways
 
 
+def load_signal_nodes(input_parquet: Path) -> list[tuple[float, float]]:
+    """Traffic-signal node coordinates (`highway=traffic_signals`)."""
+    rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['highway'] = 'traffic_signals'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    points: list[tuple[float, float]] = []
+    for (wkb,) in rows:
+        geometry = shapely.from_wkb(wkb)
+        if geometry.geom_type == "Point":
+            points.append((geometry.x, geometry.y))
+    return points
+
+
 def write_loop_report(
     fleets: dict[str, list[Loop]],
     report_dir: Path,
@@ -307,11 +325,13 @@ def parquet_to_tiles(
             "train": load_ways(input_parquet, "railway", RAILWAYS),
         }
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
-        fleets = build_fleets(ways_by_kind, configs)
-        traffic_by_tile = fleets_to_tiles(fleets, zoom_level)
+        signal_points = load_signal_nodes(input_parquet)
+        fleets, signals = build_fleets(ways_by_kind, configs, signal_points)
+        traffic_by_tile = fleets_to_tiles(fleets, zoom_level, configs, signals)
         logger.info(
-            "traffic: %s -> %d tiles with loops",
+            "traffic: %s, %d signals -> %d tiles with loops",
             {kind: len(ways) for kind, ways in ways_by_kind.items()},
+            len(signal_points),
             len(traffic_by_tile),
         )
         if report_dir is not None:

@@ -1,10 +1,6 @@
 import * as THREE from "three";
 
-import {
-  toModelCoords,
-  type TrafficLoop,
-  type TrafficRun,
-} from "./geojson_data";
+import { toModelCoords, type TrafficLoop } from "./geojson_data";
 
 // a fleet of precomputed vehicles: one InstancedMesh of boxes, placed from the
 // route data every frame
@@ -43,15 +39,24 @@ interface PreparedRun {
 interface PreparedVehicle {
   phase: number;
   period: number;
-  // shared by every vehicle on the loop, so the geometry is prepared once
+  // each vehicle has its own schedule (its signal waits differ), so its runs
+  // are prepared per vehicle; the coords arrays are shared with the loop
   runs: PreparedRun[];
 }
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
 
-function prepareRun(run: TrafficRun): PreparedRun {
-  return { t0: run.t0, t1: run.t1, coords: run.coords, times: run.times };
+// cumulative signal delay at a base time; windows are [slot, line, wait],
+// sorted by slot
+function delayAt(time: number, windows: number[][]): number {
+  let delay = 0;
+  for (const [slot, line, wait] of windows) {
+    if (time <= slot) break;
+    if (time >= line || line <= slot) delay += wait;
+    else delay += (wait * (time - slot)) / (line - slot);
+  }
+  return delay;
 }
 
 // the run whose [t0, t1) contains tau, or undefined when the vehicle is in a
@@ -74,14 +79,16 @@ function findRun(runs: PreparedRun[], tau: number): PreparedRun | undefined {
   return tau <= run.t1 + TIME_EPS ? run : undefined;
 }
 
-// point (lon/lat) and heading at `seconds` into the run. The run's speed is
-// constant between two keyframes, so interpolating them by time is exact.
+// point (lon/lat) and heading at `seconds` (a schedule time; the run's `times`
+// are absolute, from the loop start). The run's speed is constant between two
+// keyframes, so interpolating them by time is exact.
 function sampleRun(
   run: PreparedRun,
   seconds: number,
 ): { lon: number; lat: number; heading: number } {
+  const first = run.times[0];
   const total = run.times[run.times.length - 1];
-  const d = Math.max(0, Math.min(total, seconds));
+  const d = Math.max(first, Math.min(total, seconds));
   let lo = 1;
   let hi = run.times.length - 1;
   while (lo < hi) {
@@ -158,45 +165,53 @@ export class TrafficRenderer {
     return this.vehicles.length;
   }
 
-  // the union of the loaded tiles' traffic; the per-tile pieces of one loop
-  // (same id) are merged here so a vehicle crossing a tile boundary keeps a
-  // single identity
+  // the union of the loaded tiles' traffic. A loop appears in every tile it
+  // spans; the renderer merges those pieces by loop id, and within a loop each
+  // vehicle gets its own runs (its own keyframe times), sharing the coords.
   setLoops(loops: TrafficLoop[]): void {
-    const byId = new Map<
-      string,
-      {
-        period: number;
-        runs: PreparedRun[];
-        vehicles: TrafficLoop["vehicles"];
-      }
-    >();
+    const byId = new Map<string, { period: number; entries: TrafficLoop[] }>();
     for (const loop of loops) {
       let group = byId.get(loop.id);
       if (!group) {
-        group = {
-          period: loop.period,
-          runs: [],
-          vehicles: loop.vehicles,
-        };
+        group = { period: loop.period, entries: [] };
         byId.set(loop.id, group);
       }
-      for (const run of loop.runs) group.runs.push(prepareRun(run));
+      group.entries.push(loop);
     }
 
     const vehicles: PreparedVehicle[] = [];
     let slot = 0;
     for (const group of byId.values()) {
+      const first = group.entries[0];
       if (slot >= this.capacity) break;
-      group.runs.sort((a, b) => a.t0 - b.t0);
-      for (const vehicle of group.vehicles) {
+      for (let index = 0; index < first.vehicles.length; index++) {
         if (slot >= this.capacity) break;
-        // colors are static, so they are written once here; the update loop
-        // keeps every vehicle in the same slot whether it is visible or not
-        this.mesh.setColorAt(slot, new THREE.Color(vehicle.color));
+        const runs: PreparedRun[] = [];
+        for (const entry of group.entries) {
+          const schedule = entry.vehicles[index].runs;
+          for (let r = 0; r < entry.runs.length; r++) {
+            const base = entry.runs[r].times;
+            const { carry, windows } = schedule[r];
+            const times = base.map(
+              (time) => time + carry + delayAt(time, windows),
+            );
+            runs.push({
+              coords: entry.runs[r].coords,
+              times,
+              t0: times[0],
+              t1: times[times.length - 1],
+            });
+          }
+        }
+        runs.sort((a, b) => a.t0 - b.t0);
+        this.mesh.setColorAt(
+          slot,
+          new THREE.Color(first.vehicles[index].color),
+        );
         vehicles.push({
-          phase: vehicle.phase,
-          period: group.period,
-          runs: group.runs,
+          phase: first.vehicles[index].phase,
+          period: first.vehicles[index].period,
+          runs,
         });
         slot++;
       }
@@ -227,8 +242,7 @@ export class TrafficRenderer {
         count++;
         continue;
       }
-      const seconds = tau - run.t0;
-      const { lon, lat, heading } = sampleRun(run, seconds);
+      const { lon, lat, heading } = sampleRun(run, tau);
       const m = toModelCoords([lon, lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, heading);
