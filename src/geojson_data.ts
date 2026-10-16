@@ -98,21 +98,32 @@ const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 // trees are lit too, so they shade with the sun instead of being flat
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
-// a route: a closed loop with per-segment speeds and the crossings on it, as
-// [arc length, approach group]. The client simulates vehicles along it.
-export interface TrafficLoop {
-  kind: "car" | "train";
-  id: string;
-  coords: [number, number][]; // closed loop polyline
-  cum: number[]; // cumulative meters at each coord
-  speeds: number[]; // m/s per segment (coords[i] -> coords[i + 1])
-  crossings: [number, number][]; // [arc length, group (0 or 1)]
-  vehicles: TrafficVehicle[];
+// a loop's geometry is stored once per loop (`coords`) with its base (no-signal)
+// times; each vehicle carries the small list of signal `windows` that delay it,
+// and the client materializes its times. See tilegen/traffic.py.
+export interface TrafficRun {
+  coords: [number, number][];
+  times: number[];
 }
 
 export interface TrafficVehicle {
-  phase: number; // 0..1 starting offset along the loop
+  phase: number; // 0..1 offset along the loop
   color: number; // parsed from the tile's "rrggbb"
+  period: number; // the car's own lap time (waits differ per car)
+  // per-run stops: `carry` is the wait accrued before the run, and `events`
+  // are that run's `[stop base time, wait]` stops
+  runs: { carry: number; events: number[][] }[];
+}
+
+// a loop as stored in one tile: the pieces of it that fall in this tile, plus
+// the vehicles on it. The same loop id appears in every tile it spans, with
+// disjoint run sets; the renderer merges them.
+export interface TrafficLoop {
+  kind: "car" | "train";
+  id: string;
+  period: number; // seconds for one lap
+  runs: TrafficRun[];
+  vehicles: TrafficVehicle[];
 }
 
 // a building footprint for click-picking + info (outer rings only)
@@ -221,11 +232,14 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
 interface RawTrafficLoop {
   kind: "car" | "train";
   id: string;
-  coords: [number, number][];
-  cum: number[];
-  speeds: number[];
-  crossings: [number, number][];
-  vehicles: { phase: number; color: string }[];
+  period: number;
+  runs: TrafficRun[];
+  vehicles: {
+    phase: number;
+    color: string;
+    period: number;
+    runs: { carry: number; events: number[][] }[];
+  }[];
 }
 
 function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
@@ -234,13 +248,13 @@ function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
   return loops.map((loop) => ({
     kind: loop.kind,
     id: loop.id,
-    coords: loop.coords,
-    cum: loop.cum,
-    speeds: loop.speeds,
-    crossings: loop.crossings,
+    period: loop.period,
+    runs: loop.runs,
     vehicles: loop.vehicles.map((vehicle) => ({
       phase: vehicle.phase,
       color: parseInt(vehicle.color, 16),
+      period: vehicle.period,
+      runs: vehicle.runs,
     })),
   }));
 }

@@ -203,20 +203,24 @@ def test_split_runs_are_contiguous_across_tiles():
     assert runs[-1][3][-1] == runs[0][3][0]
 
 
-def test_loops_to_tiles_exports_routes():
+def test_loops_to_tiles_shares_geometry_and_vehicles():
     _, loops = find(square_ways(9.18, 45.5, 0.001))
     config = TrafficConfig(spacing=50.0)
     traffic.assign_vehicles(loops, config)
     by_tile = traffic.loops_to_tiles(loops, 15, config)
-    assert len(by_tile) >= 1
+    assert len(by_tile) == 1
     entry = next(iter(by_tile.values()))[0]
     assert entry["id"] == loops[0].id
-    assert len(entry["coords"]) == len(entry["cum"])
-    assert len(entry["speeds"]) == len(entry["coords"]) - 1
     assert len(entry["vehicles"]) == len(loops[0].vehicles)
+    # coords and base times are shared per run; vehicles carry only their stops
+    for run in entry["runs"]:
+        assert len(run["times"]) == len(run["coords"])
     for vehicle in entry["vehicles"]:
-        assert 0.0 <= vehicle["phase"] < 1.0
-    assert entry["crossings"] == []  # no signals here
+        assert len(vehicle["runs"]) == len(entry["runs"])
+        for per_run in vehicle["runs"]:
+            assert per_run["events"] == []  # no signals here
+            assert per_run["carry"] == 0.0
+        assert vehicle["period"] > 0
 
 
 def test_global_budget_raises_spacing():
@@ -405,7 +409,7 @@ def test_car_events_queue_the_same_window():
     assert second[0][0] < first[0][0]
 
 
-def test_loops_to_tiles_marks_crossings():
+def test_loop_period_is_a_multiple_of_the_cycle_with_signals():
     graph = traffic.build_graph(square_ways(9.18, 45.5, 0.001))
     loops = traffic.find_loops(graph, TrafficConfig(min_loop_length=80.0))
     traffic.assign_vehicles(loops, TrafficConfig(spacing=30.0))
@@ -415,7 +419,4 @@ def test_loops_to_tiles_marks_crossings():
     config = TrafficConfig(signal_cycle=16.0)
     by_tile = traffic.loops_to_tiles(loops, 15, config, (centroids, grid, cell))
     entry = next(iter(by_tile.values()))[0]
-    assert len(entry["crossings"]) == 1
-    arc, group = entry["crossings"][0]
-    assert 0.0 <= arc <= entry["cum"][-1]
-    assert group in (0, 1)
+    assert entry["period"] % 16.0 == pytest.approx(0.0)

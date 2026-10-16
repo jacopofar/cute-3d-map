@@ -2,84 +2,150 @@ import * as THREE from "three";
 
 import { toModelCoords, type TrafficLoop } from "./geojson_data";
 
-// a fleet of vehicles simulated along precomputed routes
+// a fleet of precomputed vehicles: one InstancedMesh of boxes, placed from the
+// route data every frame
 export interface TrafficFleetConfig {
   length: number; // vehicle box size, meters
   width: number;
   height: number;
   maxVehicles: number;
-  accel: number; // m/s^2
-  decel: number;
 }
 
 export const CAR_TRAFFIC: TrafficFleetConfig = {
   length: 8 / 3,
   width: 4 / 3,
   height: 1,
-  maxVehicles: 40000,
-  accel: 8,
-  decel: 10,
+  // long random loops mean many vehicles pass through the loaded window at
+  // once; keep enough slots that none are dropped
+  maxVehicles: 120000,
 };
 
-// trains/trams: longer and slimmer than a car
+// trains/trams: longer and slimmer than a car (matches the old TRAIN_FLEET)
 export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   length: 15,
   width: 1.5,
   height: 2,
   maxVehicles: 500,
-  accel: 3,
-  decel: 4,
 };
 
-// a 16 s signal cycle, 8 s green per axis: axis 0 green in [0, 8), axis 1 in
-// [8, 16). Every vehicle reads the same clock, so a crossing is coherent.
-const CYCLE = 16;
-const HALF = CYCLE / 2;
-// vehicles always creep this fast so they actually reach a stop
-const MIN_CREEP = 1.5;
-// how close to a red light a vehicle starts to brake
-const LOOKAHEAD = 40;
-
-interface SimLoop {
+// a run with its time keyframes; speed may vary along it
+interface PreparedRun {
+  t0: number;
+  t1: number;
   coords: [number, number][];
-  cum: number[];
-  speeds: number[];
-  length: number;
-  // crossings sorted by arc, with the approach axis (0 or 1)
-  crossings: { arc: number; group: number }[];
-  cars: SimCar[];
+  times: number[];
 }
 
-interface SimCar {
-  arc: number;
-  velocity: number;
+// a standstill: the car sits from `start` to `end`; `lon`/`lat`/`heading` are
+// set only when the stop lands in a loaded tile, else it is off-screen
+interface Stop {
+  start: number;
+  end: number;
+  cum: number; // total wait through this stop
+  lon: number;
+  lat: number;
+  heading: number;
+  onScreen: boolean;
+}
+
+interface PreparedVehicle {
+  phase: number;
+  period: number;
+  runs: PreparedRun[];
+  stops: Stop[];
+  // wait accrued before the earliest loaded run (stops off-screen)
+  baseCarry: number;
   color: THREE.Color;
 }
 
-// index of the segment containing `arc` (cum is ascending)
-function segmentOf(cum: number[], arc: number): number {
-  let lo = 1;
-  let hi = cum.length - 1;
-  while (lo < hi) {
+// rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
+const TIME_EPS = 2e-3;
+
+// ?debug=lights tints vehicles that are standing at a light
+const DEBUG_HOLD = new THREE.Color(0xff2020);
+
+// the stop that contains `tau`, if any
+function findStop(stops: Stop[], tau: number): Stop | undefined {
+  let lo = 0;
+  let hi = stops.length - 1;
+  let best = -1;
+  while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (cum[mid] < arc) lo = mid + 1;
-    else hi = mid;
+    if (stops[mid].start <= tau) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  return lo;
+  if (best < 0) return undefined;
+  return tau < stops[best].end ? stops[best] : undefined;
 }
 
-function pointAt(
-  loop: SimLoop,
-  arc: number,
+// total wait already spent before `tau`
+function waitsBefore(stops: Stop[], tau: number): number {
+  let lo = 0;
+  let hi = stops.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (stops[mid].end <= tau) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best >= 0 ? stops[best].cum : 0;
+}
+
+// the run whose [t0, t1) contains tau (base time), or undefined when the
+// vehicle is in a part of the loop whose tile is not loaded. Sorted by t0.
+function findRun(runs: PreparedRun[], tau: number): PreparedRun | undefined {
+  let lo = 0;
+  let hi = runs.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (runs[mid].t0 <= tau) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (best < 0) return undefined;
+  const run = runs[best];
+  return tau <= run.t1 + TIME_EPS ? run : undefined;
+}
+
+// point (lon/lat) and heading at `seconds` (a schedule time; the run's `times`
+// are absolute, from the loop start). The run's speed is constant between two
+// keyframes, so interpolating them by time is exact.
+function sampleRun(
+  run: PreparedRun,
+  seconds: number,
 ): { lon: number; lat: number; heading: number } {
-  const i = segmentOf(loop.cum, arc);
-  const c0 = loop.cum[i - 1];
-  const c1 = loop.cum[i];
-  const f = c1 > c0 ? (arc - c0) / (c1 - c0) : 0;
-  const a = loop.coords[i - 1];
-  const b = loop.coords[i];
-  const lon = a[0] + (b[0] - a[0]) * f;
-  const lat = a[1] + (b[1] - a[1]) * f;
+  const first = run.times[0];
+  const total = run.times[run.times.length - 1];
+  const d = Math.max(first, Math.min(total, seconds));
+  let lo = 1;
+  let hi = run.times.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (run.times[mid] < d) lo = mid + 1;
+    else hi = mid;
+  }
+  const i = lo;
+  const t0 = run.times[i - 1];
+  const t1 = run.times[i];
+  const t = t1 > t0 ? (d - t0) / (t1 - t0) : 0;
+  const a = run.coords[i - 1];
+  const b = run.coords[i];
+  const lon = a[0] + (b[0] - a[0]) * t;
+  const lat = a[1] + (b[1] - a[1]) * t;
+  // heading in model space; angles are origin/scale independent, so a local
+  // equirectangular projection is enough
   const cosLat = Math.cos((lat * Math.PI) / 180);
   const heading = Math.atan2(
     (b[1] - a[1]) * 110540,
@@ -89,25 +155,26 @@ function pointAt(
 }
 
 /**
- * Simulates vehicles along precomputed routes (loop geometry + per-segment
- * speeds + crossings). Vehicles obey a shared 16 s signal cycle and follow the
- * vehicle ahead, so they queue at red lights and never overlap; the routes
- * themselves are deterministic data, only the motion is simulated.
+ * Renders precomputed traffic: every vehicle is a pure function of wall-clock
+ * time, so there is no simulation to advance, nothing to rebuild when a tile
+ * arrives and no state to lose when one leaves. Tile load/unload only changes
+ * which loops are present (setLoops).
  */
 export class TrafficRenderer {
+  private readonly scene: THREE.Scene;
   private readonly mesh: THREE.InstancedMesh;
   private readonly config: TrafficFleetConfig;
-  private readonly scene: THREE.Scene;
+  private readonly debug: boolean;
   private readonly dummy = new THREE.Object3D();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
   private readonly capacity: number;
   private readonly now: () => number;
-  private readonly timer = new THREE.Timer();
-  private loops: SimLoop[] = [];
-  // debug (?debug=lights): crossings, as lon/lat
-  private readonly debug: boolean;
+  private vehicles: PreparedVehicle[] = [];
+  // debug (?debug=lights): the crossings the loaded cars obey, as lon/lat
   private crossings: [number, number][] = [];
   private points?: THREE.Points;
+  // when disabled (map zoomed out) the mesh is hidden and the per-frame update
+  // is skipped
   enabled = true;
 
   constructor(
@@ -134,10 +201,10 @@ export class TrafficRenderer {
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.mesh);
-    this.timer.connect(document);
     if (debug) {
+      const pointGeometry = new THREE.BufferGeometry();
       this.points = new THREE.Points(
-        new THREE.BufferGeometry(),
+        pointGeometry,
         new THREE.PointsMaterial({
           color: 0xff00ff,
           size: 6,
@@ -156,63 +223,110 @@ export class TrafficRenderer {
 
   // live vehicle count, for the perf benchmark
   get count(): number {
-    return this.loops.reduce((n, loop) => n + loop.cars.length, 0);
+    return this.vehicles.length;
   }
 
-  // one copy of each loop (it appears in every tile it touches)
+  // the union of the loaded tiles' traffic. A loop appears in every tile it
+  // spans; the renderer merges those pieces by loop id, and within a loop each
+  // vehicle gets its own runs (its own keyframe times), sharing the coords.
   setLoops(loops: TrafficLoop[]): void {
-    const byId = new Map<string, TrafficLoop>();
-    for (const loop of loops) if (!byId.has(loop.id)) byId.set(loop.id, loop);
+    const byId = new Map<string, { period: number; entries: TrafficLoop[] }>();
+    for (const loop of loops) {
+      let group = byId.get(loop.id);
+      if (!group) {
+        group = { period: loop.period, entries: [] };
+        byId.set(loop.id, group);
+      }
+      group.entries.push(loop);
+    }
 
-    const simLoops: SimLoop[] = [];
-    const crossings: [number, number][] = [];
+    const vehicles: PreparedVehicle[] = [];
     let slot = 0;
-    for (const loop of byId.values()) {
-      const cum = loop.cum;
-      const length = cum[cum.length - 1];
-      if (!(length > 0)) continue;
-      const cars: SimCar[] = [];
-      for (const vehicle of loop.vehicles) {
+    for (const group of byId.values()) {
+      const source = group.entries[0].vehicles;
+      if (slot >= this.capacity) break;
+      for (let index = 0; index < source.length; index++) {
         if (slot >= this.capacity) break;
-        const arc = vehicle.phase * length;
-        this.mesh.setColorAt(slot, new THREE.Color(vehicle.color));
-        cars.push({
-          arc,
-          velocity: loop.speeds[segmentOf(cum, arc)],
-          color: new THREE.Color(vehicle.color),
+        const runs: PreparedRun[] = [];
+        const stops: Stop[] = [];
+        // the wait already accrued before the earliest loaded run
+        let baseCarry = 0;
+        let earliest = Infinity;
+        for (const entry of group.entries) {
+          const schedule = entry.vehicles[index].runs;
+          for (let r = 0; r < entry.runs.length; r++) {
+            const coords = entry.runs[r].coords;
+            const times = entry.runs[r].times;
+            const run: PreparedRun = {
+              coords,
+              times,
+              t0: times[0],
+              t1: times[times.length - 1],
+            };
+            runs.push(run);
+            const { carry, events } = schedule[r];
+            if (times[0] < earliest) {
+              earliest = times[0];
+              baseCarry = carry;
+            }
+            let cum = carry;
+            for (const [base, wait] of events) {
+              const at = sampleRun(run, base);
+              stops.push({
+                start: base + cum,
+                end: base + cum + wait,
+                cum: cum + wait,
+                lon: at.lon,
+                lat: at.lat,
+                heading: at.heading,
+                onScreen: true,
+              });
+              cum += wait;
+            }
+          }
+        }
+        runs.sort((a, b) => a.t0 - b.t0);
+        stops.sort((a, b) => a.start - b.start);
+        this.mesh.setColorAt(slot, new THREE.Color(source[index].color));
+        vehicles.push({
+          phase: source[index].phase,
+          period: source[index].period,
+          runs,
+          stops,
+          baseCarry,
+          color: new THREE.Color(source[index].color),
         });
         slot++;
       }
-      if (cars.length === 0) continue;
-      const simLoop: SimLoop = {
-        coords: loop.coords,
-        cum,
-        speeds: loop.speeds,
-        length,
-        crossings: loop.crossings.map(([arc, group]) => ({ arc, group })),
-        cars,
-      };
-      simLoops.push(simLoop);
-      if (this.debug) {
-        for (const crossing of simLoop.crossings) {
-          const point = pointAt(simLoop, crossing.arc);
-          crossings.push([point.lon, point.lat]);
+    }
+    if (this.debug) {
+      const seen = new Set<string>();
+      const crossings: [number, number][] = [];
+      for (const vehicle of vehicles) {
+        for (const stop of vehicle.stops) {
+          if (!stop.onScreen) continue;
+          const key = `${stop.lon.toFixed(5)},${stop.lat.toFixed(5)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            crossings.push([stop.lon, stop.lat]);
+          }
         }
       }
+      this.crossings = crossings;
     }
-    this.loops = simLoops;
-    this.crossings = crossings;
+    if (slot >= this.capacity) {
+      console.warn("traffic: vehicle capacity exceeded, dropping routes");
+    }
+    this.vehicles = vehicles;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
+  // place every vehicle for the current wall-clock phase. Positions are
+  // recomputed in model space every frame because the projection origin can be
+  // reset while panning (resetOrigin in main.ts).
   update(originMeters: [number, number], scaleFactor: number): void {
     if (!this.enabled) return;
-    this.timer.update();
-    const dt = Math.min(this.timer.getDelta(), 0.1);
     const now = this.now();
-    // both axes agree on the light because everyone reads this clock
-    const greenGroup = Math.floor((now % CYCLE) / HALF) % 2;
-
     if (this.debug && this.points) {
       const positions = new Float32Array(this.crossings.length * 3);
       for (let i = 0; i < this.crossings.length; i++) {
@@ -226,67 +340,55 @@ export class TrafficRenderer {
         new THREE.BufferAttribute(positions, 3),
       );
     }
-
     let count = 0;
-    for (const loop of this.loops) {
-      loop.cars.sort((a, b) => a.arc - b.arc);
-      for (let i = 0; i < loop.cars.length; i++) {
-        const car = loop.cars[i];
-        const segment = segmentOf(loop.cum, car.arc);
-        let desired = loop.speeds[segment];
-
-        // next crossing ahead (wrapping the loop)
-        let nearest = Infinity;
-        let nearestGroup = 0;
-        for (const crossing of loop.crossings) {
-          const ahead = (crossing.arc - car.arc + loop.length) % loop.length;
-          if (ahead < nearest) {
-            nearest = ahead;
-            nearestGroup = crossing.group;
-          }
+    let colorChanged = false;
+    for (const vehicle of this.vehicles) {
+      const period = vehicle.period;
+      let tau = (now + vehicle.phase * period) % period;
+      if (tau < 0) tau += period;
+      const stop = findStop(vehicle.stops, tau);
+      let lon: number;
+      let lat: number;
+      let heading: number;
+      if (stop) {
+        // standing at a red light; if that stop is in an unloaded tile, hide it
+        if (!stop.onScreen) {
+          this.mesh.setMatrixAt(count, this.hidden);
+          count++;
+          continue;
         }
-        if (nearest < LOOKAHEAD && nearestGroup !== greenGroup) {
-          // red for this approach: brake to the crossing
-          desired = Math.min(
-            desired,
-            Math.max(MIN_CREEP, Math.sqrt(2 * this.config.decel * nearest)),
-          );
+        lon = stop.lon;
+        lat = stop.lat;
+        heading = stop.heading;
+      } else {
+        const base =
+          tau - Math.max(vehicle.baseCarry, waitsBefore(vehicle.stops, tau));
+        const run = findRun(vehicle.runs, base);
+        if (!run) {
+          // the tile holding this part of the loop is not loaded: hide the
+          // vehicle with a zero-scale matrix but keep its slot for the color
+          this.mesh.setMatrixAt(count, this.hidden);
+          count++;
+          continue;
         }
-
-        // follow the car ahead (the next one by arc, wrapping for the last)
-        const leader = loop.cars[(i + 1) % loop.cars.length];
-        if (leader !== car) {
-          const gap = (leader.arc - car.arc + loop.length) % loop.length;
-          const effective = gap - this.config.length - 1;
-          desired = Math.min(
-            desired,
-            effective <= 0 ? 0 : Math.sqrt(2 * this.config.decel * effective),
-          );
-        }
-
-        if (car.velocity < desired) {
-          car.velocity = Math.min(
-            desired,
-            car.velocity + this.config.accel * dt,
-          );
-        } else {
-          car.velocity = Math.max(
-            desired,
-            car.velocity - this.config.decel * dt,
-          );
-        }
-        car.arc = (car.arc + car.velocity * dt) % loop.length;
-
-        const { lon, lat, heading } = pointAt(loop, car.arc);
-        const m = toModelCoords([lon, lat], originMeters, scaleFactor);
-        this.dummy.position.set(m[0], m[1], this.config.height / 2);
-        this.dummy.rotation.set(0, 0, heading);
-        this.dummy.updateMatrix();
-        this.mesh.setMatrixAt(count, this.dummy.matrix);
-        count++;
+        ({ lon, lat, heading } = sampleRun(run, base));
       }
+      if (this.debug) {
+        // tint whoever is standing at a light
+        this.mesh.setColorAt(count, stop ? DEBUG_HOLD : vehicle.color);
+        colorChanged = true;
+      }
+      const m = toModelCoords([lon, lat], originMeters, scaleFactor);
+      this.dummy.position.set(m[0], m[1], this.config.height / 2);
+      this.dummy.rotation.set(0, 0, heading);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(count, this.dummy.matrix);
+      count++;
     }
     this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
+    if (colorChanged && this.mesh.instanceColor) {
+      this.mesh.instanceColor.needsUpdate = true;
+    }
   }
 }

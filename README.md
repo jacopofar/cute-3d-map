@@ -80,8 +80,8 @@ Because loop length is the main tuning knob, the generator writes a report
   a length histogram.
 - `loops.geojson` — every loop as a `LineString` (no vehicles), for looking at
   them on a map. By default it keeps only loops intersecting
-  `data/milan_piece_polygon.json`; pass `--report-polygon` to clip to another
-  area, or `--no-report` to skip the report entirely.
+  `data/milano_polygon.json`; pass `--report-polygon` to clip to another area,
+  or `--no-report` to skip the report entirely.
 
 `tilegen/report/` is gitignored (it is generated from local data).
 
