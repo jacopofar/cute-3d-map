@@ -15,8 +15,13 @@ from traffic import (
     DRIVABLE_HIGHWAYS,
     RAILWAYS,
     TRAIN_CONFIG,
+    Loop,
     Way,
-    build_traffic_tiles,
+    build_fleets,
+    fleets_to_tiles,
+    loop_coords,
+    loop_report,
+    loops_to_geojson,
     road_oneway,
 )
 
@@ -25,6 +30,11 @@ logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+
+# where the loop report looks for the comune di Milano boundary by default.
+# data/ is local-only, so if the file is missing the report GeoJSON keeps every
+# loop instead of failing.
+DEFAULT_REPORT_POLYGON = Path("../data/milano_polygon.json")
 
 
 def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -> Path:
@@ -216,12 +226,44 @@ def load_ways(
     return ways
 
 
+def write_loop_report(
+    fleets: dict[str, list[Loop]],
+    report_dir: Path,
+    polygon: BaseGeometry | None,
+) -> None:
+    """Write the loop-size report (`loops.md`) and the troubleshooting GeoJSON
+    (`loops.geojson`). When `polygon` is given, the GeoJSON keeps only loops
+    that intersect it (the comune di Milano by default)."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "loops.md").write_text(loop_report(fleets))
+    features: list[dict] = []
+    for loops in fleets.values():
+        selected = loops
+        if polygon is not None:
+            selected = [
+                loop
+                for loop in loops
+                if shapely.LineString(loop_coords(loop)).intersects(polygon)
+            ]
+        features.extend(loops_to_geojson(selected))
+    (report_dir / "loops.geojson").write_text(
+        json.dumps(
+            {"type": "FeatureCollection", "features": features},
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    logger.info(f"loop report: {len(features)} loops written to {report_dir}")
+
+
 def parquet_to_tiles(
     input_parquet: Path,
     target_folder: Path,
     target_folder_raw: Path | None,
     borders_shape: shapely.Geometry | None = None,
     traffic: bool = True,
+    report_dir: Path | None = None,
+    report_polygon: BaseGeometry | None = None,
 ) -> None:
     duckdb.load_extension("spatial")
     zoom_level = TILE_ZOOM
@@ -260,12 +302,15 @@ def parquet_to_tiles(
             "train": load_ways(input_parquet, "railway", RAILWAYS),
         }
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
-        traffic_by_tile = build_traffic_tiles(ways_by_kind, zoom_level, configs)
+        fleets = build_fleets(ways_by_kind, configs)
+        traffic_by_tile = fleets_to_tiles(fleets, zoom_level)
         logger.info(
             "traffic: %s -> %d tiles with loops",
             {kind: len(ways) for kind, ways in ways_by_kind.items()},
             len(traffic_by_tile),
         )
+        if report_dir is not None:
+            write_loop_report(fleets, report_dir, report_polygon)
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
             logger.info(f"Generating tile {x}/{y}")
@@ -357,6 +402,27 @@ def parquet_to_tiles(
     default=True,
     help="Precompute vehicle routes (loops) and write them into the tiles.",
 )
+@click.option(
+    "--report/--no-report",
+    default=True,
+    help="Write the loop report (report/loops.md and report/loops.geojson).",
+)
+@click.option(
+    "--report-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("report"),
+    show_default=True,
+    help="Directory for the loop report.",
+)
+@click.option(
+    "--report-polygon",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Only put loops intersecting this polygon in the report GeoJSON. "
+        f"Defaults to {DEFAULT_REPORT_POLYGON} when that file exists."
+    ),
+)
 def main(
     input_pbf: Path,
     polygon_filter: Path | None,
@@ -364,6 +430,9 @@ def main(
     raw_output: Path,
     raw: bool,
     traffic: bool,
+    report: bool,
+    report_dir: Path,
+    report_polygon: Path | None,
 ) -> None:
     logger.info(f"Processing {input_pbf}")
     # Note: you can reduce the file size using a border geojson:
@@ -372,6 +441,14 @@ def main(
     borders_shape = None
     if polygon_filter is not None:
         borders_shape = shapely.from_geojson(polygon_filter.read_text())
+    report_shape = None
+    if report and traffic:
+        polygon_path = report_polygon
+        if polygon_path is None and DEFAULT_REPORT_POLYGON.exists():
+            polygon_path = DEFAULT_REPORT_POLYGON
+            logger.info(f"Using {polygon_path} to clip the report GeoJSON")
+        if polygon_path is not None:
+            report_shape = shapely.from_geojson(polygon_path.read_text())
     gpq_path = pbf_to_parquet(input_pbf, borders_shape=borders_shape)
     print(f"Extracted: {gpq_path}")
     parquet_to_tiles(
@@ -380,6 +457,8 @@ def main(
         raw_output if raw else None,
         borders_shape=borders_shape,
         traffic=traffic,
+        report_dir=report_dir if report and traffic else None,
+        report_polygon=report_shape,
     )
 
 

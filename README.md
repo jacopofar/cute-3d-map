@@ -53,9 +53,23 @@ is a stateless renderer that samples it. There is no runtime simulation.
   only while its half-open `[t0, t1)` contains the phase.
 - Two fleets come out of the same machinery: cars on drivable highways (spacing
   18 m) and trains/trams on `railway=rail`/`tram` (spacing 800 m, orange).
-  Small loops are dropped (200 m for cars, 500 m for trains) so nothing circles
+  Small loops are dropped (400 m for cars, 500 m for trains) so nothing circles
   a single building or a roundabout.
 - Vehicles are gated on the zoom (and the traffic checkbox) as before.
+
+### Loop report
+
+Because loop length is the main tuning knob, the generator writes a report
+(`tilegen/report/`, or `--report-dir`):
+
+- `loops.md` — per fleet, the loop count, vehicle count, min/mean/max length and
+  a length histogram.
+- `loops.geojson` — every loop as a `LineString` (no vehicles), for looking at
+  them on a map. By default it keeps only loops intersecting
+  `data/milano_polygon.json`; pass `--report-polygon` to clip to another area,
+  or `--no-report` to skip the report entirely.
+
+`tilegen/report/` is gitignored (it is generated from local data).
 
 `src/maplibre_setup.ts` fixes a MapLibre v6 issue where the web worker URL is
 resolved dynamically and doesn't survive `vite build` — it wires the worker
@@ -173,7 +187,9 @@ skip the raw tiles).
 
 By default the run also precomputes the vehicle routes (see "Precomputed
 traffic" above) and writes them into the tiles; pass `--no-traffic` to skip
-that step and emit only the geometry tiles.
+that step and emit only the geometry tiles. With traffic on it also writes the
+loop report into `tilegen/report/` (`--report-dir` to move it, `--no-report` to
+skip).
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,

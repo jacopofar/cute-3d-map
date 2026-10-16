@@ -177,7 +177,7 @@ class TrafficConfig:
 CAR_CONFIG = TrafficConfig(
     spacing=18.0,
     max_vehicles=80000,
-    min_loop_length=200.0,
+    min_loop_length=400.0,
     max_loop_length=6000.0,
 )
 
@@ -560,24 +560,135 @@ def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[d
     return by_tile
 
 
-def build_traffic_tiles(
+def build_fleets(
     ways_by_kind: dict[str, list[Way]],
-    zoom: int,
     configs: dict[str, TrafficConfig] | None = None,
-) -> dict[tuple[int, int], list[dict]]:
-    """Build (and merge) the routes of every fleet into per-tile traffic.
+) -> dict[str, list[Loop]]:
+    """Build one fleet of loops per kind ("car", "train").
 
-    `ways_by_kind` maps a fleet kind ("car", "train") to its network; each fleet
-    is looped and populated independently with its own config, then the results
-    are merged by tile (the frontend splits them by `kind`)."""
+    Kept separate from the tile serialization so the loops themselves are
+    available for the report and the troubleshooting GeoJSON."""
     if configs is None:
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
-    by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    fleets: dict[str, list[Loop]] = {}
     for kind, ways in ways_by_kind.items():
         config = configs[kind]
         graph = build_graph(ways)
         loops = find_loops(graph, config, kind=kind)
         assign_vehicles(loops, config)
+        fleets[kind] = loops
+    return fleets
+
+
+def fleets_to_tiles(
+    fleets: dict[str, list[Loop]], zoom: int
+) -> dict[tuple[int, int], list[dict]]:
+    """Merge every fleet's per-tile route entries into one traffic block."""
+    by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    for loops in fleets.values():
         for tile, entries in loops_to_tiles(loops, zoom).items():
             by_tile[tile].extend(entries)
     return by_tile
+
+
+def build_traffic_tiles(
+    ways_by_kind: dict[str, list[Way]],
+    zoom: int,
+    configs: dict[str, TrafficConfig] | None = None,
+) -> dict[tuple[int, int], list[dict]]:
+    """Convenience entry point: ways -> per-tile serialized traffic."""
+    return fleets_to_tiles(build_fleets(ways_by_kind, configs), zoom)
+
+
+def loop_coords(loop: Loop) -> list[tuple[float, float]]:
+    """The whole loop as one closed polyline (dedup the shared endpoints)."""
+    coords: list[tuple[float, float]] = []
+    for seg in loop.segs:
+        if coords and coords[-1] == seg[0]:
+            coords.extend(seg[1:])
+        else:
+            coords.extend(seg)
+    return coords
+
+
+# loop-length buckets (meters) for the report histogram
+HISTOGRAM_BUCKETS = (
+    0.0,
+    200.0,
+    400.0,
+    600.0,
+    800.0,
+    1000.0,
+    1500.0,
+    2000.0,
+    3000.0,
+    5000.0,
+    math.inf,
+)
+
+
+def _bucket_label(low: float, high: float) -> str:
+    return f"{low:.0f}+" if high == math.inf else f"{low:.0f}-{high:.0f}"
+
+
+def loop_report(fleets: dict[str, list[Loop]]) -> str:
+    """A markdown description of each fleet's loop sizes (count, min/mean/max,
+    histogram). Pure text, so it is easy to test and to diff between runs."""
+    lines = ["# Vehicle loop report", ""]
+    for kind in sorted(fleets):
+        loops = fleets[kind]
+        lines.append(f"## {kind}")
+        lines.append("")
+        if not loops:
+            lines.extend(["No loops.", ""])
+            continue
+        lengths = sorted(loop.length for loop in loops)
+        count = len(lengths)
+        vehicles = sum(len(loop.vehicles) for loop in loops)
+        total = sum(lengths)
+        lines.extend(
+            [
+                f"- Loops: **{count}**",
+                f"- Vehicles: **{vehicles}**",
+                (
+                    f"- Length (m): min **{lengths[0]:.0f}**, mean "
+                    f"**{total / count:.0f}**, max **{lengths[-1]:.0f}**"
+                ),
+                f"- Total loop length: {total / 1000:.1f} km",
+                "",
+                "| length bucket (m) | loops | vehicles |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for low, high in pairwise(HISTOGRAM_BUCKETS):
+            bucket = [loop for loop in loops if low <= loop.length < high]
+            lines.append(
+                f"| {_bucket_label(low, high)} | {len(bucket)} | "
+                f"{sum(len(loop.vehicles) for loop in bucket)} |"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def loops_to_geojson(loops: list[Loop]) -> list[dict]:
+    """The loops as LineString features, for visual troubleshooting."""
+    return [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [round(lon, 7), round(lat, 7)] for lon, lat in loop_coords(loop)
+                ],
+            },
+            "properties": {
+                "id": loop.id,
+                "kind": loop.kind,
+                "length_m": round(loop.length, 1),
+                "speed_mps": round(loop.v, 2),
+                "period_s": round(loop.period, 1),
+                "vehicles": len(loop.vehicles),
+            },
+        }
+        for loop in loops
+    ]

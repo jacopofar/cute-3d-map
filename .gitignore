@@ -3,6 +3,8 @@ Screenshot*.png
 # own data for testing
 data/
 public/tiles
+# generated loop report (tilegen/report)
+tilegen/report
 # secrets
 .env
 # Logs

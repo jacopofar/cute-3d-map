@@ -50,9 +50,9 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
 - `tilegen/geo.py` — slippy-tile helpers shared by the generator.
 - `tilegen/traffic.py` — precomputes vehicle routes: global graph, planar-face
   loops, per-tile split. Per-fleet configs (`CAR_CONFIG`, `TRAIN_CONFIG`) drive
-  cars and trains. Takes plain `Way` inputs and does no OSM I/O itself
-  (`main.load_ways` reads the parquet), so it is dependency-free and
-  unit-tested in `tilegen/tests/`.
+  cars and trains, and `loop_report` / `loops_to_geojson` build the loop report.
+  Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
+  the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
 
 ## Domain lexicon
 

@@ -217,3 +217,26 @@ def test_build_traffic_tiles_tags_each_fleet():
     )
     kinds = {entry["kind"] for entries in by_tile.values() for entry in entries}
     assert kinds == {"car", "train"}
+
+
+def test_loop_coords_closes_the_ring():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    coords = traffic.loop_coords(loops[0])
+    assert coords[0] == coords[-1]
+    assert len(coords) == 5  # four corners plus the closing point
+
+
+def test_loop_report_and_geojson():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(min_loop_length=80.0, spacing=50.0))
+    report = traffic.loop_report({"car": loops, "train": []})
+    assert "## car" in report
+    assert "Loops: **1**" in report
+    assert "## train" in report
+    assert "No loops." in report
+
+    features = traffic.loops_to_geojson(loops)
+    assert len(features) == 1
+    assert features[0]["geometry"]["type"] == "LineString"
+    assert features[0]["properties"]["kind"] == "car"
+    assert features[0]["properties"]["vehicles"] == len(loops[0].vehicles)
