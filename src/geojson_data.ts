@@ -110,9 +110,9 @@ export interface TrafficVehicle {
   phase: number; // 0..1 offset along the loop
   color: number; // parsed from the tile's "rrggbb"
   period: number; // the car's own lap time (waits differ per car)
-  // per-run schedule: `carry` is the delay accrued before the run, and
-  // `windows` are the stops whose line falls in the run
-  runs: { carry: number; windows: number[][] }[];
+  // per-run stops: `carry` is the wait accrued before the run, and `events`
+  // are that run's `[stop base time, wait]` stops
+  runs: { carry: number; events: number[][] }[];
 }
 
 // a loop as stored in one tile: the pieces of it that fall in this tile, plus
@@ -238,7 +238,7 @@ interface RawTrafficLoop {
     phase: number;
     color: string;
     period: number;
-    runs: { carry: number; windows: number[][] }[];
+    runs: { carry: number; events: number[][] }[];
   }[];
 }
 

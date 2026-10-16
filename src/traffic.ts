@@ -36,31 +36,68 @@ interface PreparedRun {
   times: number[];
 }
 
+// a standstill: the car sits from `start` to `end`; `lon`/`lat`/`heading` are
+// set only when the stop lands in a loaded tile, else it is off-screen
+interface Stop {
+  start: number;
+  end: number;
+  cum: number; // total wait through this stop
+  lon: number;
+  lat: number;
+  heading: number;
+  onScreen: boolean;
+}
+
 interface PreparedVehicle {
   phase: number;
   period: number;
-  // each vehicle has its own schedule (its signal waits differ), so its runs
-  // are prepared per vehicle; the coords arrays are shared with the loop
+  // the loop's shared runs (coords + base times); cars differ by their stops
   runs: PreparedRun[];
+  stops: Stop[];
+  // wait accrued before the earliest loaded run (stops off-screen)
+  baseCarry: number;
 }
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
 
-// cumulative signal delay at a base time; windows are [slot, line, wait],
-// sorted by slot
-function delayAt(time: number, windows: number[][]): number {
-  let delay = 0;
-  for (const [slot, line, wait] of windows) {
-    if (time <= slot) break;
-    if (time >= line || line <= slot) delay += wait;
-    else delay += (wait * (time - slot)) / (line - slot);
+// the stop that contains `tau`, if any
+function findStop(stops: Stop[], tau: number): Stop | undefined {
+  let lo = 0;
+  let hi = stops.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (stops[mid].start <= tau) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  return delay;
+  if (best < 0) return undefined;
+  return tau < stops[best].end ? stops[best] : undefined;
 }
 
-// the run whose [t0, t1) contains tau, or undefined when the vehicle is in a
-// part of the loop whose tile is not loaded. `runs` is sorted by t0.
+// total wait already spent before `tau`
+function waitsBefore(stops: Stop[], tau: number): number {
+  let lo = 0;
+  let hi = stops.length - 1;
+  let best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (stops[mid].end <= tau) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best >= 0 ? stops[best].cum : 0;
+}
+
+// the run whose [t0, t1) contains tau (base time), or undefined when the
+// vehicle is in a part of the loop whose tile is not loaded. Sorted by t0.
 function findRun(runs: PreparedRun[], tau: number): PreparedRun | undefined {
   let lo = 0;
   let hi = runs.length - 1;
@@ -112,22 +149,6 @@ function sampleRun(
     (b[0] - a[0]) * cosLat * 111320,
   );
   return { lon, lat, heading };
-}
-
-// lon/lat at a base `time` along a run (used by the debug overlay)
-function interpolateAt(
-  times: number[],
-  coords: [number, number][],
-  value: number,
-): [number, number] {
-  let i = 1;
-  while (i < times.length - 1 && times[i] < value) i++;
-  const t0 = times[i - 1];
-  const t1 = times[i];
-  const f = t1 > t0 ? Math.max(0, Math.min(1, (value - t0) / (t1 - t0))) : 0;
-  const a = coords[i - 1];
-  const b = coords[i];
-  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
 }
 
 /**
@@ -219,36 +240,57 @@ export class TrafficRenderer {
     const vehicles: PreparedVehicle[] = [];
     let slot = 0;
     for (const group of byId.values()) {
-      const first = group.entries[0];
+      const source = group.entries[0].vehicles;
       if (slot >= this.capacity) break;
-      for (let index = 0; index < first.vehicles.length; index++) {
+      for (let index = 0; index < source.length; index++) {
         if (slot >= this.capacity) break;
         const runs: PreparedRun[] = [];
+        const stops: Stop[] = [];
+        // the wait already accrued before the earliest loaded run
+        let baseCarry = 0;
+        let earliest = Infinity;
         for (const entry of group.entries) {
           const schedule = entry.vehicles[index].runs;
           for (let r = 0; r < entry.runs.length; r++) {
-            const base = entry.runs[r].times;
-            const { carry, windows } = schedule[r];
-            const times = base.map(
-              (time) => time + carry + delayAt(time, windows),
-            );
-            runs.push({
-              coords: entry.runs[r].coords,
+            const coords = entry.runs[r].coords;
+            const times = entry.runs[r].times;
+            const run: PreparedRun = {
+              coords,
               times,
               t0: times[0],
               t1: times[times.length - 1],
-            });
+            };
+            runs.push(run);
+            const { carry, events } = schedule[r];
+            if (times[0] < earliest) {
+              earliest = times[0];
+              baseCarry = carry;
+            }
+            let cum = carry;
+            for (const [base, wait] of events) {
+              const at = sampleRun(run, base);
+              stops.push({
+                start: base + cum,
+                end: base + cum + wait,
+                cum: cum + wait,
+                lon: at.lon,
+                lat: at.lat,
+                heading: at.heading,
+                onScreen: true,
+              });
+              cum += wait;
+            }
           }
         }
         runs.sort((a, b) => a.t0 - b.t0);
-        this.mesh.setColorAt(
-          slot,
-          new THREE.Color(first.vehicles[index].color),
-        );
+        stops.sort((a, b) => a.start - b.start);
+        this.mesh.setColorAt(slot, new THREE.Color(source[index].color));
         vehicles.push({
-          phase: first.vehicles[index].phase,
-          period: first.vehicles[index].period,
+          phase: source[index].phase,
+          period: source[index].period,
           runs,
+          stops,
+          baseCarry,
         });
         slot++;
       }
@@ -256,21 +298,13 @@ export class TrafficRenderer {
     if (this.debug) {
       const seen = new Set<string>();
       const crossings: [number, number][] = [];
-      for (const group of byId.values()) {
-        for (const entry of group.entries) {
-          for (let r = 0; r < entry.runs.length; r++) {
-            const base = entry.runs[r].times;
-            const coords = entry.runs[r].coords;
-            for (const vehicle of entry.vehicles) {
-              for (const window of vehicle.runs[r].windows) {
-                const point = interpolateAt(base, coords, window[1]);
-                const key = `${point[0].toFixed(5)},${point[1].toFixed(5)}`;
-                if (!seen.has(key)) {
-                  seen.add(key);
-                  crossings.push(point);
-                }
-              }
-            }
+      for (const vehicle of vehicles) {
+        for (const stop of vehicle.stops) {
+          if (!stop.onScreen) continue;
+          const key = `${stop.lon.toFixed(5)},${stop.lat.toFixed(5)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            crossings.push([stop.lon, stop.lat]);
           }
         }
       }
@@ -307,15 +341,33 @@ export class TrafficRenderer {
       const period = vehicle.period;
       let tau = (now + vehicle.phase * period) % period;
       if (tau < 0) tau += period;
-      const run = findRun(vehicle.runs, tau);
-      if (!run) {
-        // the tile holding this part of the loop is not loaded: hide the
-        // vehicle with a zero-scale matrix but keep its slot for the color
-        this.mesh.setMatrixAt(count, this.hidden);
-        count++;
-        continue;
+      const stop = findStop(vehicle.stops, tau);
+      let lon: number;
+      let lat: number;
+      let heading: number;
+      if (stop) {
+        // standing at a red light; if that stop is in an unloaded tile, hide it
+        if (!stop.onScreen) {
+          this.mesh.setMatrixAt(count, this.hidden);
+          count++;
+          continue;
+        }
+        lon = stop.lon;
+        lat = stop.lat;
+        heading = stop.heading;
+      } else {
+        const base =
+          tau - Math.max(vehicle.baseCarry, waitsBefore(vehicle.stops, tau));
+        const run = findRun(vehicle.runs, base);
+        if (!run) {
+          // the tile holding this part of the loop is not loaded: hide the
+          // vehicle with a zero-scale matrix but keep its slot for the color
+          this.mesh.setMatrixAt(count, this.hidden);
+          count++;
+          continue;
+        }
+        ({ lon, lat, heading } = sampleRun(run, base));
       }
-      const { lon, lat, heading } = sampleRun(run, tau);
       const m = toModelCoords([lon, lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, heading);

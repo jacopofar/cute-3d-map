@@ -212,14 +212,15 @@ def test_loops_to_tiles_shares_geometry_and_vehicles():
     entry = next(iter(by_tile.values()))[0]
     assert entry["id"] == loops[0].id
     assert len(entry["vehicles"]) == len(loops[0].vehicles)
-    # coords are shared per run; each vehicle carries only its signal windows
+    # coords and base times are shared per run; vehicles carry only their stops
     for run in entry["runs"]:
         assert len(run["times"]) == len(run["coords"])
     for vehicle in entry["vehicles"]:
         assert len(vehicle["runs"]) == len(entry["runs"])
         for per_run in vehicle["runs"]:
-            assert per_run["windows"] == []  # no signals here
+            assert per_run["events"] == []  # no signals here
             assert per_run["carry"] == 0.0
+        assert vehicle["period"] > 0
 
 
 def test_global_budget_raises_spacing():
@@ -388,23 +389,23 @@ def test_approach_group_handles_diagonals():
     assert north_east != south_east
 
 
-def test_car_windows_green_and_red():
+def test_car_events_green_and_red():
     config = TrafficConfig(signal_cycle=16.0, queue_slots=5, queue_seconds=1.5)
     # arrival 10 -> second half -> red for group 0, green at 16 (wait 6)
-    red = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, {})
+    red = traffic._car_events([(10.0, 0, 0)], 0.0, 0.0, config, {})
     assert len(red) == 1
-    assert red[0][2] == pytest.approx(6.0)
+    assert red[0][1] == pytest.approx(6.0)
     # arrival 2 -> first half -> green for group 0
-    assert traffic._car_windows([(2.0, 0, 0)], 0.0, 0.0, config, {}) == []
+    assert traffic._car_events([(2.0, 0, 0)], 0.0, 0.0, config, {}) == []
 
 
-def test_car_windows_queue_the_same_window():
+def test_car_events_queue_the_same_window():
     config = TrafficConfig(signal_cycle=16.0, queue_slots=5, queue_seconds=1.5)
     counters: dict = {}
-    first = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, counters)
-    second = traffic._car_windows([(10.0, 0, 0)], 0.0, 0.0, config, counters)
+    first = traffic._car_events([(10.0, 0, 0)], 0.0, 0.0, config, counters)
+    second = traffic._car_events([(10.0, 0, 0)], 0.0, 0.0, config, counters)
     assert len(first) == 1 and len(second) == 1
-    # the second car stops further back on the approach
+    # the second car's stop is further back on the approach
     assert second[0][0] < first[0][0]
 
 

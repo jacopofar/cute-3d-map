@@ -906,23 +906,23 @@ def _path_crossings(
     return [(time, group, index) for time, group, index, _ in merged]
 
 
-def _car_windows(
+def _car_events(
     crossings: list[tuple[float, int, int]],
     phase: float,
     period: float,
     config: TrafficConfig,
     counters: dict[tuple[int, int], int],
-) -> list[tuple[float, float, float]]:
-    """The stops this car must make, as (slot time, line time, wait).
+) -> list[tuple[float, float]]:
+    """The stops this car makes, as (gate base time, wait).
 
-    A car arriving on red waits for its group's green. Its queue slot is a
-    little earlier on the approach, and the queue is counted per crossing and
-    half-cycle, so it stays short instead of growing with the number of loops."""
+    The gate is where the car stands still (on its approach); the rank, counted
+    per crossing and half-cycle, puts successive cars further back so they queue
+    instead of stacking."""
     cycle = config.signal_cycle
     half = cycle / 2
     delta = (-phase * period) % cycle
     delay = 0.0
-    windows: list[tuple[float, float, float]] = []
+    events: list[tuple[float, float]] = []
     for line_time, group, index in crossings:
         arrival = line_time + delay
         cycle_time = (arrival + delta) % cycle
@@ -933,37 +933,11 @@ def _car_windows(
         key = (index, window)
         rank = counters.get(key, 0)
         counters[key] = rank + 1
-        slot_time = max(
-            0.0, line_time - config.queue_seconds * (min(rank, config.queue_slots) + 1)
-        )
-        windows.append((slot_time, line_time, wait))
+        slot = min(rank, config.queue_slots)
+        gate = line_time - config.queue_seconds * (slot + 1)
+        events.append((max(0.0, gate), wait))
         delay += wait
-    return windows
-
-
-def _delay_at(time: float, windows: list[tuple[float, float, float]]) -> float:
-    """Time lost up to `time`: each stop ramps the delay in over its approach
-    (the slowdown) and keeps it after the line."""
-    delay = 0.0
-    for slot_time, line_time, wait in windows:
-        if time <= slot_time:
-            continue
-        if time >= line_time or line_time <= slot_time:
-            delay += wait
-        else:
-            delay += wait * (time - slot_time) / (line_time - slot_time)
-    return delay
-
-
-def _distribute_pad(
-    windows: list[tuple[float, float, float]], pad: float
-) -> list[tuple[float, float, float]]:
-    """Spread the period padding across the car's waits, so the loop period can
-    be a multiple of the signal cycle."""
-    if pad <= 0 or not windows:
-        return windows
-    share = pad / len(windows)
-    return [(slot, line, wait + share) for slot, line, wait in windows]
+    return events
 
 
 def _split_segment_t(
@@ -1041,44 +1015,50 @@ def _loop_to_tiles(
     base_period = base_times[-1]
     stops = bool(crossings)
 
-    run_starts = [run["base"][0] for run in runs]
-    run_ends = [run["base"][-1] for run in runs]
     per_tile: dict[tuple[int, int], list[int]] = defaultdict(list)
     for index, run in enumerate(runs):
         per_tile[run["tile"]].append(index)
+    run_starts = [run["base"][0] for run in runs]
+    run_ends = [run["base"][-1] for run in runs]
 
-    # each car keeps its own period: quantized to the cycle when it waits at
-    # lights (so its light alignment repeats), else its own lap. Sharing one
-    # period across cars would pad the quicker cars by minutes.
     vehicle_entries: list[dict] = []
     for vehicle in loop.vehicles:
         phase = vehicle["phase"]
-        period = base_period if not stops else math.ceil(base_period / cycle) * cycle
-        for _ in range(4):
-            trial = _car_windows(crossings, phase, period, config, {})
-            lap = base_period + sum(wait for *_, wait in trial)
-            candidate = math.ceil(lap / cycle - 1e-9) * cycle if stops else lap
-            if candidate == period:
-                break
-            period = candidate
-        windows = _car_windows(crossings, phase, period, config, counters)
-        lap = base_period + sum(wait for *_, wait in windows)
-        pad = period - lap  # in [0, cycle), so no car is padded by much
-        padded = _distribute_pad(windows, pad)
-        creep = pad if not padded else 0.0
-        full = ([(0.0, 0.0, creep)] if creep else []) + list(padded)
-        # each window is stored in the run its slot falls in; a run carries the
-        # delay already accrued at its start, so no stop is duplicated across
-        # the tiles a loop spans
+        events: list[tuple[float, float]] = []
+        if not stops:
+            period = base_period
+        else:
+            # each car keeps its own period, quantized to the cycle so its light
+            # alignment repeats each lap
+            period = math.ceil(base_period / cycle) * cycle
+            for _ in range(4):
+                trial = _car_events(crossings, phase, period, config, {})
+                lap = base_period + sum(wait for _, wait in trial)
+                candidate = math.ceil(lap / cycle - 1e-9) * cycle
+                if candidate == period:
+                    break
+                period = candidate
+            events = _car_events(crossings, phase, period, config, counters)
+            if events:
+                lap = base_period + sum(wait for _, wait in events)
+                pad = period - lap  # in [0, cycle)
+                if pad > 1e-6:
+                    events[0] = (events[0][0], events[0][1] + pad)
+            else:
+                period = base_period  # nothing to wait for, no alignment needed
+        # each stop is stored in the run its gate falls in, with the wait
+        # already accrued at the run's start, so it is written once per loop
         per_run = []
         for start, end in zip(run_starts, run_ends):
             per_run.append(
                 {
-                    "carry": round(_delay_at(start, full), 3),
-                    "windows": [
-                        [round(slot, 3), round(line, 3), round(wait, 3)]
-                        for slot, line, wait in full
-                        if start <= slot <= end
+                    "carry": round(
+                        sum(wait for gate, wait in events if gate < start - 1e-6), 3
+                    ),
+                    "events": [
+                        [round(gate, 3), round(wait, 3)]
+                        for gate, wait in events
+                        if start - 1e-6 <= gate <= end + 1e-6
                     ],
                 }
             )
