@@ -32,10 +32,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-# where the loop report looks for the comune di Milano boundary by default.
+# where the loop report looks for the boundary by default; the small "piece"
+# polygon keeps the test area (and the loop search) manageable.
 # data/ is local-only, so if the file is missing the report GeoJSON keeps every
 # loop instead of failing.
-DEFAULT_REPORT_POLYGON = Path("../data/milano_polygon.json")
+DEFAULT_REPORT_POLYGON = Path("../data/milan_piece_polygon.json")
 
 
 def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -> Path:
