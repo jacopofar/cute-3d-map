@@ -1043,7 +1043,10 @@ def _loop_to_tiles(
                 lap = base_period + sum(wait for _, wait in events)
                 pad = period - lap  # in [0, cycle)
                 if pad > 1e-6:
-                    events[0] = (events[0][0], events[0][1] + pad)
+                    # put the pad on the LAST stop: it only shifts times after
+                    # the final crossing, so it cannot invalidate any stop
+                    # decision (adding it up front did exactly that)
+                    events[-1] = (events[-1][0], events[-1][1] + pad)
             else:
                 period = base_period  # nothing to wait for, no alignment needed
         # each stop is stored in the run its gate falls in, with the wait
