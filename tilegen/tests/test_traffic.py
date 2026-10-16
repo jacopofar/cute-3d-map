@@ -24,6 +24,22 @@ def square_ways(lon, lat, d, oneway=None, reverse=False):
     return ways
 
 
+def grid_ways(n=8, d=0.001, lon=9.18, lat=45.5):
+    """An n x n grid of two-way streets, for the random-loop generator."""
+
+    def point(i, j):
+        return (lon + i * d, lat + j * d)
+
+    ways = []
+    for i in range(n):
+        for j in range(n):
+            if i + 1 < n:
+                ways.append(Way([point(i, j), point(i + 1, j)], highway="residential"))
+            if j + 1 < n:
+                ways.append(Way([point(i, j), point(i, j + 1)], highway="residential"))
+    return ways
+
+
 def segs_to_coords(loop):
     coords = []
     for seg in loop.segs:
@@ -240,3 +256,48 @@ def test_loop_report_and_geojson():
     assert features[0]["geometry"]["type"] == "LineString"
     assert features[0]["properties"]["kind"] == "car"
     assert features[0]["properties"]["vehicles"] == len(loops[0].vehicles)
+
+
+def test_random_loops_are_closed_and_within_bounds():
+    graph = traffic.build_graph(grid_ways())
+    config = TrafficConfig(
+        method="random",
+        loop_count=5,
+        seed=1,
+        min_loop_length=100.0,
+        max_loop_length=5000.0,
+    )
+    loops = traffic.random_loops(graph, config, "car")
+    assert 1 <= len(loops) <= 5
+    for loop in loops:
+        coords = traffic.loop_coords(loop)
+        assert coords[0] == coords[-1]  # closed
+        assert 100.0 <= loop.length <= 5000.0
+        assert loop.kind == "car"
+    assert len({loop.id for loop in loops}) == len(loops)  # no duplicates
+
+
+def test_random_loops_are_deterministic():
+    graph = traffic.build_graph(grid_ways())
+    config = TrafficConfig(method="random", loop_count=5, seed=7, min_loop_length=100.0)
+    first = [loop.id for loop in traffic.random_loops(graph, config, "car")]
+    second = [loop.id for loop in traffic.random_loops(graph, config, "car")]
+    assert first == second
+
+
+def test_random_loops_reject_too_short():
+    graph = traffic.build_graph(grid_ways())
+    config = TrafficConfig(
+        method="random", loop_count=5, seed=1, min_loop_length=1_000_000.0
+    )
+    assert traffic.random_loops(graph, config, "car") == []
+
+
+def test_build_loops_dispatches_on_method():
+    graph = traffic.build_graph(grid_ways())
+    random_config = TrafficConfig(
+        method="random", loop_count=3, seed=2, min_loop_length=100.0
+    )
+    assert len(traffic.build_loops(graph, random_config, "car")) == 3
+    face_config = TrafficConfig(method="faces", min_loop_length=80.0)
+    assert len(traffic.build_loops(graph, face_config, "car")) > 0

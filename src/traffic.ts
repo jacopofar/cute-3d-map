@@ -19,9 +19,9 @@ export const CAR_TRAFFIC: TrafficFleetConfig = {
   length: 8 / 3,
   width: 4 / 3,
   height: 1,
-  // precomputed routes cover many small loops, so the loaded window can hold
-  // a lot of vehicles
-  maxVehicles: 30000,
+  // long random loops mean many vehicles pass through the loaded window at
+  // once; keep enough slots that none are dropped
+  maxVehicles: 120000,
 };
 
 // trains/trams: longer and slimmer than a car (matches the old TRAIN_FLEET)

@@ -7,12 +7,17 @@ so a vehicle's arc-length along the loop is
 
     s(t) = v * ((t + phase * period) % period)
 
-Loops are found globally (planar faces of the whole network) so that no
-vehicle is emitted twice and cycles are correct across tile boundaries; only
-at the end is each loop split per tile at the tile boundaries. A tile stores
-the geometry pieces that fall inside it plus the phases/colors of the vehicles
-on those loops. A piece's time interval does not depend on the vehicle phase,
-so the geometry is shared by every vehicle on the loop.
+Loops are built globally, then split per tile at the tile boundaries; a tile
+stores the geometry pieces that fall inside it plus the phases/colors of the
+vehicles on those loops. A piece's time interval does not depend on the vehicle
+phase, so the geometry is shared by every vehicle on the loop.
+
+Two generators exist:
+
+- **faces** (n trains/trams): loops are the planar faces of the whole graph.
+- **random** (cars): pick three random nodes and stitch the shortest paths
+  A -> B -> C -> A, rejecting loops below the minimum length, until the target
+  loop count is reached. Later the node pick can be weighted by census data.
 
 Metric note: everything (loop length, piece length, arc-length offsets) is
 measured with the same haversine formula. Shapely's planar lengths are in
@@ -21,7 +26,9 @@ done by walking the geometry in arc-length space instead of clipping.
 """
 
 import hashlib
+import heapq
 import math
+import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -158,6 +165,11 @@ class Loop:
 
 @dataclass
 class TrafficConfig:
+    # "faces" (planar faces of the graph) or "random" (three nodes stitched by
+    # shortest paths). See the module docstring.
+    method: str = "faces"
+    loop_count: int = 1000  # random method: how many loops to target
+    seed: int = 0  # random method: reproducible node picks
     spacing: float = DEFAULT_SPACING
     max_vehicles: int = DEFAULT_MAX_VEHICLES
     min_loop_length: float = 80.0
@@ -171,14 +183,19 @@ class TrafficConfig:
     gray_fraction: float = GRAY_FRACTION
 
 
-# cars: six times the old density (spacing 18 m) and small block loops dropped,
-# so a loop is a real street circuit rather than a car endlessly circling one
-# building or a roundabout
+# cars: 1000 loops stitched through three random nodes. Random points are far
+# apart, so loops are long (Milan: ~20 km) and a spacing-derived fleet would be
+# huge, so max_vehicles is the real density knob here (it scales the spacing up
+# to fit). min length only drops short loops; there is a generous max because
+# long loops are the point.
 CAR_CONFIG = TrafficConfig(
+    method="random",
+    loop_count=1000,
+    seed=20261016,
     spacing=18.0,
-    max_vehicles=80000,
+    max_vehicles=15000,
     min_loop_length=400.0,
-    max_loop_length=6000.0,
+    max_loop_length=30000.0,
 )
 
 # trains/trams: sparse and long, no grays, one orange
@@ -380,6 +397,139 @@ def find_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[L
     return loops
 
 
+def _directed_adjacency(
+    graph: Graph,
+) -> dict[str, list[tuple[str, str, float]]]:
+    """node -> (neighbor, edge key, length) for every legal travel direction."""
+    adjacency: dict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    for key, edge in graph.edges.items():
+        if edge.forward:
+            adjacency[edge.a].append((edge.b, key, edge.length))
+        if edge.backward:
+            adjacency[edge.b].append((edge.a, key, edge.length))
+    return adjacency
+
+
+def _a_star(
+    graph: Graph,
+    adjacency: dict[str, list[tuple[str, str, float]]],
+    start: str,
+    goal: str,
+) -> list[tuple[str, int]] | None:
+    """Shortest directed path start -> goal as (edge key, direction) steps.
+
+    A* with the great-circle distance to the goal: edge lengths are geodesic,
+    so the heuristic never overestimates and the search stays small even on the
+    whole Milan graph."""
+    if start == goal:
+        return []
+    goal_coord = graph.coords[goal]
+    dist: dict[str, float] = {start: 0.0}
+    prev: dict[str, tuple[str, str]] = {}
+    heap: list[tuple[float, float, str]] = [
+        (haversine_m(graph.coords[start], goal_coord), 0.0, start)
+    ]
+    while heap:
+        _, travelled, node = heapq.heappop(heap)
+        if node == goal:
+            steps: list[tuple[str, int]] = []
+            while node != start:
+                previous, key = prev[node]
+                edge = graph.edges[key]
+                steps.append((key, 1 if edge.a == previous else -1))
+                node = previous
+            steps.reverse()
+            return steps
+        if travelled > dist.get(node, math.inf):
+            continue
+        for neighbor, key, weight in adjacency[node]:
+            candidate = travelled + weight
+            if candidate < dist.get(neighbor, math.inf):
+                dist[neighbor] = candidate
+                prev[neighbor] = (node, key)
+                estimate = candidate + haversine_m(graph.coords[neighbor], goal_coord)
+                heapq.heappush(heap, (estimate, candidate, neighbor))
+    return None
+
+
+def _steps_to_segs(
+    graph: Graph, start: str, steps: list[tuple[str, int]]
+) -> list[list[tuple[float, float]]]:
+    segs: list[list[tuple[float, float]]] = []
+    for key, direction in steps:
+        edge = graph.edges[key]
+        segs.append(edge.coords if direction == 1 else list(reversed(edge.coords)))
+    return segs
+
+
+def _path_speed(
+    graph: Graph, steps: list[tuple[str, int]], config: TrafficConfig
+) -> float:
+    weight = 0.0
+    speed_acc = 0.0
+    for key, _ in steps:
+        edge = graph.edges[key]
+        speed_acc += config.speeds.get(edge.highway, config.default_speed) * edge.length
+        weight += edge.length
+    return speed_acc / weight if weight > 0 else config.default_speed
+
+
+def random_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[Loop]:
+    """Loop A -> B -> C -> A through three random nodes, via shortest paths.
+
+    Repeats until `config.loop_count` loops (or a bounded number of attempts),
+    keeping a loop only when its length is within the configured bounds. The
+    pick is seeded, so a run is reproducible."""
+    adjacency = _directed_adjacency(graph)
+    nodes = [node for node, edges in graph.incident.items() if edges]
+    if len(nodes) < 3:
+        return []
+    rng = random.Random(config.seed)
+    loops: list[Loop] = []
+    seen: set[str] = set()
+    max_attempts = config.loop_count * 50
+    attempts = 0
+    while len(loops) < config.loop_count and attempts < max_attempts:
+        attempts += 1
+        a, b, c = rng.sample(nodes, 3)
+        first = _a_star(graph, adjacency, a, b)
+        if first is None:
+            continue
+        second = _a_star(graph, adjacency, b, c)
+        if second is None:
+            continue
+        third = _a_star(graph, adjacency, c, a)
+        if third is None:
+            continue
+        steps = first + second + third
+        length = sum(graph.edges[key].length for key, _ in steps)
+        if not (config.min_loop_length <= length <= config.max_loop_length):
+            continue
+        loop_id = hashlib.sha1(
+            "|".join(f"{key}:{direction}" for key, direction in steps).encode()
+        ).hexdigest()[:12]
+        if loop_id in seen:
+            continue
+        seen.add(loop_id)
+        loops.append(
+            Loop(
+                id=loop_id,
+                segs=_steps_to_segs(graph, a, steps),
+                length=length,
+                base_speed=_path_speed(graph, steps, config),
+                kind=kind,
+            )
+        )
+    return loops
+
+
+def build_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[Loop]:
+    """Dispatch to the configured loop generator."""
+    if config.method == "random":
+        return random_loops(graph, config, kind)
+    return find_loops(graph, config, kind=kind)
+
+
 def _vehicle_color(seed: str, config: TrafficConfig) -> str:
     h = int(hashlib.md5(seed.encode()).hexdigest(), 16)
     gray = h % 1000 < config.gray_fraction * 1000
@@ -574,7 +724,7 @@ def build_fleets(
     for kind, ways in ways_by_kind.items():
         config = configs[kind]
         graph = build_graph(ways)
-        loops = find_loops(graph, config, kind=kind)
+        loops = build_loops(graph, config, kind)
         assign_vehicles(loops, config)
         fleets[kind] = loops
     return fleets
@@ -611,18 +761,19 @@ def loop_coords(loop: Loop) -> list[tuple[float, float]]:
     return coords
 
 
-# loop-length buckets (meters) for the report histogram
+# loop-length buckets (meters) for the report histogram; they span the short
+# face loops up to the long random ones
 HISTOGRAM_BUCKETS = (
     0.0,
-    200.0,
-    400.0,
-    600.0,
-    800.0,
+    500.0,
     1000.0,
-    1500.0,
     2000.0,
-    3000.0,
     5000.0,
+    10000.0,
+    15000.0,
+    20000.0,
+    25000.0,
+    30000.0,
     math.inf,
 )
 

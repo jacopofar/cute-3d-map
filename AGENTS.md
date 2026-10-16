@@ -48,9 +48,10 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
 - `tilegen/geo.py` — slippy-tile helpers shared by the generator.
-- `tilegen/traffic.py` — precomputes vehicle routes: global graph, planar-face
-  loops, per-tile split. Per-fleet configs (`CAR_CONFIG`, `TRAIN_CONFIG`) drive
-  cars and trains, and `loop_report` / `loops_to_geojson` build the loop report.
+- `tilegen/traffic.py` — precomputes vehicle routes: global graph, loop
+  generation (`random` three-point loops for cars, planar `faces` for trains),
+  per-tile split. Per-fleet configs (`CAR_CONFIG`, `TRAIN_CONFIG`) drive cars
+  and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
 
@@ -67,8 +68,10 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   `tree_row` (the road/rail network is not emitted; routes come from
   `traffic`).
 - **fleet** — a `TrafficRenderer`; everything the traffic block holds.
-- **loop** — a closed planar face of the road (or rail) graph; the unit of
-  precomputed traffic.
+- **loop** — a closed walk of the road (or rail) graph; the unit of precomputed
+  traffic.
+- **method** — how a fleet builds loops: `random` (cars: shortest paths through
+  three random nodes) or `faces` (trains: planar faces of the graph).
 - **kind** — a loop/vehicle tag, `car` or `train`; picks the fleet and body.
 - **run** — the piece of a loop that falls inside one tile, with `[t0, t1)`
   seconds into the loop's `period`.

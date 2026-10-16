@@ -41,20 +41,22 @@ The project has two halves:
 Every vehicle is precomputed offline in `tilegen/traffic.py`; `src/traffic.ts`
 is a stateless renderer that samples it. There is no runtime simulation.
 
-- A **loop** is a planar face of the whole road (or rail) graph (found
-  globally, so no vehicle is emitted twice and cycles are correct across tile
-  boundaries). Vehicles are spread evenly along it by `phase` and travel at one
-  constant speed, so arc-length is `s(t) = v * ((t + phase * period) % period)`.
+- A **loop** is a closed walk of the road (or rail) graph. Cars build them
+  randomly: three nodes A, B, C are picked and the shortest directed paths
+  A -> B -> C -> A are stitched into a loop (`method="random"`, 1000 loops,
+  min 400 m, seeded so a run is reproducible). Trains/trams use the planar
+  faces of the rail graph instead (`method="faces"`, min 500 m). Vehicles are
+  spread evenly along a loop by `phase` and travel at one constant speed, so
+  arc-length is `s(t) = v * ((t + phase * period) % period)`.
 - Each loop is split per tile at tile boundaries. A tile stores the pieces
   that fall inside it (`runs`, with `t0`/`t1` seconds into `period`) plus the
   `vehicles` (`phase` + color) on those loops; each entry is tagged `kind`
   (`car` or `train`) and the renderer merges pieces that share a loop `id`.
   Nothing simulates, nothing rebuilds when a tile arrives, and a piece is drawn
   only while its half-open `[t0, t1)` contains the phase.
-- Two fleets come out of the same machinery: cars on drivable highways (spacing
-  18 m) and trains/trams on `railway=rail`/`tram` (spacing 800 m, orange).
-  Small loops are dropped (400 m for cars, 500 m for trains) so nothing circles
-  a single building or a roundabout.
+- Two fleets come out of the same machinery: cars on drivable highways (up to
+  15k vehicles across the 1000 loops) and trains/trams on `railway=rail`/`tram`
+  (spacing 800 m, orange).
 - Vehicles are gated on the zoom (and the traffic checkbox) as before.
 
 ### Loop report
