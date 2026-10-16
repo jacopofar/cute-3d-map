@@ -99,11 +99,14 @@ const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 // one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
-// `period`; the piece is drawn while phase is in [t0, t1). See tilegen/traffic.py.
+// `period`; the piece is drawn while the phase is in [t0, t1). `times[i]` is
+// the seconds from the run's start to `coords[i]` (times[0] is 0), so the
+// speed may vary along the run. See tilegen/traffic.py.
 export interface TrafficRun {
   t0: number;
   t1: number;
   coords: [number, number][];
+  times: number[];
 }
 
 export interface TrafficVehicle {

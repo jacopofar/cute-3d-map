@@ -22,6 +22,7 @@ from traffic import (
     loop_coords,
     loop_report,
     loops_to_geojson,
+    parse_maxspeed,
     road_oneway,
 )
 
@@ -214,6 +215,9 @@ def load_ways(
         parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
         # oneway only means anything on the road network
         oneway = road_oneway(tags) if tag_key == "highway" else None
+        maxspeed = (
+            parse_maxspeed(tags.get("maxspeed")) if tag_key == "highway" else None
+        )
         for part in parts:
             if isinstance(part, LineString):
                 ways.append(
@@ -221,6 +225,7 @@ def load_ways(
                         coords=[(c[0], c[1]) for c in part.coords],
                         oneway=oneway,
                         highway=value,
+                        maxspeed=maxspeed,
                     )
                 )
     return ways

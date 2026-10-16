@@ -74,11 +74,14 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   three random nodes) or `faces` (trains: planar faces of the graph).
 - **kind** — a loop/vehicle tag, `car` or `train`; picks the fleet and body.
 - **run** — the piece of a loop that falls inside one tile, with `[t0, t1)`
-  seconds into the loop's `period`.
+  seconds into the loop's `period` and a `times` keyframe per coordinate.
 - **phase** — a vehicle's 0..1 offset along its loop; vehicles are spread
   `k/n` so spacing is even.
-- **period** — seconds for one lap of a loop (`length / speed`); the frontend
-  samples `s = v * ((t + phase * period) % period)`.
+- **period** — seconds for one lap of a loop (the sum of its seg times, since
+  speeds vary along it); the client samples the run by `(t + phase * period) %
+  period`.
+- **speed** — per edge: the `maxspeed` tag when present, else the highway-class
+  default; clamped to a sane range.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap

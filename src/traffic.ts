@@ -32,17 +32,16 @@ export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   maxVehicles: 500,
 };
 
-// a run with its arc lengths precomputed once, at tile-load time
+// a run with its time keyframes; speed may vary along it
 interface PreparedRun {
   t0: number;
   t1: number;
   coords: [number, number][];
-  cum: number[];
+  times: number[];
 }
 
 interface PreparedVehicle {
   phase: number;
-  v: number;
   period: number;
   // shared by every vehicle on the loop, so the geometry is prepared once
   runs: PreparedRun[];
@@ -51,25 +50,8 @@ interface PreparedVehicle {
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
 
-function metersBetween(a: [number, number], b: [number, number]): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(b[1] - a[1]);
-  const dLon = toRad(b[0] - a[0]);
-  const la1 = toRad(a[1]);
-  const la2 = toRad(b[1]);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
 function prepareRun(run: TrafficRun): PreparedRun {
-  const cum = [0];
-  for (let i = 1; i < run.coords.length; i++) {
-    cum.push(cum[i - 1] + metersBetween(run.coords[i - 1], run.coords[i]));
-  }
-  return { t0: run.t0, t1: run.t1, coords: run.coords, cum };
+  return { t0: run.t0, t1: run.t1, coords: run.coords, times: run.times };
 }
 
 // the run whose [t0, t1) contains tau, or undefined when the vehicle is in a
@@ -92,24 +74,25 @@ function findRun(runs: PreparedRun[], tau: number): PreparedRun | undefined {
   return tau <= run.t1 + TIME_EPS ? run : undefined;
 }
 
-// point (lon/lat) and heading at `meters` into the run
+// point (lon/lat) and heading at `seconds` into the run. The run's speed is
+// constant between two keyframes, so interpolating them by time is exact.
 function sampleRun(
   run: PreparedRun,
-  meters: number,
+  seconds: number,
 ): { lon: number; lat: number; heading: number } {
-  const total = run.cum[run.cum.length - 1];
-  const d = Math.max(0, Math.min(total, meters));
+  const total = run.times[run.times.length - 1];
+  const d = Math.max(0, Math.min(total, seconds));
   let lo = 1;
-  let hi = run.cum.length - 1;
+  let hi = run.times.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (run.cum[mid] < d) lo = mid + 1;
+    if (run.times[mid] < d) lo = mid + 1;
     else hi = mid;
   }
   const i = lo;
-  const c0 = run.cum[i - 1];
-  const c1 = run.cum[i];
-  const t = c1 > c0 ? (d - c0) / (c1 - c0) : 0;
+  const t0 = run.times[i - 1];
+  const t1 = run.times[i];
+  const t = t1 > t0 ? (d - t0) / (t1 - t0) : 0;
   const a = run.coords[i - 1];
   const b = run.coords[i];
   const lon = a[0] + (b[0] - a[0]) * t;
@@ -182,7 +165,6 @@ export class TrafficRenderer {
     const byId = new Map<
       string,
       {
-        v: number;
         period: number;
         runs: PreparedRun[];
         vehicles: TrafficLoop["vehicles"];
@@ -192,7 +174,6 @@ export class TrafficRenderer {
       let group = byId.get(loop.id);
       if (!group) {
         group = {
-          v: loop.v,
           period: loop.period,
           runs: [],
           vehicles: loop.vehicles,
@@ -214,7 +195,6 @@ export class TrafficRenderer {
         this.mesh.setColorAt(slot, new THREE.Color(vehicle.color));
         vehicles.push({
           phase: vehicle.phase,
-          v: group.v,
           period: group.period,
           runs: group.runs,
         });
@@ -247,8 +227,8 @@ export class TrafficRenderer {
         count++;
         continue;
       }
-      const s = vehicle.v * (tau - run.t0);
-      const { lon, lat, heading } = sampleRun(run, s);
+      const seconds = tau - run.t0;
+      const { lon, lat, heading } = sampleRun(run, seconds);
       const m = toModelCoords([lon, lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, heading);

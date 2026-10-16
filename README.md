@@ -45,9 +45,13 @@ is a stateless renderer that samples it. There is no runtime simulation.
   randomly: three nodes A, B, C are picked and the shortest directed paths
   A -> B -> C -> A are stitched into a loop (`method="random"`, 1000 loops,
   min 400 m, seeded so a run is reproducible). Trains/trams use the planar
-  faces of the rail graph instead (`method="faces"`, min 500 m). Vehicles are
-  spread evenly along a loop by `phase` and travel at one constant speed, so
-  arc-length is `s(t) = v * ((t + phase * period) % period)`.
+  faces of the rail graph instead (`method="faces"`, min 500 m).
+- Speed varies along a loop: each edge travels at its `maxspeed` tag when
+  present, otherwise the highway-class default (`primary`/`residential`/...),
+  so the loop's `period` is the sum of edge times. Runs carry `(coords, times)`
+  keyframes and the vehicle is placed by phase, so it speeds up and slows down
+  as it moves between road classes. Vehicles are spread evenly in time by
+  `phase`.
 - Each loop is split per tile at tile boundaries. A tile stores the pieces
   that fall inside it (`runs`, with `t0`/`t1` seconds into `period`) plus the
   `vehicles` (`phase` + color) on those loops; each entry is tagged `kind`

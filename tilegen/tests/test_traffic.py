@@ -301,3 +301,43 @@ def test_build_loops_dispatches_on_method():
     assert len(traffic.build_loops(graph, random_config, "car")) == 3
     face_config = TrafficConfig(method="faces", min_loop_length=80.0)
     assert len(traffic.build_loops(graph, face_config, "car")) > 0
+
+
+def test_parse_maxspeed():
+    assert traffic.parse_maxspeed("50") == pytest.approx(50 / 3.6)
+    assert traffic.parse_maxspeed("50 km/h") == pytest.approx(50 / 3.6)
+    assert traffic.parse_maxspeed("30 mph") == pytest.approx(30 * 0.44704)
+    assert traffic.parse_maxspeed("walk") == pytest.approx(1.4)
+    assert traffic.parse_maxspeed("IT:urban") == pytest.approx(50 / 3.6)
+    assert traffic.parse_maxspeed("signals") is None
+    assert traffic.parse_maxspeed(None) is None
+
+
+def slow_square():
+    """A square whose first edge is tagged slow (2 m/s)."""
+    ways = square_ways(9.18, 45.5, 0.001)
+    ways[0] = Way(coords=ways[0].coords, highway="residential", maxspeed=2.0)
+    return traffic.build_graph(ways)
+
+
+def test_loop_period_uses_per_segment_speed():
+    graph = slow_square()
+    loop = traffic.find_loops(graph, TrafficConfig(min_loop_length=80.0))[0]
+    assert min(loop.seg_speeds) == pytest.approx(2.0)
+    assert max(loop.seg_speeds) == pytest.approx(10.0)  # residential default
+    expected = sum(
+        traffic.seg_length(seg) / speed
+        for seg, speed in zip(loop.segs, loop.seg_speeds)
+    )
+    assert loop.period == pytest.approx(expected)
+    assert loop.v == pytest.approx(loop.length / loop.period)
+
+
+def test_split_runs_times_follow_segment_speeds():
+    loop = traffic.find_loops(slow_square(), TrafficConfig(min_loop_length=80.0))[0]
+    runs = traffic.split_runs(loop, 15)
+    for _tile, t0, t1, _coords, times in runs:
+        assert times[0] == pytest.approx(0.0)
+        assert times == sorted(times)  # never goes back in time
+        assert t1 - t0 == pytest.approx(times[-1])
+    assert runs[-1][2] == pytest.approx(loop.period)

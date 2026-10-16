@@ -1,11 +1,11 @@
 """Precompute vehicle trajectories offline.
 
 The frontend no longer simulates traffic: every vehicle is a deterministic
-function of wall-clock time. A **loop** is a closed walk of the road graph;
-its vehicles are spread evenly by phase and travel it at one constant speed,
-so a vehicle's arc-length along the loop is
-
-    s(t) = v * ((t + phase * period) % period)
+function of wall-clock time. A **loop** is a closed walk of the road graph,
+split into per-edge **segs**, each with its own speed (the `maxspeed` tag when
+present, else the highway-class default). A loop's `period` is the sum of
+seg times, and a **run** carries time keyframes, so a vehicle's position is a
+function of the phase `(t + phase * period) % period`.
 
 Loops are built globally, then split per tile at the tile boundaries; a tile
 stores the geometry pieces that fall inside it plus the phases/colors of the
@@ -132,11 +132,38 @@ def node_key(c: tuple[float, float]) -> str:
     return f"{c[0]:.6f},{c[1]:.6f}"
 
 
+def parse_maxspeed(value) -> float | None:
+    """Parse an OSM maxspeed tag to m/s, or None when there is no usable
+    number (the caller then falls back to the highway class speed)."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in ("walk", "foot"):
+        return 1.4
+    digits = ""
+    for character in text:
+        if character.isdigit() or (character == "." and digits and "." not in digits):
+            digits += character
+        elif digits:
+            break
+    if not digits:
+        if "urban" in text:
+            return 50 / 3.6
+        if "rural" in text:
+            return 90 / 3.6
+        return None
+    speed = float(digits)
+    if "mph" in text:
+        return speed * 0.44704
+    return speed / 3.6
+
+
 @dataclass
 class Way:
     coords: list[tuple[float, float]]
     oneway: str | None = None
     highway: str | None = None
+    maxspeed: float | None = None  # m/s
 
 
 @dataclass
@@ -149,18 +176,23 @@ class Edge:
     backward: bool
     highway: str | None
     length: float
+    maxspeed: float | None = None  # m/s
 
 
 @dataclass
 class Loop:
     id: str
     segs: list[list[tuple[float, float]]]
+    seg_speeds: list[float]  # m/s per seg, parallel to segs
     length: float
-    base_speed: float
+    period: float  # seconds for one lap (speeds vary along the loop)
     kind: str = "car"
-    v: float = 0.0
-    period: float = 0.0
     vehicles: list[dict] = field(default_factory=list)
+
+    @property
+    def v(self) -> float:
+        """Mean speed, for the report."""
+        return self.length / self.period if self.period else 0.0
 
 
 @dataclass
@@ -243,11 +275,32 @@ class Graph:
             backward=way.oneway != "yes",
             highway=way.highway,
             length=length,
+            maxspeed=way.maxspeed,
         )
         self.incident[a].append(key)
         self.incident[b].append(key)
         self.coords[a] = coords[0]
         self.coords[b] = coords[-1]
+
+
+def edge_speed(edge: Edge, config: TrafficConfig) -> float:
+    """Travel speed along an edge: its maxspeed tag when present, else the
+    highway-class default. Clamped to a sane range."""
+    speed = (
+        edge.maxspeed
+        if edge.maxspeed is not None
+        else config.speeds.get(edge.highway, config.default_speed)
+    )
+    return max(1.0, min(40.0, speed))
+
+
+def seg_length(seg: list[tuple[float, float]]) -> float:
+    return sum(haversine_m(a, b) for a, b in pairwise(seg))
+
+
+def loop_period(segs: list[list[tuple[float, float]]], speeds: list[float]) -> float:
+    """Seconds for one lap: each seg crossed at its own speed."""
+    return sum(seg_length(seg) / speed for seg, speed in zip(segs, speeds) if speed > 0)
 
 
 def build_graph(ways, min_length: float = 1.0) -> Graph:
@@ -365,7 +418,7 @@ def _face_to_loop(graph: Graph, walk: list[tuple[str, str]], config: TrafficConf
 
     forward = _walk_to_steps(graph, nodes, keys)
     if _steps_legal(graph, forward[0]):
-        _, segs = forward
+        steps, segs = forward
     else:
         # the walk is the planar (CCW) direction; driving it may require the
         # opposite direction
@@ -373,17 +426,17 @@ def _face_to_loop(graph: Graph, walk: list[tuple[str, str]], config: TrafficConf
         reverse = _walk_to_steps(graph, reverse_nodes, list(reversed(keys)))
         if not _steps_legal(graph, reverse[0]):
             return None
-        _, segs = reverse
+        steps, segs = reverse
 
-    weight = 0.0
-    speed_acc = 0.0
-    for key in set(keys):
-        edge = graph.edges[key]
-        speed_acc += config.speeds.get(edge.highway, config.default_speed) * edge.length
-        weight += edge.length
-    base_speed = speed_acc / weight if weight > 0 else config.default_speed
+    speeds = [edge_speed(graph.edges[key], config) for key, _ in steps]
     loop_id = hashlib.sha1("|".join(sorted(set(keys))).encode()).hexdigest()[:12]
-    return Loop(id=loop_id, segs=segs, length=length, base_speed=base_speed)
+    return Loop(
+        id=loop_id,
+        segs=segs,
+        seg_speeds=speeds,
+        length=length,
+        period=loop_period(segs, speeds),
+    )
 
 
 def find_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[Loop]:
@@ -453,25 +506,13 @@ def _a_star(
 
 
 def _steps_to_segs(
-    graph: Graph, start: str, steps: list[tuple[str, int]]
+    graph: Graph, steps: list[tuple[str, int]]
 ) -> list[list[tuple[float, float]]]:
     segs: list[list[tuple[float, float]]] = []
     for key, direction in steps:
         edge = graph.edges[key]
         segs.append(edge.coords if direction == 1 else list(reversed(edge.coords)))
     return segs
-
-
-def _path_speed(
-    graph: Graph, steps: list[tuple[str, int]], config: TrafficConfig
-) -> float:
-    weight = 0.0
-    speed_acc = 0.0
-    for key, _ in steps:
-        edge = graph.edges[key]
-        speed_acc += config.speeds.get(edge.highway, config.default_speed) * edge.length
-        weight += edge.length
-    return speed_acc / weight if weight > 0 else config.default_speed
 
 
 def random_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[Loop]:
@@ -511,12 +552,15 @@ def random_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list
         if loop_id in seen:
             continue
         seen.add(loop_id)
+        segs = _steps_to_segs(graph, steps)
+        speeds = [edge_speed(graph.edges[key], config) for key, _ in steps]
         loops.append(
             Loop(
                 id=loop_id,
-                segs=_steps_to_segs(graph, a, steps),
+                segs=segs,
+                seg_speeds=speeds,
                 length=length,
-                base_speed=_path_speed(graph, steps, config),
+                period=loop_period(segs, speeds),
                 kind=kind,
             )
         )
@@ -552,8 +596,6 @@ def assign_vehicles(loops: list[Loop], config: TrafficConfig) -> None:
 
     for loop in loops:
         n = max(1, round(loop.length / spacing))
-        loop.v = loop.base_speed
-        loop.period = loop.length / loop.v
         loop.vehicles = [
             {
                 "phase": k / n,
@@ -625,27 +667,45 @@ def _tile_of_mid(
 
 def split_runs(
     loop: Loop, zoom: int
-) -> list[tuple[tuple[int, int], float, float, list[tuple[float, float]]]]:
-    """Split a loop into runs of constant tile, in arc-length space.
+) -> list[
+    tuple[
+        tuple[int, int],
+        float,
+        float,
+        list[tuple[float, float]],
+        list[float],
+    ]
+]:
+    """Split a loop into runs of constant tile, in time space.
 
-    Returns (tile, t0, t1, coords) with t0/t1 seconds into the loop's period.
-    The first run starts at t0 = 0 and the last ends at t1 = period; the seam
-    at t = 0/period is therefore two runs (as every loop start is), which the
-    client resolves with a half-open interval."""
-    runs: list[tuple[tuple[int, int], float, float, list[tuple[float, float]]]] = []
+    Returns (tile, t0, t1, coords, times): t0/t1 are seconds into the loop's
+    period, and times[i] is the seconds from the run's start to coords[i]
+    (times[0] is 0). Speed is constant along an edge, so a run split inside one
+    stays linear in time; the client samples by time. The first run starts at
+    t0 = 0 and the last ends at t1 = period, so the seam at t = 0/period is two
+    runs, resolved by the client's half-open interval."""
+    runs: list[
+        tuple[
+            tuple[int, int],
+            float,
+            float,
+            list[tuple[float, float]],
+            list[float],
+        ]
+    ] = []
     current: dict | None = None
-    s = 0.0
-    for seg in loop.segs:
-        seg_len = sum(haversine_m(a, b) for a, b in pairwise(seg))
+    elapsed = 0.0
+    for seg, speed in zip(loop.segs, loop.seg_speeds):
+        seg_time = seg_length(seg) / speed if speed > 0 else 0.0
         pieces: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for a, b in pairwise(seg):
             pieces.extend(segment_pieces(a, b, zoom))
         subtotal = sum(haversine_m(a, b) for a, b in pieces) or 1.0
         acc = 0.0
         for a, b in pieces:
-            sa = s + seg_len * acc / subtotal
+            ta = elapsed + seg_time * acc / subtotal
             acc += haversine_m(a, b)
-            sb = s + seg_len * acc / subtotal
+            tb = elapsed + seg_time * acc / subtotal
             tile = _tile_of_mid(a, b, zoom)
             if (
                 current is not None
@@ -653,26 +713,33 @@ def split_runs(
                 and current["coords"][-1] == a
             ):
                 current["coords"].append(b)
-                current["end_s"] = sb
+                current["times"].append(tb - current["start_t"])
             else:
                 if current is not None and len(current["coords"]) >= 2:
                     runs.append(
                         (
                             current["tile"],
-                            current["start_s"] / loop.v,
-                            current["end_s"] / loop.v,
+                            current["start_t"],
+                            current["start_t"] + current["times"][-1],
                             current["coords"],
+                            current["times"],
                         )
                     )
-                current = {"tile": tile, "start_s": sa, "end_s": sb, "coords": [a, b]}
-        s += seg_len
+                current = {
+                    "tile": tile,
+                    "start_t": ta,
+                    "coords": [a, b],
+                    "times": [0.0, tb - ta],
+                }
+        elapsed += seg_time
     if current is not None and len(current["coords"]) >= 2:
         runs.append(
             (
                 current["tile"],
-                current["start_s"] / loop.v,
-                loop.length / loop.v,
+                current["start_t"],
+                current["start_t"] + current["times"][-1],
                 current["coords"],
+                current["times"],
             )
         )
     return runs
@@ -685,12 +752,13 @@ def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[d
     by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
     for loop in loops:
         per_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
-        for tile, t0, t1, coords in split_runs(loop, zoom):
+        for tile, t0, t1, coords, times in split_runs(loop, zoom):
             per_tile[tile].append(
                 {
                     "t0": round(t0, 3),
                     "t1": round(t1, 3),
                     "coords": [[round(c[0], 7), round(c[1], 7)] for c in coords],
+                    "times": [round(t, 3) for t in times],
                 }
             )
         for tile, runs in per_tile.items():
@@ -797,6 +865,8 @@ def loop_report(fleets: dict[str, list[Loop]]) -> str:
         count = len(lengths)
         vehicles = sum(len(loop.vehicles) for loop in loops)
         total = sum(lengths)
+        periods = sum(loop.period for loop in loops)
+        mean_speed = total / periods if periods else 0.0
         lines.extend(
             [
                 f"- Loops: **{count}**",
@@ -806,6 +876,10 @@ def loop_report(fleets: dict[str, list[Loop]]) -> str:
                     f"**{total / count:.0f}**, max **{lengths[-1]:.0f}**"
                 ),
                 f"- Total loop length: {total / 1000:.1f} km",
+                (
+                    f"- Fleet mean speed: {mean_speed:.1f} m/s "
+                    f"({mean_speed * 3.6:.0f} km/h)"
+                ),
                 "",
                 "| length bucket (m) | loops | vehicles |",
                 "| --- | --- | --- |",
