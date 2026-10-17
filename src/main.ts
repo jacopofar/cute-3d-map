@@ -201,14 +201,22 @@ class CoolMap {
     scale: number;
   };
   constructor(tileCenter: [number, number], zoomLevel: number = 16) {
-    this.tileCenter = tileCenter;
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
       zoom: zoomLevel,
       pitch: 30,
+      // keep the view in the URL as OSM does ("#map=zoom/lat/lon"), so a
+      // position can be linked; the prefix makes maplibre use that shape, and
+      // it reads a fragment pasted on load and updates it as the map moves
+      hash: "map",
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });
+    // the projection origin follows whatever the map actually opened on (a
+    // #map= fragment may have moved it), so no tiles are fetched for the
+    // default center first
+    const opened = this.map.getCenter();
+    this.tileCenter = [opened.lng, opened.lat];
     // for debugging
     this.map.showTileBoundaries = false;
 

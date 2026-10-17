@@ -33,7 +33,10 @@ The project has two halves:
    the precomputed vehicle routes that fall inside the tile. See below.
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
-   and adds a Three.js `CustomLayerInterface`. On every map move it loads/unloads
+   and adds a Three.js `CustomLayerInterface`. The map keeps its view in the URL
+   as a `#map=zoom/lat/lon` permalink (MapLibre's own hash handling, with the
+   `map` prefix so the fragment looks like OSM's): a position can be copied or
+   linked, and a pasted link opens there. On every map move it loads/unloads
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row).

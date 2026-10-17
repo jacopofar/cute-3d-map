@@ -42,7 +42,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
   `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
-  center (`loadUnloadCoord`), debounced 150 ms.
+  center (`loadUnloadCoord`), debounced 150 ms. The map carries its view in a
+  `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre reads and writes it)
+  and the projection origin is seeded from wherever the map opens.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).

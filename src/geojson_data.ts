@@ -181,6 +181,14 @@ export async function objectsAt(
     // means "nothing here" (treat as empty, don't retry forever)
     return { meshes: [], buildings: [], traffic: [], crossings: [] };
   }
+  // A dev server with a SPA fallback (Vite does this) answers a missing
+  // /tiles/... path with index.html and a 200, so a permalink pointing outside
+  // the generated set would otherwise blow up parsing HTML as JSON and retry on
+  // every move. Not JSON means "nothing here" as far as the map is concerned.
+  if (!(response.headers.get("content-type") ?? "").includes("json")) {
+    console.warn(`tile ${x}/${y} is not JSON, treating it as empty`);
+    return { meshes: [], buildings: [], traffic: [], crossings: [] };
+  }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
   }
