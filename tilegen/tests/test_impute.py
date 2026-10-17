@@ -34,6 +34,16 @@ def test_sample_spans_every_value():
     assert {distribution.sample(rng) for _ in range(50)} == {"a", "b", "c"}
 
 
+def test_from_counts_does_not_depend_on_dict_order():
+    # the SQL that builds the counts has no ORDER BY, so the sampler must
+    # canonicalize the order or the same seed would draw a different value
+    a = dist({"red": 5, "blue": 3, "gold": 2})
+    b = dist({"gold": 2, "red": 5, "blue": 3})
+    assert a == b
+    rng_a, rng_b = random.Random(7), random.Random(7)
+    assert [a.sample(rng_a) for _ in range(20)] == [b.sample(rng_b) for _ in range(20)]
+
+
 def test_impute_keeps_the_real_tags():
     distributions = {
         "color": dist({"red": 1}),

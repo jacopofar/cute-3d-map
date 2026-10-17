@@ -35,8 +35,14 @@ class Distribution:
 
     @classmethod
     def from_counts(cls, counts: dict[str, int]) -> "Distribution | None":
-        """None when there is nothing to sample (the tag is never set)."""
-        items = [(str(value), int(count)) for value, count in counts.items() if count]
+        """None when there is nothing to sample (the tag is never set).
+
+        Values are sorted so the cumulative layout does not depend on the
+        caller's dict order: the SQL that builds the counts has no ORDER BY, so
+        without this the same seed could draw a different value between runs."""
+        items = sorted(
+            (str(value), int(count)) for value, count in counts.items() if count
+        )
         if not items:
             return None
         cumulative = tuple(accumulate(count for _, count in items))
