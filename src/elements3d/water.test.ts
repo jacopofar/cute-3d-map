@@ -78,10 +78,10 @@ describe("water", () => {
   it("draws water below level 0 almost transparent", () => {
     const underwater = {
       ...areaFeature("lake"),
-      properties: { cmtype: "water", water: "lake", level: -1 },
+      properties: { cmtype: "water", water: "lake", layer: -1 },
     } as unknown as Geojson.Feature;
     expect(waterFade(underwater)).toBe(UNDERWATER_OPACITY);
-    expect(waterFade(areaFeature("lake"))).toBe(1); // no level -> surface
+    expect(waterFade(areaFeature("lake"))).toBe(1); // no layer -> surface
     const [geometry] = water(ORIGIN_METERS, SCALE, underwater);
     const fade = geometry.getAttribute("aFade");
     expect(fade.count).toBe(geometry.getAttribute("position").count);

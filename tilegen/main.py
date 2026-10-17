@@ -293,10 +293,10 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
         "cmtype": "water",
         "water": kind,
         "name": tags.get("name"),
-        # a negative vertical level means below ground (underwater); the
-        # frontend draws those faint. OSM marks this with `layer` (Seveso is
-        # `layer=-2`), so `level` here is layer-or-level.
-        "level": vertical_level(tags),
+        # the OSM vertical position: `layer` when set (Seveso is layer=-2, a
+        # culverted river below ground), else `level`. Negative is below ground;
+        # the frontend draws those faint.
+        "layer": vertical_level(tags),
     }
     return {
         "type": "feature",

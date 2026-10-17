@@ -110,10 +110,10 @@ A water body below ground is drawn at 10% opacity (`UNDERWATER_OPACITY`): OSM
 marks this with a negative **`layer`** (the tunnel/bridge ordering — Seveso is
 `layer=-2`; `level` is the fallback). The fade is baked into a per-vertex
 `aFade` attribute, so a tile's merged water mesh can mix surface and underwater
-features. tilegen emits the effective vertical position as the feature's
-`level` and reports the positions it finds: water below 0 (the ones that fade)
-and roads above 0 (bridges, recorded for a future pass; the road network itself
-is not emitted).
+features. tilegen emits the effective vertical position as the feature's `layer`
+and reports the positions it finds: water below 0 (the ones that fade) and roads
+above 0 (bridges, recorded for a future pass; the road network itself is not
+emitted).
 
 ### Precomputed traffic
 

@@ -276,15 +276,15 @@ def test_to_water_reports_a_negative_vertical_level():
     # OSM marks a below-ground waterway with `layer` (Seveso is layer=-2)
     underwater = main.to_water(7, {"natural": "water", "layer": "-2"}, lake, box)
     assert underwater is not None
-    assert underwater["properties"]["level"] == -2
+    assert underwater["properties"]["layer"] == -2
     # a plain `level` is still honoured
     by_level = main.to_water(8, {"natural": "water", "level": "-1"}, lake, box)
     assert by_level is not None
-    assert by_level["properties"]["level"] == -1
-    # no vertical tag -> no level key, so the frontend sees a surface feature
+    assert by_level["properties"]["layer"] == -1
+    # no vertical tag -> no layer key, so the frontend sees a surface feature
     plain = main.to_water(9, {"natural": "water"}, lake, box)
     assert plain is not None
-    assert "level" not in plain["properties"]
+    assert "layer" not in plain["properties"]
 
 
 def test_to_water_ignores_a_non_channel_waterway():

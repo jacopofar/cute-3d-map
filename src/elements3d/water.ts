@@ -61,12 +61,12 @@ export function waterwayWidth(kind: string): number {
   return WATERWAY_WIDTH[kind] ?? DEFAULT_WATERWAY_WIDTH;
 }
 
-// how opaque a water feature is: a negative OSM level means below ground
+// how opaque a water feature is: a negative OSM `layer` means below ground
 // (underwater), drawn faint; everything else is a solid surface
 export function waterFade(f: Geojson.Feature): number {
-  const props = f.properties as { level?: unknown } | null;
-  const level = props ? Number(props.level) : NaN;
-  return Number.isFinite(level) && level < 0 ? UNDERWATER_OPACITY : 1;
+  const props = f.properties as { layer?: unknown } | null;
+  const layer = props ? Number(props.layer) : NaN;
+  return Number.isFinite(layer) && layer < 0 ? UNDERWATER_OPACITY : 1;
 }
 
 // bake the fade into a per-vertex attribute, so the shader can vary the alpha
