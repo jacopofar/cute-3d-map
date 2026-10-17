@@ -8,7 +8,7 @@ import click
 import duckdb
 import quackosm as qosm
 import shapely
-from geo import TILE_ZOOM, coord_to_tile
+from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
@@ -195,6 +195,82 @@ def to_crossing(feature_id, tags, s) -> dict | None:
     return to_stop_point(feature_id, tags, s, "crossing")
 
 
+# water areas: bodies of water mapped as polygons. `water` alone catches the
+# water=* areas that carry no natural=water.
+WATER_NATURAL = frozenset({"water", "bay", "strait", "wetland"})
+WATER_LANDUSE = frozenset({"reservoir", "basin"})
+# linear waterways: the frontend buffers these into ribbons, so only the classes
+# that are actually a visible channel are kept (a weir or a waterfall is not)
+WATERWAY_KINDS = frozenset({"river", "canal", "stream", "drain", "ditch"})
+
+
+def water_kind(tags) -> str | None:
+    """The water sub-kind ("lake", "river", ...) the frontend colors and sizes
+    by, or None when the feature is not water at all."""
+    natural = tags.get("natural")
+    if natural in WATER_NATURAL:
+        return tags.get("water") or ("wetland" if natural == "wetland" else "lake")
+    if tags.get("landuse") in WATER_LANDUSE:
+        return tags.get("water") or tags["landuse"]
+    if tags.get("waterway") in ("riverbank", "dock"):
+        return tags.get("water") or "lake"
+    if "water" in tags:
+        return tags.get("water") or "lake"
+    return None
+
+
+def is_water(tags) -> bool:
+    return water_kind(tags) is not None or tags.get("waterway") in WATERWAY_KINDS
+
+
+def _flatten(geometry, want: str):
+    """The parts of a clipped geometry of the wanted type (Polygon or
+    LineString), dropping the point/sliver artifacts a boundary touch can leave
+    behind. Returns a single part, a Multi of them, or None."""
+    parts = []
+    for part in shapely.get_parts(geometry):
+        if part.is_empty:
+            continue
+        if part.geom_type == want:
+            parts.append(part)
+        elif part.geom_type == f"Multi{want}":
+            parts.extend(p for p in part.geoms if not p.is_empty)
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return (
+        shapely.MultiPolygon(parts)
+        if want == "Polygon"
+        else shapely.MultiLineString(parts)
+    )
+
+
+def to_water(feature_id, tags, s, tile_box) -> dict | None:
+    """A water body as a render feature: an area (polygon), or a waterway line
+    the frontend buffers into a ribbon.
+
+    The geometry is clipped to the tile, unlike buildings (small enough to store
+    whole in every tile): a lake or a long canal spans many tiles, and storing
+    its full outline in each would both bloat the tile and draw the same water
+    surface over and over."""
+    kind = water_kind(tags)
+    if kind is None:
+        kind = tags.get("waterway")
+        if kind not in WATERWAY_KINDS:
+            return None
+    want = "Polygon" if s.geom_type in ("Polygon", "MultiPolygon") else "LineString"
+    clipped = _flatten(s.intersection(tile_box), want)
+    if clipped is None:
+        return None
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {"cmtype": "water", "water": kind},
+    }
+
+
 def tile_to_geojson(
     data,
     tile_x: int,
@@ -202,7 +278,8 @@ def tile_to_geojson(
     zoom: int,
     distributions: dict[str, Distribution] | None = None,
 ) -> tuple[list, list]:
-    """Build the render features (buildings, trees) and the raw-tag features.
+    """Build the render features (buildings, trees, water) and the raw-tag
+    features.
 
     The road and rail network is deliberately not emitted: the vehicle routes
     are precomputed wholesale in traffic.py (from the parquet), so the frontend
@@ -210,6 +287,9 @@ def tile_to_geojson(
     """
     ret = []
     ret_raw = []
+    # water is clipped to the tile, so its box is built once here
+    min_lon, min_lat, max_lon, max_lat = tile_lonlat_bounds(tile_x, tile_y, zoom)
+    tile_box = shapely.box(min_lon, min_lat, max_lon, max_lat)
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
@@ -230,6 +310,8 @@ def tile_to_geojson(
             ret.append(to_traffic_signal(feature_id, tags, s))
         elif tags.get("highway") == "crossing":
             ret.append(to_crossing(feature_id, tags, s))
+        elif is_water(tags):
+            ret.append(to_water(feature_id, tags, s, tile_box))
 
     return [r for r in ret if r is not None], ret_raw
 

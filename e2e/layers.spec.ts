@@ -77,6 +77,18 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
   await page.click("#roof-shapes-toggle input");
   expect((await countMeshes(page, "roof")).visible).toBeGreaterThan(0);
 
+  // water: same, its own mesh per tile
+  await expect
+    .poll(async () => (await countMeshes(page, "water")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+  expect((await countMeshes(page, "water")).visible).toBeGreaterThan(0);
+  await page.click("#water-toggle input");
+  expect((await countMeshes(page, "water")).visible).toBe(0);
+  await page.click("#water-toggle input");
+  expect((await countMeshes(page, "water")).visible).toBeGreaterThan(0);
+
   // the facade detail needs the zoom gate to open
   await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;

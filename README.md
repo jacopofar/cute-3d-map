@@ -1,7 +1,8 @@
 # Demo: MapLibre + Three.js + GeoJSON 3D buildings and trees
 
-This project renders OSM-derived 3D content (extruded buildings, trees, tree rows)
-on top of a MapLibre map, using Three.js as a custom layer. Unlike the original
+This project renders OSM-derived 3D content (extruded buildings, trees, tree
+rows, animated water) on top of a MapLibre map, using Three.js as a custom
+layer. Unlike the original
 [MapLibre 3D model example](https://maplibre.org/maplibre-gl-js/docs/examples/add-3d-model/),
 the geometry is not a GLTF model: it is generated at runtime from GeoJSON tiles,
 converted from EPSG:4326 to local meters and extruded into meshes.
@@ -24,6 +25,11 @@ The project has two halves:
    - `cmtype: "tree"` (point) — with `type` (broadleaf/conifer) and `size`
      (crown radius, m) derived from OSM tags or a hash;
    - `cmtype: "tree_row"` (LineString) — one shared type/size for the row;
+   - `cmtype: "water"` — a lake, pond or reservoir (Polygon), or a
+     river/canal/stream (LineString) the frontend buffers into a ribbon. Water
+     is **clipped to the tile** (a lake spans many tiles), unlike the small
+     buildings, and drawn by an animated shader. The `water` property carries
+     the sub-kind (`lake`, `river`, `canal`, ...) that picks its color/width;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -39,7 +45,8 @@ The project has two halves:
    linked, and a pasted link opens there. On every map move it loads/unloads
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
-   `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row).
+   `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
+   water).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -73,10 +80,26 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes** and **imputed colors** on and off, with a question mark beside
-the last one explaining what imputation means. The first three are mesh
-visibility; imputed colors are baked into the geometry and so reload the loaded
-tiles.
+**roof shapes**, **water** and **imputed colors** on and off, with a question
+mark beside the last one explaining what imputation means. All but imputed
+colors are mesh visibility switches (water's is all-or-nothing: unchecked, no
+water is drawn); imputed colors are baked into the geometry and so reload the
+loaded tiles.
+
+### Water
+
+Water is drawn at ground level by an animated shader (`src/elements3d/water.ts`):
+lakes, ponds and reservoirs as flat polygons, and rivers, canals and streams as
+flat ribbons whose width depends on the class (`WATERWAY_WIDTH`). tilegen clips
+each water body to the tile, so a lake or a long canal only stores the piece
+that belongs to the tile instead of its whole outline in every tile it touches.
+
+The shader is a `ShaderMaterial` (no lights or normals): a drifting field of two
+crossing swells plus some noise, with narrow bright bands that travel across it,
+tinted by a per-kind base color baked into the vertex colors. `uTime` is
+advanced every frame from wall-clock time, so the surface keeps moving while the
+map is still. Water is its own per-tile mesh, so the **water** checkbox in the
+layers menu is a plain visibility switch.
 
 ### Precomputed traffic
 

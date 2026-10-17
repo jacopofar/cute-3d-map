@@ -23,6 +23,7 @@ import type { BuildingInfo, TrafficLoop } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
 import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
+import { waterMaterial } from "./elements3d/water.ts";
 
 // Import our custom CSS
 // import "./scss/styles.scss";
@@ -168,6 +169,8 @@ class CoolMap {
   private windowsEnabled = true;
   private balconiesEnabled = true;
   private roofShapesEnabled = true;
+  // water is its own per-tile mesh, so this is a plain visibility switch
+  private waterEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -391,6 +394,9 @@ class CoolMap {
           coolMap.trainsTraffic.update(originMeters, scaleFactor);
         }
         coolMap.updateClouds(originMeters, scaleFactor);
+        // drive the water ripples from wall-clock time (the render loop runs
+        // every frame via triggerRepaint)
+        waterMaterial.uniforms.uTime.value = performance.now() / 1000;
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -483,6 +489,10 @@ class CoolMap {
     wireToggle("#roof-shapes-toggle", (on) => {
       this.roofShapesEnabled = on;
       this.applyRoofVisibility();
+    });
+    wireToggle("#water-toggle", (on) => {
+      this.waterEnabled = on;
+      this.applyWaterVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -877,8 +887,8 @@ class CoolMap {
   // rest. Called on the debounced move, on tile load/unload and after an origin
   // reset, so it is cheap when nothing changed (it only checks keys).
   private syncBuildingDetail() {
-    // roofs follow their checkbox whatever the zoom
-    this.applyRoofVisibility();
+    // roofs and water follow their checkboxes whatever the zoom
+    this.applyTileVisibility();
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
       this.clearBuildingDetail();
       return;
@@ -906,7 +916,7 @@ class CoolMap {
       if (!keep.has(key)) this.disposeDetail(key);
     }
     this.applyDetailVisibility();
-    this.applyRoofVisibility();
+    this.applyTileVisibility();
   }
 
   private addDetailMesh(
@@ -939,6 +949,23 @@ class CoolMap {
         }
       }
     }
+  }
+
+  // water is a per-tile mesh as well, so its checkbox is a visibility switch
+  private applyWaterVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "water") {
+          mesh.visible = this.waterEnabled;
+        }
+      }
+    }
+  }
+
+  // the per-tile layers whose checkbox is just a visibility switch
+  private applyTileVisibility() {
+    this.applyRoofVisibility();
+    this.applyWaterVisibility();
   }
 
   private disposeDetail(key: string) {

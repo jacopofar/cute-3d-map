@@ -54,6 +54,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   since OSM rings come in both windings). `CoolMap` builds it only above zoom 17
   and only for the tiles around the center (`loadedDetail`), and drops it when
   zoomed out or when the origin resets.
+- `src/elements3d/water.ts` — lakes, ponds and reservoirs as flat polygons and
+  rivers/canals/streams as flat ribbons at ground level, drawn by one animated
+  `ShaderMaterial` (procedural ripples, `uTime` advanced each frame). tilegen
+  clips water to the tile (a lake spans many tiles), unlike buildings; water is
+  its own per-tile mesh (kind `water`), so the checkbox is a visibility switch.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
   drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
@@ -88,8 +93,8 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row`, `traffic_signal`, `crossing` (the road/rail network is not
-  emitted; routes come from `traffic`).
+  `tree_row`, `water`, `traffic_signal`, `crossing` (the road/rail network is
+  not emitted; routes come from `traffic`).
 - **fleet** — a `TrafficRenderer`; everything the traffic block holds.
 - **loop** — a closed walk of the road (or rail) graph; the unit of precomputed
   traffic.
@@ -120,6 +125,13 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   pitched over a single, convex ring of at most `MAX_ROOF_VERTICES` (8) corners;
   a concave outline or a courtyard stays flat, since the ridge fan breaks up on
   those.
+- **water** — an OSM water area (`natural=water`, `landuse=reservoir`/`basin`, a
+  `water=*` value, ...) or a linear waterway (`waterway=river`/`canal`/`stream`/
+  `drain`/`ditch`), emitted as `cmtype` `water` with a `water` sub-kind (`lake`,
+  `river`, ...). tilegen clips it to the tile; the frontend draws areas flat and
+  buffers lines into ribbons.
+- **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
+  the ripples are procedural (nothing is simulated), anchored to model space.
 - **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
   leaves them out: `tilegen/impute.py` draws one from the observed distribution
   of that tag in the same extract, seeded from the building id. The frontend
@@ -143,10 +155,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   `index.html` (`#layer-menu-button` opens `#layer-menu-panel`,
   `#layer-menu-collapse` folds it, `#imputed-help` explains the imputed
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
-  are unchanged (`#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`,
-  `#windows-toggle`, `#balconies-toggle`, `#roof-shapes-toggle`,
-  `#imputed-colors-toggle`). Windows, balconies and roofs are their own meshes,
-  so those are plain visibility switches; imputed colors are baked into the
-  geometry, so changing that one reloads the loaded tiles.
+  are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
+  `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
+  `#imputed-colors-toggle`. Windows, balconies, roofs and water are their own
+  meshes, so those are plain visibility switches; imputed colors are baked into
+  the geometry, so changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

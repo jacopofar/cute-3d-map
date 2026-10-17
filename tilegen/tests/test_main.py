@@ -194,6 +194,76 @@ def test_tile_to_geojson_includes_trees_and_rows():
     assert [f["properties"]["cmtype"] for f in render] == ["tree", "tree_row"]
 
 
+def test_water_kind_classifies_areas_and_lines():
+    assert main.water_kind({"natural": "water"}) == "lake"
+    assert main.water_kind({"natural": "water", "water": "pond"}) == "pond"
+    assert main.water_kind({"natural": "wetland"}) == "wetland"
+    assert main.water_kind({"landuse": "reservoir"}) == "reservoir"
+    assert main.water_kind({"waterway": "riverbank"}) == "lake"
+    assert main.water_kind({"water": "river"}) == "river"
+    assert main.water_kind({"building": "yes"}) is None
+
+
+def test_is_water_accepts_channels_but_not_other_ways():
+    assert main.is_water({"waterway": "canal"})
+    assert main.is_water({"natural": "water"})
+    assert not main.is_water({"waterway": "weir"})  # not a channel
+    assert not main.is_water({"highway": "residential"})
+
+
+def test_to_water_clips_an_area_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a lake much larger than the tile, centred on it
+    lake = shapely.box(min_lon - 1, min_lat - 1, max_lon + 1, max_lat + 1)
+    f = main.to_water(1, {"natural": "water"}, lake, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "water", "water": "lake"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.equals(box)
+    # an area outside the tile is dropped
+    away = shapely.box(max_lon + 0.01, max_lat + 0.01, max_lon + 0.02, max_lat + 0.02)
+    assert main.to_water(2, {"natural": "water"}, away, box) is None
+
+
+def test_to_water_clips_a_waterway_line_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon - 0.001, min_lat), (max_lon + 0.001, min_lat)])
+    f = main.to_water(3, {"waterway": "canal"}, line, box)
+    assert f is not None
+    assert f["properties"]["water"] == "canal"
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "LineString"
+    assert round(clipped.bounds[0], 9) == round(min_lon, 9)
+
+
+def test_to_water_ignores_a_non_channel_waterway():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    assert main.to_water(4, {"waterway": "weir"}, line, box) is None
+
+
+def test_tile_to_geojson_includes_water():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    pond = shapely.to_wkb(
+        geom(
+            "POLYGON (("
+            f"{cx} {cy}, {cx + 2e-4} {cy}, {cx + 2e-4} {cy + 2e-4}, "
+            f"{cx} {cy + 2e-4}, {cx} {cy}))"
+        )
+    )
+    render, raw = main.tile_to_geojson(
+        [(1, {"natural": "water"}, pond)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["water"]
+    assert render[0]["properties"]["water"] == "lake"
+    assert len(raw) == 1
+
+
 def test_crossing_points_from_rows_keeps_points_only():
     point = shapely.to_wkb(geom("POINT (9.18 45.5)"))
     line = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
