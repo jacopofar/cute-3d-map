@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import zlib
 from collections import defaultdict
 from pathlib import Path
@@ -65,6 +66,24 @@ def parse_length(value: str | None) -> float | None:
         return float(token)
     except ValueError:
         return None
+
+
+# the first signed number in a level value: OSM levels can be a ";" list or a
+# range ("0;1", "-1--2"), and only the first matters for a single height
+_LEVEL_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def parse_level(value) -> float | None:
+    """Parse an OSM `level` value to a number (int when whole), or None when
+    there is no usable number. A negative level is below ground: an underwater
+    water body, or a road in a tunnel."""
+    if value is None:
+        return None
+    match = _LEVEL_RE.search(str(value))
+    if match is None:
+        return None
+    number = float(match.group())
+    return int(number) if number.is_integer() else number
 
 
 def to_building(feature_id, tags, s, distributions=None) -> dict | None:
@@ -263,7 +282,14 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
     clipped = _flatten(s.intersection(tile_box), want)
     if clipped is None:
         return None
-    properties = {"cmtype": "water", "water": kind, "name": tags.get("name")}
+    properties = {
+        "cmtype": "water",
+        "water": kind,
+        "name": tags.get("name"),
+        # a negative level means below ground (underwater); the frontend draws
+        # those faint
+        "level": parse_level(tags.get("level")),
+    }
     return {
         "type": "feature",
         "id": feature_id,
@@ -455,6 +481,60 @@ def building_distributions(input_parquet: Path) -> dict[str, Distribution]:
     return distributions
 
 
+def _in_list(values) -> str:
+    return "(" + ", ".join(f"'{value}'" for value in sorted(values)) + ")"
+
+
+# the SQL twin of `is_water`, for the level report (which runs over the parquet
+# before the tiles exist, so it cannot reuse the Python predicate)
+WATER_SQL = " or ".join(
+    (
+        f"tags['natural'] in {_in_list(WATER_NATURAL)}",
+        f"tags['landuse'] in {_in_list(WATER_LANDUSE)}",
+        f"tags['waterway'] in {_in_list(WATERWAY_KINDS | {'riverbank', 'dock'})}",
+        "tags['water'] is not null",
+    )
+)
+
+
+def level_report(input_parquet: Path) -> None:
+    """Report the OSM `level` values that matter for rendering: water below
+    level 0 (underwater, drawn faint in the frontend) and the levels present on
+    roads (recorded for a future bridge pass; the road network is not emitted)."""
+    water = duckdb.execute(
+        f"""
+        select tags['level'], count(*)
+        from read_parquet($input_path)
+        where ({WATER_SQL}) and tags['level'] is not null
+        group by 1
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    underwater = sum(count for level, count in water if (parse_level(level) or 0) < 0)
+    logger.info(
+        f"water levels: {underwater} of {sum(count for _, count in water)} "
+        "features below level 0 (drawn faint)"
+    )
+    for level, count in sorted(water, key=lambda row: str(row[0])):
+        logger.info(f"  water level {level!r}: {count}")
+
+    roads = duckdb.execute(
+        """
+        select tags['level'], count(*)
+        from read_parquet($input_path)
+        where tags['highway'] is not null and tags['level'] is not null
+        group by 1
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    logger.info(
+        f"road levels: {sum(count for _, count in roads)} ways carry a level "
+        "(for a future bridge pass)"
+    )
+    for level, count in sorted(roads, key=lambda row: str(row[0])):
+        logger.info(f"  road level {level!r}: {count}")
+
+
 def load_or_build_fleets(
     ways_by_kind: dict[str, list[Way]],
     configs: dict[str, TrafficConfig],
@@ -574,6 +654,7 @@ def parquet_to_tiles(
     # every building gets a color, roof shape and roof color: the real tag where
     # it has one, otherwise a sample from the dataset's own distribution
     distributions = building_distributions(input_parquet)
+    level_report(input_parquet)
     bb = duckdb.execute(
         """
         with ext as (

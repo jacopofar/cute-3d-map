@@ -251,6 +251,29 @@ def test_to_water_keeps_the_name():
     assert "name" not in plain["properties"]
 
 
+def test_parse_level():
+    assert main.parse_level("0") == 0
+    assert main.parse_level("-1") == -1
+    assert main.parse_level("1.5") == 1.5
+    assert main.parse_level("0;1") == 0  # a list: the first entry wins
+    assert main.parse_level("-1--2") == -1  # a range: the low end
+    assert main.parse_level("basement") is None
+    assert main.parse_level(None) is None
+
+
+def test_to_water_reports_a_negative_level():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    lake = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    underwater = main.to_water(7, {"natural": "water", "level": "-1"}, lake, box)
+    assert underwater is not None
+    assert underwater["properties"]["level"] == -1
+    # no level tag -> no level key, so the frontend sees a surface feature
+    plain = main.to_water(8, {"natural": "water"}, lake, box)
+    assert plain is not None
+    assert "level" not in plain["properties"]
+
+
 def test_to_water_ignores_a_non_channel_waterway():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

@@ -56,9 +56,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   zoomed out or when the origin resets.
 - `src/elements3d/water.ts` — lakes, ponds and reservoirs as flat polygons and
   rivers/canals/streams as flat ribbons at ground level, drawn by one animated
-  `ShaderMaterial` (procedural ripples, `uTime` advanced each frame). tilegen
-  clips water to the tile (a lake spans many tiles), unlike buildings; water is
-  its own per-tile mesh (kind `water`), so the checkbox is a visibility switch.
+  `ShaderMaterial` (procedural ripples, `uTime` advanced each frame). A negative
+  OSM `level` (underwater) fades the feature to `UNDERWATER_OPACITY` via a
+  per-vertex `aFade`. tilegen clips water to the tile (a lake spans many tiles),
+  unlike buildings; water is its own per-tile mesh (kind `water`), so the
+  checkbox is a visibility switch.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
   drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
@@ -132,6 +134,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **level** — the OSM `level` tag on water or a road; a negative level is below
+  ground. Water below level 0 is drawn faint (`UNDERWATER_OPACITY`); tilegen only
+  reports road levels, recorded for a future bridge pass (roads are not emitted).
 - **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
   leaves them out: `tilegen/impute.py` draws one from the observed distribution
   of that tag in the same extract, seeded from the building id. The frontend

@@ -6,9 +6,11 @@ import { describe, expect, it } from "vitest";
 import { epsg4326toEpsg3857, waterInfo } from "../geojson_data";
 import {
   DEFAULT_WATER_COLOR,
+  UNDERWATER_OPACITY,
   WATERWAY_WIDTH,
   water,
   waterColor,
+  waterFade,
 } from "./water";
 
 const ORIGIN: [number, number] = [9.18, 45.5];
@@ -67,6 +69,25 @@ describe("water", () => {
       expect(position.getZ(i)).toBe(0); // flat at ground level
     }
     expect(colorOf(geometry)).toBe(waterColor("lake").getHexString());
+    // a surface feature is fully opaque
+    const fade = geometry.getAttribute("aFade");
+    expect(fade.count).toBe(position.count);
+    for (let i = 0; i < fade.count; i++) expect(fade.getX(i)).toBe(1);
+  });
+
+  it("draws water below level 0 almost transparent", () => {
+    const underwater = {
+      ...areaFeature("lake"),
+      properties: { cmtype: "water", water: "lake", level: -1 },
+    } as unknown as Geojson.Feature;
+    expect(waterFade(underwater)).toBe(UNDERWATER_OPACITY);
+    expect(waterFade(areaFeature("lake"))).toBe(1); // no level -> surface
+    const [geometry] = water(ORIGIN_METERS, SCALE, underwater);
+    const fade = geometry.getAttribute("aFade");
+    expect(fade.count).toBe(geometry.getAttribute("position").count);
+    for (let i = 0; i < fade.count; i++) {
+      expect(fade.getX(i)).toBeCloseTo(UNDERWATER_OPACITY, 6);
+    }
   });
 
   it("buffers a line into a ribbon of the class width", () => {
@@ -122,6 +143,9 @@ describe("water", () => {
     const merged = BufferGeometryUtils.mergeGeometries(geometries);
     expect(merged).not.toBeNull();
     expect(merged!.getAttribute("color").count).toBe(
+      merged!.getAttribute("position").count,
+    );
+    expect(merged!.getAttribute("aFade").count).toBe(
       merged!.getAttribute("position").count,
     );
   });

@@ -42,6 +42,10 @@ export const WATER_COLORS: Record<string, string> = {
 };
 export const DEFAULT_WATER_COLOR = "#2f6f9e";
 
+// a water body below level 0 is underwater: draw it almost transparent so it
+// reads as submerged rather than as a surface
+export const UNDERWATER_OPACITY = 0.1;
+
 const HALF = 0.5;
 
 export function waterKindOf(f: Geojson.Feature): string {
@@ -55,6 +59,22 @@ export function waterColor(kind: string): THREE.Color {
 
 export function waterwayWidth(kind: string): number {
   return WATERWAY_WIDTH[kind] ?? DEFAULT_WATERWAY_WIDTH;
+}
+
+// how opaque a water feature is: a negative OSM level means below ground
+// (underwater), drawn faint; everything else is a solid surface
+export function waterFade(f: Geojson.Feature): number {
+  const props = f.properties as { level?: unknown } | null;
+  const level = props ? Number(props.level) : NaN;
+  return Number.isFinite(level) && level < 0 ? UNDERWATER_OPACITY : 1;
+}
+
+// bake the fade into a per-vertex attribute, so the shader can vary the alpha
+// within one merged mesh
+function applyFade(geometry: THREE.BufferGeometry, fade: number): void {
+  const count = geometry.getAttribute("position").count;
+  const values = new Float32Array(count).fill(fade);
+  geometry.setAttribute("aFade", new THREE.BufferAttribute(values, 1));
 }
 
 // a flat, triangulated polygon (holes included) lying in the z = 0 plane
@@ -145,12 +165,14 @@ export function water(
 ): THREE.BufferGeometry[] {
   const kind = waterKindOf(f);
   const color = waterColor(kind);
+  const fade = waterFade(f);
   const geometries: THREE.BufferGeometry[] = [];
 
   const addArea = (rings: Geojson.Position[][]) => {
     const geometry = areaGeometry(rings, originMeters, scaleFactor);
     if (geometry) {
       applyVertexColor(geometry, color);
+      applyFade(geometry, fade);
       geometries.push(geometry);
     }
   };
@@ -163,6 +185,7 @@ export function water(
     );
     if (geometry) {
       applyVertexColor(geometry, color);
+      applyFade(geometry, fade);
       geometries.push(geometry);
     }
   };
@@ -194,10 +217,13 @@ export const waterMaterial = new THREE.ShaderMaterial({
   },
   vertexShader: /* glsl */ `
     attribute vec3 color;
+    attribute float aFade;
     varying vec3 vColor;
+    varying float vFade;
     varying vec2 vPos;
     void main() {
       vColor = color;
+      vFade = aFade;
       vPos = position.xy;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
@@ -206,6 +232,7 @@ export const waterMaterial = new THREE.ShaderMaterial({
     uniform float uTime;
     uniform vec3 uHighlight;
     varying vec3 vColor;
+    varying float vFade;
     varying vec2 vPos;
 
     float hash(vec2 p) {
@@ -239,7 +266,12 @@ export const waterMaterial = new THREE.ShaderMaterial({
 
       vec3 color = mix(vColor * 0.82, vColor, ripple);
       color += uHighlight * glint * 0.5;
-      gl_FragColor = vec4(color, 1.0);
+      gl_FragColor = vec4(color, vFade);
     }
   `,
+  // aFade varies within a tile (surface vs underwater), so the material blends;
+  // it does not write depth, so the faint underwater water does not hide the
+  // ground or the water behind it
+  transparent: true,
+  depthWrite: false,
 });
