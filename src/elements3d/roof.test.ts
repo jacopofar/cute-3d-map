@@ -4,11 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import { epsg4326toEpsg3857 } from "../geojson_data";
 import { building } from "./building";
-import { ROOF_COLORS, roofGeometry } from "./roof";
+import { DEFAULT_ROOF_COLOR, roofGeometry } from "./roof";
 
 const ORIGIN: [number, number] = [9.18, 45.5];
 const SCALE = Math.cos((2 * Math.PI * ORIGIN[1]) / 360);
 const ORIGIN_METERS = epsg4326toEpsg3857(ORIGIN);
+const ROOF_COLOR = "#b0553c";
 
 // ~30 m x 12 m footprint (long, narrow), counter-clockwise
 function longRing(): [number, number][] {
@@ -22,26 +23,17 @@ function longRing(): [number, number][] {
   ];
 }
 
-describe("roofGeometry", () => {
-  // a seed that gives this footprint a pitched roof (the seeded variety can
-  // otherwise pick flat)
-  const pitchedSeed = (() => {
-    for (let seed = 0; seed < 100; seed++) {
-      if (roofGeometry([longRing()], 12, ORIGIN_METERS, SCALE, seed))
-        return seed;
-    }
-    throw new Error("no pitched seed found");
-  })();
+const roof = (
+  shape: string | undefined,
+  height = 12,
+  rings = [longRing()],
+  color: string | undefined = ROOF_COLOR,
+) => roofGeometry(rings, height, ORIGIN_METERS, SCALE, shape, color);
 
+describe("roofGeometry", () => {
   it("builds a roof above the eaves, wound to match its normals", () => {
     const height = 12;
-    const geometry = roofGeometry(
-      [longRing()],
-      height,
-      ORIGIN_METERS,
-      SCALE,
-      pitchedSeed,
-    );
+    const geometry = roof("gabled", height);
     expect(geometry).not.toBeNull();
     const position = geometry!.getAttribute("position");
     const normal = geometry!.getAttribute("normal");
@@ -80,24 +72,36 @@ describe("roofGeometry", () => {
     }
   });
 
-  it("picks a roof tone from the palette", () => {
-    const geometry = roofGeometry(
-      [longRing()],
-      12,
-      ORIGIN_METERS,
-      SCALE,
-      pitchedSeed,
-    )!;
-    const palette = ROOF_COLORS.map((hex) =>
-      new THREE.Color(hex).getHexString(),
-    );
+  it("uses the roof color it is given", () => {
+    const geometry = roof("gabled", 12, [longRing()], "#b0553c")!;
     const color = geometry.getAttribute("color");
     const hex = new THREE.Color(
       color.getX(0),
       color.getY(0),
       color.getZ(0),
     ).getHexString();
-    expect(palette).toContain(hex);
+    expect(hex).toBe(new THREE.Color("#b0553c").getHexString());
+  });
+
+  it("falls back when the roof color is not usable", () => {
+    const geometry = roof("gabled", 12, [longRing()], "not a color")!;
+    const color = geometry.getAttribute("color");
+    const hex = new THREE.Color(
+      color.getX(0),
+      color.getY(0),
+      color.getZ(0),
+    ).getHexString();
+    expect(hex).toBe(new THREE.Color(DEFAULT_ROOF_COLOR).getHexString());
+  });
+
+  it("stays flat when the shape is flat", () => {
+    expect(roof("flat")).toBeNull();
+  });
+
+  it("stays flat for a shape it cannot render", () => {
+    for (const shape of ["skillion", "mansard", "saltbox", "round"]) {
+      expect(roof(shape)).toBeNull();
+    }
   });
 
   it("stays flat when the footprint has an inner ring", () => {
@@ -109,14 +113,10 @@ describe("roofGeometry", () => {
       [outer[0][0] + 2e-4, outer[0][1] + 8e-5],
       [outer[0][0] + 1e-4, outer[0][1] + 8e-5],
     ];
-    for (let seed = 0; seed < 8; seed++) {
-      expect(
-        roofGeometry([outer, hole], 12, ORIGIN_METERS, SCALE, seed),
-      ).toBeNull();
-    }
+    expect(roof("gabled", 12, [outer, hole])).toBeNull();
   });
 
-  it("stays flat on a footprint too far from its hull", () => {
+  it("stays flat on a footprint too complex to roof", () => {
     // an L: a 10 x 10 square missing a 6 x 6 corner, in degrees
     const d = 1.3e-4; // ~10 m
     const x0 = ORIGIN[0];
@@ -129,82 +129,83 @@ describe("roofGeometry", () => {
       [x0 + 0.4 * d, y0 + d],
       [x0, y0 + d],
     ];
-    for (let seed = 0; seed < 8; seed++) {
-      expect(roofGeometry([l], 12, ORIGIN_METERS, SCALE, seed)).toBeNull();
-    }
-  });
-  it("stays flat for a big squarish footprint", () => {
-    const side = 0.00035; // ~27 m
-    const square: [number, number][] = [
-      [ORIGIN[0], ORIGIN[1]],
-      [ORIGIN[0] + side, ORIGIN[1]],
-      [ORIGIN[0] + side, ORIGIN[1] + side],
-      [ORIGIN[0], ORIGIN[1] + side],
-    ];
-    // most seeds leave a big square flat (the seeded variety occasionally does)
-    const built = [0, 1, 2, 3, 4, 5, 6, 7].filter(
-      (seed) => roofGeometry([square], 12, ORIGIN_METERS, SCALE, seed) !== null,
-    );
-    expect(built.length).toBeLessThanOrEqual(3);
-  });
-
-  it("is deterministic for the same seed", () => {
-    const a = roofGeometry(
-      [longRing()],
-      12,
-      ORIGIN_METERS,
-      SCALE,
-      pitchedSeed,
-    )!;
-    const b = roofGeometry(
-      [longRing()],
-      12,
-      ORIGIN_METERS,
-      SCALE,
-      pitchedSeed,
-    )!;
-    expect(Array.from(a.getAttribute("position").array)).toEqual(
-      Array.from(b.getAttribute("position").array),
-    );
+    expect(roof("gabled", 12, [l])).toBeNull();
   });
 });
 
 describe("building", () => {
-  it("merges the roof into the same geometry as the walls", () => {
-    const feature = {
+  const feature = (properties: Record<string, unknown>) =>
+    ({
       type: "Feature",
       geometry: { type: "Polygon", coordinates: [longRing()] },
-      properties: { height: 12 },
-    } as unknown as Parameters<typeof building>[2];
-    const geometries = building(ORIGIN_METERS, SCALE, feature);
-    // the extruded walls, plus a roof
-    expect(geometries.length).toBe(2);
-    // the tile pipeline merges these, so they must share their attributes
-    const merged = BufferGeometryUtils.mergeGeometries(geometries);
+      properties,
+    }) as unknown as Parameters<typeof building>[2];
+
+  it("returns the walls and the roof as separate geometries", () => {
+    const parts = building(
+      ORIGIN_METERS,
+      SCALE,
+      feature({ height: 12, roof_shape: "gabled", roof_color: "#b0553c" }),
+    );
+    expect(parts).toHaveLength(1);
+    expect(parts[0].roof).not.toBeNull();
+    // the tile pipeline merges each kind, so they must share their attributes
+    const merged = BufferGeometryUtils.mergeGeometries([
+      parts[0].walls,
+      parts[0].roof!,
+    ]);
     expect(merged).not.toBeNull();
   });
 
-  it("keeps a flat-roofed building to a single extrusion", () => {
-    const side = 0.00035; // ~27 m square, over FLAT_AREA
-    const feature = {
-      type: "Feature",
-      geometry: {
-        type: "Polygon",
-        coordinates: [
-          [
-            [ORIGIN[0], ORIGIN[1]],
-            [ORIGIN[0] + side, ORIGIN[1]],
-            [ORIGIN[0] + side, ORIGIN[1] + side],
-            [ORIGIN[0], ORIGIN[1] + side],
-          ],
-        ],
-      },
-      properties: { height: 12 },
-    } as unknown as Parameters<typeof building>[2];
-    // whichever way the seeded variety fell, the geometry still merges
-    const geometries = building(ORIGIN_METERS, SCALE, feature);
-    expect(geometries.length).toBeGreaterThanOrEqual(1);
-    const merged = BufferGeometryUtils.mergeGeometries(geometries);
+  it("gives a flat-roofed building no roof geometry", () => {
+    const parts = building(
+      ORIGIN_METERS,
+      SCALE,
+      feature({ height: 12, roof_shape: "flat" }),
+    );
+    expect(parts[0].roof).toBeNull();
+    const merged = BufferGeometryUtils.mergeGeometries([parts[0].walls]);
     expect(merged).not.toBeNull();
+  });
+
+  it("uses an imputed color, or ignores it when asked to", () => {
+    const tagged = feature({
+      height: 12,
+      color: "coral",
+      roof_shape: "gabled",
+      roof_color: "gold",
+    });
+    const imputed = feature({
+      height: 12,
+      color: "coral",
+      roof_shape: "gabled",
+      roof_color: "gold",
+      imputed: ["color", "roof_color"],
+    });
+    const toneOf = (geometry: THREE.BufferGeometry | null) =>
+      geometry && geometry.getAttribute("color").count > 0
+        ? new THREE.Color(
+            geometry.getAttribute("color").getX(0),
+            geometry.getAttribute("color").getY(0),
+            geometry.getAttribute("color").getZ(0),
+          ).getHexString()
+        : null;
+
+    // a real color is used either way
+    expect(toneOf(building(ORIGIN_METERS, SCALE, tagged, false)[0].walls)).toBe(
+      new THREE.Color("coral").getHexString(),
+    );
+    // an imputed one is dropped when the option is off
+    const parts = building(ORIGIN_METERS, SCALE, imputed, false);
+    expect(toneOf(parts[0].walls)).toBe(
+      new THREE.Color("#aaaaaa").getHexString(),
+    );
+    expect(toneOf(parts[0].roof)).toBe(
+      new THREE.Color(DEFAULT_ROOF_COLOR).getHexString(),
+    );
+    // ... and kept when it is on
+    const on = building(ORIGIN_METERS, SCALE, imputed, true);
+    expect(toneOf(on[0].walls)).toBe(new THREE.Color("coral").getHexString());
+    expect(toneOf(on[0].roof)).toBe(new THREE.Color("gold").getHexString());
   });
 });

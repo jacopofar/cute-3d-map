@@ -38,6 +38,9 @@ export const FACADE_COLORS = {
 type Triple = [number, number, number];
 type Point = [number, number];
 
+// the four vertex buffers of a geometry being built
+type Buffers = [number[], number[], number[], number[]];
+
 interface Edge {
   a: Point;
   dir: Point;
@@ -49,13 +52,12 @@ interface Edge {
 // culls back faces, and OSM rings come in both windings, so getting this wrong
 // makes quads invisible from the side that matters.
 function pushFace(
-  position: number[],
-  normal: number[],
-  color: number[],
+  buffers: Buffers,
   corners: Triple[],
   facing: Triple,
   rgb: THREE.Color,
 ): void {
+  const [position, normal, uv, color] = buffers;
   const e1: Triple = [
     corners[1][0] - corners[0][0],
     corners[1][1] - corners[0][1],
@@ -77,15 +79,14 @@ function pushFace(
   for (const i of order) {
     position.push(corners[i][0], corners[i][1], corners[i][2]);
     normal.push(facing[0], facing[1], facing[2]);
+    uv.push(0, 0);
     color.push(rgb.r, rgb.g, rgb.b);
   }
 }
 
 // a vertical quad standing on p0 -> p1, from z0 to z1, facing `facing`
 function pushQuad(
-  position: number[],
-  normal: number[],
-  color: number[],
+  buffers: Buffers,
   p0: Point,
   p1: Point,
   z0: number,
@@ -94,9 +95,7 @@ function pushQuad(
   rgb: THREE.Color,
 ): void {
   pushFace(
-    position,
-    normal,
-    color,
+    buffers,
     [
       [p0[0], p0[1], z0],
       [p1[0], p1[1], z0],
@@ -125,9 +124,7 @@ const outward = (p: Point, normal: Point, distance: number): Point => [
 // its outer edge. Kept to five quads — the plate's underside and ends are never
 // seen from above, so they are not worth the geometry.
 function pushBalcony(
-  position: number[],
-  normalArr: number[],
-  colorArr: number[],
+  buffers: Buffers,
   edge: Edge,
   span: { start: number; width: number },
   sill: number,
@@ -142,65 +139,19 @@ function pushBalcony(
   const sideIn: Point = [edge.dir[0], edge.dir[1]];
   const bottom = sill - BALCONY_SLAB;
   const railTop = sill + BALCONY_RAILING;
-  const up: Triple = [0, 0, 1];
-  const down: Triple = [0, 0, -1];
   const v = (p: Point, z: number): Triple => [p[0], p[1], z];
 
-  // the plate
+  // the plate, then the railing on its outer edge
   pushFace(
-    position,
-    normalArr,
-    colorArr,
+    buffers,
     [v(inner0, sill), v(outer0, sill), v(outer1, sill), v(inner1, sill)],
-    up,
+    [0, 0, 1],
     slab,
   );
-  pushQuad(
-    position,
-    normalArr,
-    colorArr,
-    outer0,
-    outer1,
-    bottom,
-    sill,
-    edge.normal,
-    slab,
-  );
-
-  // the railing
-  pushQuad(
-    position,
-    normalArr,
-    colorArr,
-    outer0,
-    outer1,
-    sill,
-    railTop,
-    edge.normal,
-    rail,
-  );
-  pushQuad(
-    position,
-    normalArr,
-    colorArr,
-    inner0,
-    outer0,
-    sill,
-    railTop,
-    sideOut,
-    rail,
-  );
-  pushQuad(
-    position,
-    normalArr,
-    colorArr,
-    inner1,
-    outer1,
-    sill,
-    railTop,
-    sideIn,
-    rail,
-  );
+  pushQuad(buffers, outer0, outer1, bottom, sill, edge.normal, slab);
+  pushQuad(buffers, outer0, outer1, sill, railTop, edge.normal, rail);
+  pushQuad(buffers, inner0, outer0, sill, railTop, sideOut, rail);
+  pushQuad(buffers, inner1, outer1, sill, railTop, sideIn, rail);
 }
 
 // every edge of a ring as model-space edges with an outward normal. The normal
@@ -236,19 +187,26 @@ function ringEdges(
   return edges;
 }
 
+export interface FacadeDetail {
+  // flat wall quads: the windows and the door
+  windows: THREE.BufferGeometry | null;
+  // the slabs and railings
+  balconies: THREE.BufferGeometry | null;
+}
+
 /**
- * Windows, balconies and one door for a tile's buildings, merged into a single
- * non-indexed geometry (positions, normals and a baked colour), so a tile draws
- * its facade detail in one call. Returns null when nothing was emitted.
+ * Windows, balconies and one door for a tile's buildings, as two geometries so
+ * the windows and the balconies can be switched on their own. Each carries
+ * positions, normals, uvs and a baked color, so a tile draws its facade detail
+ * in one call per group.
  */
 export function tileFacadeDetail(
   originMeters: [number, number],
   scaleFactor: number,
   infos: BuildingInfo[],
-): THREE.BufferGeometry | null {
-  const position: number[] = [];
-  const normal: number[] = [];
-  const color: number[] = [];
+): FacadeDetail {
+  const windows: Buffers = [[], [], [], []];
+  const balconies: Buffers = [[], [], [], []];
   const rgb = new THREE.Color();
 
   for (const info of infos) {
@@ -278,13 +236,11 @@ export function tileFacadeDetail(
       for (const column of facadeWindows(edge.length, rng)) {
         // balconies are decided per column, so they stack vertically (every
         // floor above the ground) and only occasionally come out irregular
-        const balconies = balconyColumn(balconyFloors, balconyRng);
+        const columnBalconies = balconyColumn(balconyFloors, balconyRng);
         for (let floor = 0; floor < bands.length; floor++) {
           const band = bands[floor];
           pushQuad(
-            position,
-            normal,
-            color,
+            windows,
             along(edge, column.start),
             along(edge, column.start + column.width),
             band.start,
@@ -292,11 +248,9 @@ export function tileFacadeDetail(
             edge.normal,
             windowColor,
           );
-          if (balconies.includes(floor)) {
+          if (columnBalconies.includes(floor)) {
             pushBalcony(
-              position,
-              normal,
-              color,
+              balconies,
               edge,
               balconySpan(column, edge.length, balconyRng),
               band.start,
@@ -315,9 +269,7 @@ export function tileFacadeDetail(
         : null;
     if (longest && door) {
       pushQuad(
-        position,
-        normal,
-        color,
+        windows,
         along(longest, door.start),
         along(longest, door.start + door.width),
         0,
@@ -328,6 +280,15 @@ export function tileFacadeDetail(
     }
   }
 
+  return {
+    windows: geometryFrom(windows),
+    balconies: geometryFrom(balconies),
+  };
+}
+
+// positions/normals/uvs/colors -> a BufferGeometry, or null when empty
+function geometryFrom(buffers: number[][]): THREE.BufferGeometry | null {
+  const [position, normal, uv, color] = buffers;
   if (position.length === 0) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -335,6 +296,7 @@ export function tileFacadeDetail(
     new THREE.Float32BufferAttribute(position, 3),
   );
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
   return geometry;
 }

@@ -66,7 +66,11 @@ export function geoJSONtoGeometries(
   f: Geojson.Feature,
   originMeters: [number, number],
   scaleFactor: number,
-): { kind: "building" | "tree"; geometries: THREE.BufferGeometry[] }[] {
+  imputedColors = true,
+): {
+  kind: "building" | "roof" | "tree";
+  geometries: THREE.BufferGeometry[];
+}[] {
   if (!f.properties) {
     return [];
   }
@@ -74,9 +78,17 @@ export function geoJSONtoGeometries(
     return [];
   }
   if (f.properties.cmtype === "building") {
-    return [
-      { kind: "building", geometries: building(originMeters, scaleFactor, f) },
-    ];
+    // the roof comes back as its own kind, so it can be switched off on its own
+    const parts = building(originMeters, scaleFactor, f, imputedColors);
+    const groups: {
+      kind: "building" | "roof";
+      geometries: THREE.BufferGeometry[];
+    }[] = [{ kind: "building", geometries: parts.map((part) => part.walls) }];
+    const roofs = parts
+      .map((part) => part.roof)
+      .filter((roof): roof is THREE.BufferGeometry => roof !== null);
+    if (roofs.length > 0) groups.push({ kind: "roof", geometries: roofs });
+    return groups;
   }
   if (f.properties.cmtype === "tree") {
     return [{ kind: "tree", geometries: tree(originMeters, scaleFactor, f) }];
@@ -128,12 +140,19 @@ export interface TrafficLoop {
 
 // a building footprint for click-picking + info (outer rings only)
 export interface BuildingInfo {
+  // OSM feature id ("way/1234", "relation/56"), for the OSM link
+  id?: string;
   rings: [number, number][][];
   height: number;
   color?: string;
   name?: string;
   street?: string;
   housenumber?: string;
+  // real, or filled in by tilegen from the dataset's own distribution
+  roofShape?: string;
+  roofColor?: string;
+  // the fields tilegen sampled rather than read from a tag
+  imputed: string[];
 }
 
 export interface TileObjects {
@@ -148,6 +167,9 @@ export async function objectsAt(
   viewOrigin: [number, number],
   x: number,
   y: number,
+  // when false, a building color that tilegen had to impute is ignored (the
+  // generator marks which fields it sampled, so nothing is guessed here)
+  imputedColors = true,
 ): Promise<TileObjects> {
   // offset in meters of the origin
   const originMeters = epsg4326toEpsg3857(viewOrigin);
@@ -189,7 +211,7 @@ export async function objectsAt(
     if (cmtype === "building") {
       buildings.push(buildingInfo(f));
     }
-    geoJSONtoGeometries(f, originMeters, scaleFactor).forEach(
+    geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
         (byKind[kind] ??= []).push(...geometries);
       },
@@ -229,12 +251,16 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
   }
   const props = f.properties ?? {};
   return {
+    id: typeof f.id === "string" ? f.id : undefined,
     rings,
     height: Number(props.height) > 0 ? Number(props.height) : 10,
     color: props.color as string | undefined,
     name: props.name as string | undefined,
     street: props.street as string | undefined,
     housenumber: props.housenumber as string | undefined,
+    roofShape: props.roof_shape as string | undefined,
+    roofColor: props.roof_color as string | undefined,
+    imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
   };
 }
 

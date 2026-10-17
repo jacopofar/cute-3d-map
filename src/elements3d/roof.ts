@@ -1,17 +1,18 @@
 import * as THREE from "three";
 
 import { toModelCoords } from "../geojson_data";
-import { hashSeed, makeRng } from "./random";
+import { parseColor } from "./color";
 import {
   frameToWorld,
+  roofKind,
   roofOutline,
   roofPlan,
   type PreparedRoof,
 } from "./roof_layout";
 
-// Roof tones, picked once per building: terracotta, dark grey, brown, weathered
-// tile. They read as roofs against the grey walls.
-export const ROOF_COLORS = [0xb0553c, 0x4a4a4a, 0x6b4a2f, 0x8a7a66];
+// the last resort when a building carries no usable roof:colour (tilegen
+// imputes one, so this is rare)
+export const DEFAULT_ROOF_COLOR = "#8a7a66";
 
 const DEGENERATE = 1e-9;
 
@@ -80,7 +81,8 @@ export function roofGeometry(
   height: number,
   originMeters: [number, number],
   scaleFactor: number,
-  seed: number,
+  shape: string | undefined,
+  roofColor: string | undefined,
 ): THREE.BufferGeometry | null {
   // a courtyard (any inner ring) would be covered by a roof built over the outer
   // ring alone, so those stay flat
@@ -90,16 +92,14 @@ export function roofGeometry(
   );
   if (!outline || outline.length < 3) return null;
   const points = outline;
-  const roof = roofPlan(points, makeRng(seed));
+  const roof = roofPlan(points, roofKind(shape));
   if (!roof) return null;
 
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
   const colors: number[] = [];
-  const rgb = new THREE.Color(
-    ROOF_COLORS[hashSeed(`${seed}:roof`) % ROOF_COLORS.length],
-  );
+  const rgb = parseColor(roofColor, DEFAULT_ROOF_COLOR);
 
   for (let i = 0; i < points.length; i++) {
     const a = points[i];

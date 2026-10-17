@@ -24,7 +24,6 @@ import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
 import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
 
-import "./style.css";
 // Import our custom CSS
 // import "./scss/styles.scss";
 
@@ -49,6 +48,13 @@ const HTML_ENTITIES: Record<string, string> = {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => HTML_ENTITIES[c] ?? c);
+}
+
+// the OSM page for a feature id like "way/1234" (tilegen writes those ids as-is)
+function osmLink(id: string | undefined): string | null {
+  if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
+  const url = `https://www.openstreetmap.org/${id}`;
+  return `${escapeHtml(id)} (<a href="${url}" target="_blank" rel="noopener">OSM</a>)`;
 }
 
 // ray-cast point-in-polygon, in model space
@@ -152,9 +158,19 @@ class CoolMap {
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
-  // facade detail (windows/doors) meshes per tile, built only while zoomed in;
-  // kept out of loadedTiles so stats() and click-picking stay as they were
-  private loadedDetail: { [key: string]: THREE.Mesh } = {};
+  // facade detail (windows/doors and balconies) meshes per tile, built only
+  // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
+  // as they were
+  private loadedDetail: {
+    [key: string]: { windows: THREE.Mesh | null; balconies: THREE.Mesh | null };
+  } = {};
+  // layer checkboxes
+  private windowsEnabled = true;
+  private balconiesEnabled = true;
+  private roofShapesEnabled = true;
+  // when false, a color tilegen had to impute is ignored (needs a tile reload,
+  // since the colors are baked into the geometry)
+  private imputedColorsEnabled = true;
   private highlight?: THREE.Object3D;
   private popup?: Popup;
   private carsTraffic?: TrafficRenderer;
@@ -440,7 +456,82 @@ class CoolMap {
       );
     }
 
+    // facade and roof detail toggles: the meshes are built per tile, so these
+    // are plain visibility switches
+    const wireToggle = (id: string, apply: (on: boolean) => void): void => {
+      const input = document.querySelector<HTMLInputElement>(`${id} input`);
+      if (!input) return;
+      apply(input.checked);
+      input.addEventListener("change", () => apply(input.checked));
+    };
+    wireToggle("#windows-toggle", (on) => {
+      this.windowsEnabled = on;
+      this.applyDetailVisibility();
+    });
+    wireToggle("#balconies-toggle", (on) => {
+      this.balconiesEnabled = on;
+      this.applyDetailVisibility();
+    });
+    wireToggle("#roof-shapes-toggle", (on) => {
+      this.roofShapesEnabled = on;
+      this.applyRoofVisibility();
+    });
+    wireToggle("#imputed-colors-toggle", (on) => {
+      if (on === this.imputedColorsEnabled) return;
+      // the color is baked into the geometry, so the loaded tiles have to be
+      // rebuilt: drop them and let the move pass fetch them again
+      this.imputedColorsEnabled = on;
+      this.reloadTiles();
+    });
+
+    // the gear opens the layer list; the chevron at the top of the list folds it
+    const menuButton =
+      document.querySelector<HTMLButtonElement>("#layer-menu-button");
+    const menuPanel = document.querySelector<HTMLElement>("#layer-menu-panel");
+    const menuCollapse = document.querySelector<HTMLButtonElement>(
+      "#layer-menu-collapse",
+    );
+    const setMenuOpen = (open: boolean) => {
+      if (!menuButton || !menuPanel) return;
+      menuPanel.hidden = !open;
+      menuButton.hidden = open;
+      menuButton.setAttribute("aria-expanded", String(open));
+    };
+    menuButton?.addEventListener("click", () => setMenuOpen(true));
+    menuCollapse?.addEventListener("click", () => setMenuOpen(false));
+
+    // the question mark next to "imputed colors" explains what it means
+    const helpButton =
+      document.querySelector<HTMLButtonElement>("#imputed-help");
+    const helpText = document.querySelector<HTMLElement>("#imputed-help-text");
+    const setHelpOpen = (open: boolean) => {
+      if (!helpText || !helpButton) return;
+      helpText.hidden = !open;
+      helpButton.setAttribute("aria-expanded", String(open));
+    };
+    helpButton?.addEventListener("click", () =>
+      setHelpOpen(Boolean(helpText?.hidden)),
+    );
+
     this.map.on("click", (event) => this.onMapClick(event));
+  }
+
+  // drop every loaded tile so the next load pass rebuilds them, picking up the
+  // current load-time options (imputed colors)
+  private reloadTiles() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        this.customLayer.scene.remove(mesh);
+        if (mesh instanceof THREE.Mesh) mesh.geometry.dispose();
+      }
+    }
+    this.loadedTiles = {};
+    this.loadedTraffic = {};
+    this.loadedBuildings = {};
+    this.loadedCrossings = {};
+    this.clearBuildingDetail();
+    this.syncTraffic();
+    this.loadUnloadCoord(this.map.getCenter());
   }
 
   // click a building to highlight it and show its height/address
@@ -540,13 +631,30 @@ class CoolMap {
     this.highlight = outline;
 
     const address = [info.housenumber, info.street].filter(Boolean).join(" ");
+    const imputed = new Set(info.imputed);
+    const mark = (field: string) =>
+      imputed.has(field) ? ' <span class="imputed">imputed</span>' : "";
+    const swatch = (color: string | undefined) =>
+      color
+        ? `<span class="swatch" style="background:${escapeHtml(color)}"></span>`
+        : "";
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       address ? escapeHtml(address) : null,
       `Height: ${info.height.toFixed(1)} m`,
+      info.color
+        ? `Wall: ${swatch(info.color)}${escapeHtml(info.color)}${mark("color")}`
+        : null,
+      info.roofShape
+        ? `Roof: ${escapeHtml(info.roofShape)}${mark("roof_shape")}`
+        : null,
+      info.roofColor
+        ? `Roof color: ${swatch(info.roofColor)}${escapeHtml(info.roofColor)}${mark("roof_color")}`
+        : null,
+      osmLink(info.id),
       `<a href="#" data-zoom>Zoom to building</a>`,
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8 })
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
       .setHTML(lines.join("<br>"))
       .addTo(this.map);
@@ -715,6 +823,7 @@ class CoolMap {
         this.tileCenter,
         x,
         y,
+        this.imputedColorsEnabled,
       );
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
@@ -760,6 +869,8 @@ class CoolMap {
   // rest. Called on the debounced move, on tile load/unload and after an origin
   // reset, so it is cheap when nothing changed (it only checks keys).
   private syncBuildingDetail() {
+    // roofs follow their checkbox whatever the zoom
+    this.applyRoofVisibility();
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
       this.clearBuildingDetail();
       return;
@@ -776,24 +887,60 @@ class CoolMap {
         if (!infos) continue;
         const originMeters = epsg4326toEpsg3857(this.tileCenter);
         const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-        const geometry = tileFacadeDetail(originMeters, scaleFactor, infos);
-        if (!geometry) continue;
-        const mesh = new THREE.Mesh(geometry, facadeMaterial);
-        mesh.userData = { kind: "facade", tileKey: key };
-        this.customLayer.scene.add(mesh);
-        this.loadedDetail[key] = mesh;
+        const detail = tileFacadeDetail(originMeters, scaleFactor, infos);
+        this.loadedDetail[key] = {
+          windows: this.addDetailMesh(key, "windows", detail.windows),
+          balconies: this.addDetailMesh(key, "balconies", detail.balconies),
+        };
       }
     }
     for (const key of Object.keys(this.loadedDetail)) {
       if (!keep.has(key)) this.disposeDetail(key);
     }
+    this.applyDetailVisibility();
+    this.applyRoofVisibility();
+  }
+
+  private addDetailMesh(
+    tileKey: string,
+    group: "windows" | "balconies",
+    geometry: THREE.BufferGeometry | null,
+  ): THREE.Mesh | null {
+    if (!geometry) return null;
+    const mesh = new THREE.Mesh(geometry, facadeMaterial);
+    mesh.userData = { kind: "facade", group, tileKey };
+    this.customLayer.scene.add(mesh);
+    return mesh;
+  }
+
+  // the windows and the balconies follow their checkboxes; the zoom gate is
+  // handled by building or dropping the meshes in syncBuildingDetail
+  private applyDetailVisibility() {
+    for (const { windows, balconies } of Object.values(this.loadedDetail)) {
+      if (windows) windows.visible = this.windowsEnabled;
+      if (balconies) balconies.visible = this.balconiesEnabled;
+    }
+  }
+
+  // roofs are their own mesh per tile, so this is just visibility too
+  private applyRoofVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "roof") {
+          mesh.visible = this.roofShapesEnabled;
+        }
+      }
+    }
   }
 
   private disposeDetail(key: string) {
-    const mesh = this.loadedDetail[key];
-    if (!mesh) return;
-    this.customLayer.scene.remove(mesh);
-    mesh.geometry.dispose();
+    const detail = this.loadedDetail[key];
+    if (!detail) return;
+    for (const mesh of [detail.windows, detail.balconies]) {
+      if (!mesh) continue;
+      this.customLayer.scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
     delete this.loadedDetail[key];
   }
 
@@ -889,9 +1036,12 @@ class CoolMap {
     const renderInfo = this.customLayer.renderer?.info.render;
     let facadeTiles = 0;
     let facadeVertices = 0;
-    for (const mesh of Object.values(this.loadedDetail)) {
-      facadeTiles += 1;
-      facadeVertices += mesh.geometry.getAttribute("position")?.count ?? 0;
+    for (const detail of Object.values(this.loadedDetail)) {
+      for (const mesh of [detail.windows, detail.balconies]) {
+        if (!mesh) continue;
+        facadeTiles += 1;
+        facadeVertices += mesh.geometry.getAttribute("position")?.count ?? 0;
+      }
     }
     return {
       tiles: Object.keys(this.loadedTiles).length,

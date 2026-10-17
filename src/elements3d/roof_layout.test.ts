@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  FLAT_AREA,
-  GABLE_ASPECT,
   MAX_RISE,
   MIN_RISE,
-  PYRAMID_WIDTH,
   ROOF_KINDS,
-  chooseRoofKind,
   frameToWorld,
-  polygonArea,
   ridgeAxis,
   ridgeExtent,
   isConvex,
@@ -17,6 +12,7 @@ import {
   ringCorners,
   roofOutline,
   roofFrame,
+  roofKind,
   roofPlan,
   roofRise,
 } from "./roof_layout";
@@ -28,13 +24,27 @@ const rectangle: [number, number][] = [
   [10, 4],
   [0, 4],
 ];
-// never triggers the seeded "variety" branch (ROOF_VARIETY is well below 0.9)
-const steady = () => 0.9;
 
-describe("polygonArea", () => {
-  it("measures a rectangle either winding", () => {
-    expect(polygonArea(rectangle)).toBeCloseTo(40);
-    expect(polygonArea([...rectangle].reverse())).toBeCloseTo(40);
+describe("roofKind", () => {
+  it("maps the shapes the renderer builds", () => {
+    expect(roofKind("gabled")).toBe("gabled");
+    expect(roofKind("Hipped")).toBe("hipped");
+    expect(roofKind(" pyramidal ")).toBe("pyramidal");
+    expect(roofKind("flat")).toBe("flat");
+  });
+
+  it("reads anything it has no geometry for as flat", () => {
+    for (const shape of [
+      "skillion",
+      "mansard",
+      "half-hipped",
+      "round",
+      "1",
+      "",
+    ]) {
+      expect(roofKind(shape)).toBe("flat");
+    }
+    expect(roofKind(undefined)).toBe("flat");
   });
 });
 
@@ -57,36 +67,6 @@ describe("roofFrame", () => {
     const frame = roofFrame(rectangle);
     // along the ridge and centred across it: the middle of the rectangle
     expect(frameToWorld(frame, 5, frame.acrossCentre)).toEqual([5, 2]);
-  });
-});
-
-describe("chooseRoofKind", () => {
-  it("gables a long, narrow footprint", () => {
-    const length = 12;
-    const width = 12 / (GABLE_ASPECT + 0.5);
-    expect(chooseRoofKind(length, width, length * width, steady)).toBe(
-      "gabled",
-    );
-  });
-
-  it("keeps a big block flat", () => {
-    const side = Math.sqrt(FLAT_AREA) + 4;
-    expect(chooseRoofKind(side, side, side * side, steady)).toBe("flat");
-  });
-
-  it("pyramids a small squarish footprint", () => {
-    const side = PYRAMID_WIDTH - 1;
-    expect(chooseRoofKind(side, side, side * side, steady)).toBe("pyramidal");
-  });
-
-  it("hips the ones in between", () => {
-    expect(chooseRoofKind(14, 12, 168, steady)).toBe("hipped");
-  });
-
-  it("lets the seeded variety pick any kind", () => {
-    // first draw under ROOF_VARIETY takes the surprise branch, then picks
-    const kind = chooseRoofKind(12, 4, 48, () => 0.05);
-    expect(ROOF_KINDS).toContain(kind);
   });
 });
 
@@ -203,7 +183,7 @@ describe("isConvex", () => {
 
 describe("roofPlan", () => {
   it("plans a gable over a long footprint", () => {
-    const roof = roofPlan(rectangle, steady);
+    const roof = roofPlan(rectangle, "gabled");
     expect(roof).not.toBeNull();
     expect(roof!.kind).toBe("gabled");
     expect(roof!.ridgeMin).toBeCloseTo(0);
@@ -211,14 +191,26 @@ describe("roofPlan", () => {
     expect(roof!.rise).toBeCloseTo(1.8);
   });
 
-  it("leaves a big square flat", () => {
-    const side = Math.sqrt(FLAT_AREA) + 4;
+  it("leaves a footprint flat when its shape is flat", () => {
     const square: [number, number][] = [
       [0, 0],
-      [side, 0],
-      [side, side],
-      [0, side],
+      [30, 0],
+      [30, 30],
+      [0, 30],
     ];
-    expect(roofPlan(square, steady)).toBeNull();
+    expect(roofPlan(square, "flat")).toBeNull();
+  });
+
+  it("builds a pyramid over a squarish footprint when asked", () => {
+    const square: [number, number][] = [
+      [0, 0],
+      [12, 0],
+      [12, 12],
+      [0, 12],
+    ];
+    const plan = roofPlan(square, "pyramidal");
+    expect(plan).not.toBeNull();
+    // the ridge collapses to a point for a pyramid
+    expect(plan!.ridgeMin).toBeCloseTo(plan!.ridgeMax);
   });
 });

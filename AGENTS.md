@@ -53,19 +53,22 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   and only for the tiles around the center (`loadedDetail`), and drops it when
   zoomed out or when the origin resets.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
-  built into the building geometry itself (in `building.ts`) so it is always
-  drawn. The shape comes from the footprint (long/narrow gables, squarish hips or
-  pyramids, big blocks stay flat) plus a seeded nudge; the layout is pure maths
-  and unit-tested. Footprints with an inner ring, a concave outline, or more than
-  `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks up on them.
-  `src/elements3d/random.ts` holds the seeded PRNG and hash shared by the facade
-  and roof code.
+  drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
+  visibility switch. The shape comes from the tile's `roof_shape`; the layout is
+  pure maths and unit-tested. Footprints with an inner ring, a concave outline,
+  or more than `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks
+  up on them. `src/elements3d/random.ts` holds the seeded PRNG and hash shared by
+  the facade and roof code.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
 - `tilegen/geo.py` — slippy-tile helpers shared by the generator.
+- `tilegen/impute.py` — fills a building's missing color/roof tags by sampling
+  the distribution of the values that ARE present (seeded per building, so a
+  rebuild reproduces the tiles). Pure: it takes counts and tag mappings, so it
+  is unit-tested like `traffic.py`.
 - `tilegen/traffic.py` — precomputes vehicle routes: global graph, loop
   generation (`random` three-point loops for cars, planar `faces` for trains),
   per-tile split. Per-fleet configs (`CAR_CONFIG`, `TRAIN_CONFIG`) drive cars
@@ -109,11 +112,16 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   building's position, so it is stable across reloads and origin resets;
   balconies only appear on buildings with at least two floors.
 - **roof** — the flat/gabled/hipped/pyramidal cap built into each building's
-  mesh from its footprint (no tile data), in a seeded roof tone. It is only
+  mesh from its footprint, in the tile's `roof_color`. The shape is the tile's
+  `roof_shape` (real `roof:shape` or an imputed one); the frontend only maps a
+  shape it has no geometry for (skillion, mansard, ...) to flat. It is only
   pitched over a single, convex ring of at most `MAX_ROOF_VERTICES` (8) corners;
   a concave outline or a courtyard stays flat, since the ridge fan breaks up on
-  those. Only flat roofs are the extrusion's own top cap; the others are extra
-  geometry.
+  those.
+- **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
+  leaves them out: `tilegen/impute.py` draws one from the observed distribution
+  of that tag in the same extract, seeded from the building id. The frontend
+  never imputes.
 - **speed bump** — the cosmetic slowdown `src/traffic.ts` adds around a crossing:
   the renderer matches the points to a loop's vertices and turns the distance
   windows into loop-time with the local speed. The global light (**axis** 0
@@ -129,8 +137,14 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 
 ## Conventions
 
-- Layer visibility toggles are checkboxes in `index.html`
-  (`#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`), styled in
-  `src/map_style.css`, wired in `CoolMap`.
+- Layer visibility toggles are checkboxes inside a layers menu in
+  `index.html` (`#layer-menu-button` opens `#layer-menu-panel`,
+  `#layer-menu-collapse` folds it, `#imputed-help` explains the imputed
+  colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
+  are unchanged (`#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`,
+  `#windows-toggle`, `#balconies-toggle`, `#roof-shapes-toggle`,
+  `#imputed-colors-toggle`). Windows, balconies and roofs are their own meshes,
+  so those are plain visibility switches; imputed colors are baked into the
+  geometry, so changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

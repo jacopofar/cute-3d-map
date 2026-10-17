@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
-import { hashSeed } from "./random";
+import { parseColor } from "./color";
 import { roofGeometry } from "./roof";
 import { applyVertexColor } from "./vertex_color";
 
@@ -38,27 +38,6 @@ function geoJSONtoHeight(f: BuildingFeature): number {
 }
 
 const DEFAULT_BUILDING_COLOR = "#aaaaaa";
-const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-const FUNCTIONAL_COLOR = /^(?:rgb|rgba|hsl|hsla)\(/i;
-
-// OSM building:colour is free text: it can be a semicolon list of two colors
-// ("black;white"), carry spaces, or be a name THREE.Color does not know. Passing
-// those straight to THREE.Color logs "Unknown color" and leaves the geometry
-// white, so take the first entry and check it before trusting it.
-function parseBuildingColor(value: string | undefined): THREE.Color {
-  const candidate = value?.split(";")[0]?.trim();
-  if (candidate) {
-    const named = candidate.toLowerCase() in THREE.Color.NAMES;
-    if (
-      HEX_COLOR.test(candidate) ||
-      FUNCTIONAL_COLOR.test(candidate) ||
-      named
-    ) {
-      return new THREE.Color(candidate);
-    }
-  }
-  return new THREE.Color(DEFAULT_BUILDING_COLOR);
-}
 
 // bake the per-feature color into a vertex color attribute, so many buildings
 // can be merged into a single mesh (one draw call per tile, not per building)
@@ -69,41 +48,62 @@ export type BuildingFeature = {
     // tilegen writes a number; allow a string here so hand-written GeoJSON
     // like "12 m" doesn't slip through as NaN
     height?: number | string;
+    // real (or tilegen-imputed) roof data, and which fields were imputed
+    roof_shape?: string;
+    roof_color?: string;
+    imputed?: string[];
   };
 };
+
+// what one building contributes: the extruded walls, and its roof as a separate
+// geometry so the roof can be switched off on its own
+export interface BuildingGeometry {
+  walls: THREE.BufferGeometry;
+  roof: THREE.BufferGeometry | null;
+}
+
+// whether a field was sampled rather than tagged
+function isImputed(f: BuildingFeature, field: string): boolean {
+  return (f.properties.imputed ?? []).includes(field);
+}
 
 export function building(
   originMeters: [number, number],
   scaleFactor: number,
   fin: Geojson.Feature,
-): THREE.BufferGeometry[] {
+  imputedColors = true,
+): BuildingGeometry[] {
   const f = fin as unknown as BuildingFeature;
   const height = geoJSONtoHeight(f);
   const extrudeSettings = {
     depth: height,
     bevelEnabled: false,
   };
-  const color = parseBuildingColor(f.properties.color);
-  // one roof shape per building, seeded from where it is, so it never changes
-  const seedFor = (polygon: Geojson.Position[][]): number => {
-    const [lon, lat] = polygon[0][0];
-    return hashSeed(`${lon},${lat}:roof`);
-  };
-  const withRoof = (
-    ring: Geojson.Position[][],
-    geometry: THREE.BufferGeometry,
-  ): THREE.BufferGeometry[] => {
-    const roof = roofGeometry(
+  // with imputed colors off, a sampled color falls back to the plain default
+  const color =
+    !imputedColors && isImputed(f, "color")
+      ? new THREE.Color(DEFAULT_BUILDING_COLOR)
+      : parseColor(f.properties.color, DEFAULT_BUILDING_COLOR);
+  const roofColor =
+    !imputedColors && isImputed(f, "roof_color")
+      ? undefined
+      : f.properties.roof_color;
+  const roofFor = (ring: Geojson.Position[][]): THREE.BufferGeometry | null =>
+    roofGeometry(
       ring.map((r) => r.map((c): [number, number] => [c[0], c[1]])),
       height,
       originMeters,
       scaleFactor,
-      seedFor(ring),
+      f.properties.roof_shape,
+      roofColor,
     );
-    return roof ? [geometry, roof] : [geometry];
-  };
+  const withRoof = (
+    ring: Geojson.Position[][],
+    geometry: THREE.BufferGeometry,
+  ) => ({ walls: geometry, roof: roofFor(ring) });
+
   if (f.geometry.type === "MultiPolygon") {
-    return f.geometry.coordinates.flatMap((polygon) => {
+    return f.geometry.coordinates.map((polygon) => {
       const featureBaseShape = coordsToShape(
         polygon,
         originMeters,
@@ -128,7 +128,7 @@ export function building(
       extrudeSettings,
     );
     applyVertexColor(geometry, color);
-    return withRoof(f.geometry.coordinates, geometry);
+    return [withRoof(f.geometry.coordinates, geometry)];
   }
   throw Error(`Cannot have building of type ${f.geometry.type}`);
 }

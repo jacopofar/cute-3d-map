@@ -27,14 +27,21 @@ export interface PreparedRoof {
   rise: number;
 }
 
-// at least this much longer than wide, and the building gets a gable
-export const GABLE_ASPECT = 1.6;
-// big blocks stay flat, however they are shaped
-export const FLAT_AREA = 500;
-// small and squarish reads as a pyramid; wider squarish ones get a hip
-export const PYRAMID_WIDTH = 9;
-// seeded "surprise": this fraction of buildings pick any kind, shape aside
-export const ROOF_VARIETY = 0.2;
+// Only the shapes with geometry here are mapped: a building whose roof:shape is
+// something else (skillion, mansard, saltbox, round, a typo...) reads as flat.
+export const ROOF_SHAPES: Record<string, RoofKind> = {
+  flat: "flat",
+  gabled: "gabled",
+  hipped: "hipped",
+  pyramidal: "pyramidal",
+};
+
+// OSM roof:shape -> the shape the renderer builds. tilegen guarantees every
+// building carries one (real or imputed), but the value can still be one of the
+// unmapped shapes.
+export function roofKind(shape: string | undefined): RoofKind {
+  return ROOF_SHAPES[(shape ?? "").trim().toLowerCase()] ?? "flat";
+}
 
 export const MIN_RISE = 0.8;
 export const MAX_RISE = 6;
@@ -44,16 +51,6 @@ export const RISE_PER_WIDTH = 0.45;
 // longer a clean ring round the building, so it gets a flat roof and no pitched
 // geometry at all.
 export const MAX_ROOF_VERTICES = 8;
-
-export function polygonArea(ring: [number, number][]): number {
-  let doubled = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    doubled += a[0] * b[1] - b[0] * a[1];
-  }
-  return Math.abs(doubled) / 2;
-}
 
 // every turn is the same way round (collinear points are fine)
 export function isConvex(ring: [number, number][]): boolean {
@@ -149,24 +146,6 @@ export function frameToWorld(
   return [along * ax - across * ay, along * ay + across * ax];
 }
 
-// Pick a shape from the footprint: long and narrow gables, squarish small ones
-// pyramid, big blocks stay flat, and a seeded fraction surprises.
-export function chooseRoofKind(
-  length: number,
-  width: number,
-  area: number,
-  rng: () => number,
-): RoofKind {
-  if (rng() < ROOF_VARIETY) {
-    return ROOF_KINDS[Math.floor(rng() * ROOF_KINDS.length)];
-  }
-  if (width <= 0) return "flat";
-  if (length / width >= GABLE_ASPECT) return "gabled";
-  if (area >= FLAT_AREA) return "flat";
-  if (width <= PYRAMID_WIDTH) return "pyramidal";
-  return "hipped";
-}
-
 // ridge height, from the footprint's narrow side so the pitch stays sane
 export function roofRise(width: number): number {
   return Math.min(MAX_RISE, Math.max(MIN_RISE, RISE_PER_WIDTH * width));
@@ -192,12 +171,10 @@ export function ridgeExtent(
 // the whole roof plan for one footprint, or null when it stays flat
 export function roofPlan(
   ring: [number, number][],
-  rng: () => number,
+  kind: RoofKind,
 ): PreparedRoof | null {
-  const frame = roofFrame(ring);
-  const length = frame.alongMax - frame.alongMin;
-  const kind = chooseRoofKind(length, frame.width, polygonArea(ring), rng);
   if (kind === "flat") return null;
+  const frame = roofFrame(ring);
   const [ridgeMin, ridgeMax] = ridgeExtent(
     kind,
     frame.alongMin,

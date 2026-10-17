@@ -27,6 +27,7 @@ function square(halfLon = 7.7e-5, halfLat = 5.4e-5): [number, number][] {
 const building = (over: Partial<BuildingInfo> = {}): BuildingInfo => ({
   rings: [square()],
   height: 12,
+  imputed: [],
   ...over,
 });
 
@@ -34,39 +35,41 @@ const DOOR = new THREE.Color(0x6b4a2f);
 
 describe("tileFacadeDetail", () => {
   it("emits quad geometry for a building", () => {
-    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()]);
-    expect(geometry).not.toBeNull();
-    const position = geometry!.getAttribute("position");
+    const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()]);
+    expect(detail.windows).not.toBeNull();
+    const position = detail.windows!.getAttribute("position");
     expect(position.count).toBeGreaterThan(0);
     expect(position.count % 6).toBe(0); // whole quads (two triangles)
-    expect(geometry!.getAttribute("normal").count).toBe(position.count);
-    expect(geometry!.getAttribute("color").count).toBe(position.count);
+    expect(detail.windows!.getAttribute("normal").count).toBe(position.count);
+    expect(detail.windows!.getAttribute("color").count).toBe(position.count);
   });
 
-  it("returns null when there is nothing to emit", () => {
+  it("returns empty groups when there is nothing to emit", () => {
     // a building too low for any window and any door
-    expect(
-      tileFacadeDetail(ORIGIN_METERS, SCALE, [building({ height: 1 })]),
-    ).toBeNull();
+    const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building({ height: 1 }),
+    ]);
+    expect(detail.windows).toBeNull();
+    expect(detail.balconies).toBeNull();
+  });
+
+  it("keeps the windows and the balconies in separate geometries", () => {
+    const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building({ rings: [square(2.6e-4, 1.8e-4)], height: 30 }),
+    ]);
+    expect(detail.windows).not.toBeNull();
+    expect(detail.balconies).not.toBeNull();
+    // the balconies carry no glass tone, the windows no horizontal face
+    expect(horizontalFaces(detail.windows)).toBe(0);
+    expect(horizontalFaces(detail.balconies)).toBeGreaterThan(0);
   });
 
   it("faces every window and door outward, away from the footprint centre", () => {
     const info = building();
-    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [info])!;
+    // the window group is the flat wall quads: the door and the windows
+    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [info]).windows!;
     const position = geometry.getAttribute("position");
     const normal = geometry.getAttribute("normal");
-    const color = geometry.getAttribute("color");
-    // balcony faces point in all directions, so only check the flat wall quads
-    const wall = [FACADE_COLORS.door, ...FACADE_COLORS.window].map(
-      (hex) => new THREE.Color(hex),
-    );
-    const isWall = (i: number) =>
-      wall.some(
-        (c) =>
-          Math.abs(color.getX(i) - c.r) < 1e-6 &&
-          Math.abs(color.getY(i) - c.g) < 1e-6 &&
-          Math.abs(color.getZ(i) - c.b) < 1e-6,
-      );
     // centre of the footprint in model space
     const corners = info.rings[0].map((c) =>
       toModelCoords([c[0], c[1]], ORIGIN_METERS, SCALE),
@@ -75,7 +78,6 @@ describe("tileFacadeDetail", () => {
     const cy = corners.reduce((s, c) => s + c[1], 0) / corners.length;
     let checked = 0;
     for (let i = 0; i < position.count; i++) {
-      if (!isWall(i)) continue;
       checked++;
       const outward =
         (position.getX(i) - cx) * normal.getX(i) +
@@ -86,7 +88,9 @@ describe("tileFacadeDetail", () => {
   });
 
   it("puts windows above the ground and one door at the ground", () => {
-    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()])!;
+    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building(),
+    ]).windows!;
     const position = geometry.getAttribute("position");
     const color = geometry.getAttribute("color");
     let doorVertices = 0;
@@ -108,8 +112,8 @@ describe("tileFacadeDetail", () => {
   });
 
   it("is deterministic for the same building", () => {
-    const a = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()])!;
-    const b = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()])!;
+    const a = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()]).windows!;
+    const b = tileFacadeDetail(ORIGIN_METERS, SCALE, [building()]).windows!;
     expect(Array.from(a.getAttribute("position").array)).toEqual(
       Array.from(b.getAttribute("position").array),
     );
@@ -121,48 +125,54 @@ describe("tileFacadeDetail", () => {
     for (const reversed of [false, true]) {
       const ring = square();
       const info = building({ rings: [reversed ? [...ring].reverse() : ring] });
-      const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [info])!;
-      const position = geometry.getAttribute("position");
-      const normal = geometry.getAttribute("normal");
-      for (let t = 0; t < position.count; t += 3) {
-        const tri = [0, 1, 2].map((o): [number, number, number] => [
-          position.getX(t + o),
-          position.getY(t + o),
-          position.getZ(t + o),
-        ]);
-        const u = tri[1].map((c, i) => c - tri[0][i]);
-        const v = tri[2].map((c, i) => c - tri[0][i]);
-        const cross = [
-          u[1] * v[2] - u[2] * v[1],
-          u[2] * v[0] - u[0] * v[2],
-          u[0] * v[1] - u[1] * v[0],
-        ];
-        const facing = [normal.getX(t), normal.getY(t), normal.getZ(t)];
-        const dot =
-          cross[0] * facing[0] + cross[1] * facing[1] + cross[2] * facing[2];
-        expect(dot).toBeGreaterThan(0);
+      const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [info]);
+      // both groups must be wound to face outward
+      for (const geometry of [
+        detail.windows!,
+        detail.balconies ?? detail.windows!,
+      ]) {
+        const position = geometry.getAttribute("position");
+        const normal = geometry.getAttribute("normal");
+        for (let t = 0; t < position.count; t += 3) {
+          const tri = [0, 1, 2].map((o): [number, number, number] => [
+            position.getX(t + o),
+            position.getY(t + o),
+            position.getZ(t + o),
+          ]);
+          const u = tri[1].map((c, i) => c - tri[0][i]);
+          const v = tri[2].map((c, i) => c - tri[0][i]);
+          const cross = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+          ];
+          const facing = [normal.getX(t), normal.getY(t), normal.getZ(t)];
+          const dot =
+            cross[0] * facing[0] + cross[1] * facing[1] + cross[2] * facing[2];
+          expect(dot).toBeGreaterThan(0);
+        }
       }
     }
   });
 
   it("adds no balconies on a single-floor building", () => {
-    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+    const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
       building({ height: 4 }),
-    ])!;
-    expect(horizontalFaces(geometry)).toBe(0);
+    ]);
+    expect(horizontalFaces(detail.balconies)).toBe(0);
   });
 
   it("adds balconies to a tall building", () => {
     // ~40 m square, 30 m tall: plenty of eligible floors, so some appear
-    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+    const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
       building({ rings: [square(2.6e-4, 1.8e-4)], height: 30 }),
-    ])!;
-    expect(horizontalFaces(geometry)).toBeGreaterThan(0);
+    ]);
+    expect(horizontalFaces(detail.balconies)).toBeGreaterThan(0);
   });
 
-  it("gives every window on a building one colour, picked per building", () => {
+  it("gives every window on a building one color, picked per building", () => {
     const one = windowTone(
-      tileFacadeDetail(ORIGIN_METERS, SCALE, [building()])!,
+      tileFacadeDetail(ORIGIN_METERS, SCALE, [building()]).windows,
     );
     expect(one).not.toBeNull();
 
@@ -172,10 +182,10 @@ describe("tileFacadeDetail", () => {
         lon + i * 0.001,
         lat,
       ]);
-      const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
         building({ rings: [ring] }),
-      ])!;
-      const tone = windowTone(geometry);
+      ]);
+      const tone = windowTone(detail.windows);
       if (tone) tones.add(tone);
     }
     expect(tones.size).toBeGreaterThan(1);
@@ -183,8 +193,9 @@ describe("tileFacadeDetail", () => {
   });
 });
 
-// the colour of the first window vertex, or null when there is none
-function windowTone(geometry: THREE.BufferGeometry): string | null {
+// the color of the first window vertex, or null when there is none
+function windowTone(geometry: THREE.BufferGeometry | null): string | null {
+  if (!geometry) return null;
   const palette = FACADE_COLORS.window.map((hex) =>
     new THREE.Color(hex).getHexString(),
   );
@@ -202,7 +213,8 @@ function windowTone(geometry: THREE.BufferGeometry): string | null {
 
 // balcony slabs are the only horizontal faces, so a |normal.z| > 0.5 vertex is
 // proof a balcony was emitted
-function horizontalFaces(geometry: THREE.BufferGeometry): number {
+function horizontalFaces(geometry: THREE.BufferGeometry | null): number {
+  if (!geometry) return 0;
   const normal = geometry.getAttribute("normal");
   let count = 0;
   for (let i = 0; i < normal.count; i++) {

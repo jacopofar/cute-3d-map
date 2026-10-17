@@ -8,6 +8,7 @@ import duckdb
 import quackosm as qosm
 import shapely
 from geo import TILE_ZOOM, coord_to_tile
+from impute import IMPUTED_FIELDS, Distribution, impute
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
 from traffic import (
@@ -61,7 +62,7 @@ def parse_length(value: str | None) -> float | None:
         return None
 
 
-def to_building(feature_id, tags, s) -> dict | None:
+def to_building(feature_id, tags, s, distributions=None) -> dict | None:
     if s.geom_type == "Point":
         logger.warning(f"Point building?? {feature_id}")
         return None
@@ -69,20 +70,24 @@ def to_building(feature_id, tags, s) -> dict | None:
         # don't abort the whole tile run over one weird feature
         logger.warning(f"non-polygon building?? {feature_id} ({s.geom_type})")
         return None
-    color = tags.get("building:colour")
     height = parse_length(tags.get("height"))
     if height is None and "building:levels" in tags:
         levels = parse_length(tags["building:levels"])
         if levels is not None:
             height = levels * 3
 
+    values, sampled = impute(tags, feature_id, distributions or {})
     properties = {
         "cmtype": "building",
-        "color": color,
         "height": height,
         "name": tags.get("name"),
         "street": tags.get("addr:street"),
         "housenumber": tags.get("addr:housenumber"),
+        # color, roof_shape and roof_color: the OSM tag when present, otherwise
+        # a sample from the dataset's own distribution (see tilegen/impute.py).
+        # `imputed` names the fields that were sampled rather than tagged.
+        **values,
+        "imputed": sampled or None,
     }
     return {
         "type": "feature",
@@ -185,7 +190,13 @@ def to_crossing(feature_id, tags, s) -> dict | None:
     return to_stop_point(feature_id, tags, s, "crossing")
 
 
-def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
+def tile_to_geojson(
+    data,
+    tile_x: int,
+    tile_y: int,
+    zoom: int,
+    distributions: dict[str, Distribution] | None = None,
+) -> tuple[list, list]:
     """Build the render features (buildings, trees) and the raw-tag features.
 
     The road and rail network is deliberately not emitted: the vehicle routes
@@ -205,7 +216,7 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
             }
         )
         if "building" in tags:
-            ret.append(to_building(feature_id, tags, s))
+            ret.append(to_building(feature_id, tags, s, distributions))
         elif tags.get("natural") == "tree":
             ret.append(to_tree(feature_id, tags, s))
         elif tags.get("natural") == "tree_row":
@@ -322,6 +333,40 @@ def write_loop_report(
     logger.info(f"loop report: {len(features)} features written to {report_dir}")
 
 
+def tag_distribution(input_parquet: Path, tag_key: str) -> Distribution | None:
+    """The distribution of one tag over every building that sets it, for
+    sampling the buildings that don't (see tilegen/impute.py)."""
+    rows = duckdb.execute(
+        f"""
+        select tags['{tag_key}'] as value, count(*) as count
+        from read_parquet($input_path)
+        where tags['building'] is not null
+          and tags['{tag_key}'] is not null
+        group by 1
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    distribution = Distribution.from_counts(
+        {value: count for value, count in rows if value is not None}
+    )
+    if distribution is not None:
+        logger.info(
+            f"{tag_key}: {len(distribution.values)} distinct values, "
+            f"{distribution.total} buildings"
+        )
+    return distribution
+
+
+def building_distributions(input_parquet: Path) -> dict[str, Distribution]:
+    """One distribution per imputed field, over the buildings that set the tag."""
+    distributions: dict[str, Distribution] = {}
+    for field, tag in IMPUTED_FIELDS:
+        distribution = tag_distribution(input_parquet, tag)
+        if distribution is not None:
+            distributions[field] = distribution
+    return distributions
+
+
 def parquet_to_tiles(
     input_parquet: Path,
     target_folder: Path,
@@ -333,6 +378,9 @@ def parquet_to_tiles(
 ) -> None:
     duckdb.load_extension("spatial")
     zoom_level = TILE_ZOOM
+    # every building gets a color, roof shape and roof color: the real tag where
+    # it has one, otherwise a sample from the dataset's own distribution
+    distributions = building_distributions(input_parquet)
     bb = duckdb.execute(
         """
         with ext as (
@@ -415,7 +463,7 @@ def parquet_to_tiles(
                 },
             )
             features, raw_features = tile_to_geojson(
-                tile_data.fetchall(), x, y, zoom_level
+                tile_data.fetchall(), x, y, zoom_level, distributions
             )
             traffic_loops = traffic_by_tile.get((x, y))
             # compact JSON (indent=2 put every coordinate on its own line and

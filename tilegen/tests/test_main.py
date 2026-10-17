@@ -1,6 +1,7 @@
 import json
 
 import geo
+import impute
 import main
 import shapely
 import traffic
@@ -47,6 +48,42 @@ def test_to_building_height_and_color():
     assert f["properties"]["cmtype"] == "building"
     assert f["properties"]["height"] == 12.0
     assert f["properties"]["color"] == "#ff0000"
+
+
+def test_to_building_imputes_missing_color_and_roof():
+    distributions = {
+        "color": impute.Distribution.from_counts({"white": 1}),
+        "roof_shape": impute.Distribution.from_counts({"gabled": 1}),
+        "roof_color": impute.Distribution.from_counts({"#bf7182": 1}),
+    }
+    f = main.to_building(9, {"building": "yes"}, geom(POLYGON), distributions)
+    assert f is not None
+    assert f["properties"]["color"] == "white"
+    assert f["properties"]["roof_shape"] == "gabled"
+    assert f["properties"]["roof_color"] == "#bf7182"
+    # and it says which of them were imputed rather than tagged
+    assert sorted(f["properties"]["imputed"]) == [
+        "color",
+        "roof_color",
+        "roof_shape",
+    ]
+
+
+def test_to_building_keeps_real_roof_tags():
+    distributions = {
+        "roof_shape": impute.Distribution.from_counts({"flat": 1}),
+    }
+    f = main.to_building(
+        10,
+        {"building": "yes", "roof:shape": "hipped", "roof:colour": "red"},
+        geom(POLYGON),
+        distributions,
+    )
+    assert f is not None
+    assert f["properties"]["roof_shape"] == "hipped"
+    assert f["properties"]["roof_color"] == "red"
+    # nothing was sampled for this one
+    assert "imputed" not in f["properties"]
 
 
 def test_to_building_levels_fallback():

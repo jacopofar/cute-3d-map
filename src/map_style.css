@@ -1,3 +1,13 @@
+/* The map UI (popups, controls) sits on MapLibre's own white background and
+   inherits the page's text color: maplibre-gl.css sets the popup background but
+   not its color, so pin the page to light and a dark browser/OS preference
+   cannot paint white text onto the white popup. */
+html,
+body {
+  margin: 0;
+  color-scheme: light;
+}
+
 /* Without this maplibre maps will not show up */
 .maplibregl-map {
   width: 100%;
@@ -6,33 +16,117 @@
   height: 100dvh;
 }
 
-#traffic-toggle,
-#inspect-toggle,
-#clouds-toggle {
+/* Layers menu: a gear button that opens the list of checkboxes, with a chevron
+   at the top of the list to collapse it again. */
+#layer-menu {
   position: fixed;
+  top: 10px;
   left: 10px;
   z-index: 10;
+  font: 13px sans-serif;
+  /* explicit, so the OS color scheme does not turn the text white */
+  color: #213547;
+}
+
+#layer-menu-button,
+#layer-menu-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #213547;
+  cursor: pointer;
+}
+
+#layer-menu-button {
+  width: 34px;
+  height: 34px;
+}
+
+#layer-menu-button:hover,
+#layer-menu-collapse:hover {
+  background: #fff;
+}
+
+#layer-menu-button[hidden] {
+  display: none;
+}
+
+#layer-menu-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 190px;
+  padding: 6px 8px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+#layer-menu-panel[hidden] {
+  display: none;
+}
+
+#layer-menu-collapse {
+  align-self: flex-end;
+  width: 22px;
+  height: 22px;
+}
+
+#layer-menu-panel > label,
+#layer-menu-panel .toggle-row {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.85);
-  font: 13px sans-serif;
-  /* explicit, so the OS color scheme does not turn the labels white */
-  color: #213547;
   cursor: pointer;
   user-select: none;
 }
 
-#traffic-toggle {
-  top: 10px;
+.help-button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid #21354780;
+  border-radius: 50%;
+  background: transparent;
+  color: #213547;
+  font: 11px sans-serif;
+  line-height: 1;
+  cursor: pointer;
 }
 
-#inspect-toggle {
-  top: 44px;
+.help-button:hover {
+  background: #21354720;
 }
 
-#clouds-toggle {
-  top: 78px;
+.help-text {
+  margin: 2px 0 0;
+  max-width: 230px;
+  color: #444;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.help-text[hidden] {
+  display: none;
+}
+
+/* building popup: color swatches and the "imputed" tag */
+.maplibregl-popup-content .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border: 1px solid #8888;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+
+.maplibregl-popup-content .imputed {
+  color: #8a6d3b;
+  font-style: italic;
+  font-size: 12px;
 }

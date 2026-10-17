@@ -17,8 +17,10 @@ The project has two halves:
    then uses [DuckDB](https://duckdb.org) with the `spatial` extension to slice
    the data into static JSON tiles at Web-Mercator zoom 15 (`public/tiles/{x}/{y}.json`).
    Each tile is a GeoJSON FeatureCollection with properties used for rendering:
-   - `cmtype: "building"` (with optional `height`, `color`) — extruded polygon,
-     height falls back to `building:levels * 3` or 10 m;
+   - `cmtype: "building"` (with `height`, `color`, `roof_shape`, `roof_color`):
+     extruded polygon; height falls back to `building:levels * 3` or 10 m, and
+     the color and roof tags are **imputed** from the dataset's own
+     distribution when OSM has none (see "Imputed tags" below);
    - `cmtype: "tree"` (point) — with `type` (broadleaf/conifer) and `size`
      (crown radius, m) derived from OSM tags or a hash;
    - `cmtype: "tree_row"` (LineString) — one shared type/size for the row;
@@ -43,13 +45,35 @@ The project has two halves:
    is derived from the footprints and heights already in the tile — no extra
    tile data — merged into one mesh per tile and rebuilt as the zoom crosses the
    gate. Every building also gets a **roof** — flat, gabled, hipped or pyramidal,
-   chosen from the footprint's shape with a seeded nudge
-   (`src/elements3d/roof.ts`), in one of a few roof tones — built into the
-   building mesh itself, so roofs are always there rather than zoom-gated.
-   Footprints that are concave, have a courtyard, or have more than 8 corners
-   stay flat: the ridge fan that builds the pitched shapes breaks up on those.
-   There is also a (commented out) GLTFExporter
+   taken from the tile's `roof_shape` (the real `roof:shape`, or imputed by the
+   generator), in the tile's `roof_color`, built into the building mesh itself,
+   so roofs are always there rather than zoom-gated. Footprints that are concave,
+   have a courtyard, or have more than 8 corners stay flat: the ridge fan that
+   builds the pitched shapes breaks up on those. There
+   is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
+
+### Imputed tags
+
+Only a couple of percent of buildings carry `building:colour` (0.5%),
+`roof:shape` (2.1%) or `roof:colour` (1.5%), so the generator fills each of those
+in rather than leave the tiles nearly featureless. A missing value is **drawn
+from the distribution of the values that are present** in the same extract — a
+dataset that is 30% red roofs yields 30% red imputed roofs — and the draw is
+seeded from the building's id, so a rebuild reproduces the same tiles. The
+frontend never imputes: it reads `color`, `roof_shape` and `roof_color` and maps
+anything it cannot draw (e.g. `roof:shape=skillion`) to a flat roof.
+
+### Buildings
+
+Clicking a building inspects it: the popup shows its name and address, height,
+wall color, roof shape and roof color (with a swatch), marks the values tilegen
+had to impute, and links to the feature's OSM page when the tile carries an id.
+The layers menu (the gear at the top left) turns the **windows**, **balconies**,
+**roof shapes** and **imputed colors** on and off, with a question mark beside
+the last one explaining what imputation means. The first three are mesh
+visibility; imputed colors are baked into the geometry and so reload the loaded
+tiles.
 
 ### Precomputed traffic
 
