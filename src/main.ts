@@ -22,6 +22,7 @@ import {
 import type { BuildingInfo, TrafficLoop } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
+import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
 
 import "./style.css";
 // Import our custom CSS
@@ -31,6 +32,12 @@ import "./map_style.css";
 
 // precomputed vehicles are only shown when the map is at least this zoomed in
 const VEHICLE_MIN_ZOOM = 15;
+// windows and doors are fine detail: only worth building once the map is close
+// enough for them to read, and only for the tiles around the centre (the tile
+// window itself is fixed by TILE_ZOOM, so at high zoom most loaded tiles are
+// off-screen)
+const FACADE_MIN_ZOOM = 17;
+const FACADE_TILE_MARGIN = 1;
 
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -145,6 +152,9 @@ class CoolMap {
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
+  // facade detail (windows/doors) meshes per tile, built only while zoomed in;
+  // kept out of loadedTiles so stats() and click-picking stay as they were
+  private loadedDetail: { [key: string]: THREE.Mesh } = {};
   private highlight?: THREE.Object3D;
   private popup?: Popup;
   private carsTraffic?: TrafficRenderer;
@@ -395,6 +405,7 @@ class CoolMap {
         this.moveDebounce = undefined;
         this.applyTrafficState();
         this.loadUnloadCoord(this.map.getCenter());
+        this.syncBuildingDetail();
       }, 150);
     });
 
@@ -619,6 +630,9 @@ class CoolMap {
     this.tileCenter = [center.lng, center.lat];
     // the highlight is in the old origin's model space; drop it
     this.clearSelection();
+    // the facade detail is baked in the old origin's space too; drop it and let
+    // the next sync rebuild it against the new origin
+    this.clearBuildingDetail();
     // in-flight loads were baked against the old origin, so discard them and
     // clear their bookkeeping to let the load loop request them again
     this.originGeneration += 1;
@@ -662,6 +676,7 @@ class CoolMap {
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
         delete this.loadedCrossings[k];
+        this.disposeDetail(k);
         deleteUsKeys.push(k);
       }
     });
@@ -722,6 +737,7 @@ class CoolMap {
       this.loadedBuildings[tileKey] = buildings;
       this.loadedCrossings[tileKey] = crossings;
       this.syncTraffic();
+      this.syncBuildingDetail();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
       console.warn("failed to load tile", tileKey, e);
@@ -738,6 +754,51 @@ class CoolMap {
     this.carsTraffic.setEnabled(on);
     this.trainsTraffic.setEnabled(on);
     if (on) this.syncTraffic();
+  }
+
+  // build the window/door meshes for the tiles around the centre, and drop the
+  // rest. Called on the debounced move, on tile load/unload and after an origin
+  // reset, so it is cheap when nothing changed (it only checks keys).
+  private syncBuildingDetail() {
+    if (this.map.getZoom() < FACADE_MIN_ZOOM) {
+      this.clearBuildingDetail();
+      return;
+    }
+    const [cx, cy] = getTileIndex(this.map.getCenter());
+    const keep = new Set<string>();
+    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
+      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
+        const key = `${x}_${y}`;
+        keep.add(key);
+        if (this.loadedDetail[key]) continue;
+        const infos = this.loadedBuildings[key];
+        // not loaded yet: loadTile runs this again when it arrives
+        if (!infos) continue;
+        const originMeters = epsg4326toEpsg3857(this.tileCenter);
+        const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+        const geometry = tileFacadeDetail(originMeters, scaleFactor, infos);
+        if (!geometry) continue;
+        const mesh = new THREE.Mesh(geometry, facadeMaterial);
+        mesh.userData = { kind: "facade", tileKey: key };
+        this.customLayer.scene.add(mesh);
+        this.loadedDetail[key] = mesh;
+      }
+    }
+    for (const key of Object.keys(this.loadedDetail)) {
+      if (!keep.has(key)) this.disposeDetail(key);
+    }
+  }
+
+  private disposeDetail(key: string) {
+    const mesh = this.loadedDetail[key];
+    if (!mesh) return;
+    this.customLayer.scene.remove(mesh);
+    mesh.geometry.dispose();
+    delete this.loadedDetail[key];
+  }
+
+  private clearBuildingDetail() {
+    for (const key of Object.keys(this.loadedDetail)) this.disposeDetail(key);
   }
 
   setTrafficEnabled(enabled: boolean) {
@@ -796,6 +857,8 @@ class CoolMap {
     buildings: number;
     vehicles: number;
     trains: number;
+    facadeTiles: number;
+    facadeVertices: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -824,6 +887,12 @@ class CoolMap {
       }
     }
     const renderInfo = this.customLayer.renderer?.info.render;
+    let facadeTiles = 0;
+    let facadeVertices = 0;
+    for (const mesh of Object.values(this.loadedDetail)) {
+      facadeTiles += 1;
+      facadeVertices += mesh.geometry.getAttribute("position")?.count ?? 0;
+    }
     return {
       tiles: Object.keys(this.loadedTiles).length,
       meshes,
@@ -838,6 +907,8 @@ class CoolMap {
       ),
       vehicles: this.carsTraffic?.count ?? 0,
       trains: this.trainsTraffic?.count ?? 0,
+      facadeTiles,
+      facadeVertices,
     };
   }
 

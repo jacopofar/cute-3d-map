@@ -37,7 +37,12 @@ The project has two halves:
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
-   MapLibre's projection matrix. There is also a (commented out) GLTFExporter
+   MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
+   balconies and one door per building** for the buildings nearest the center
+   (geometry in `src/elements3d/facade.ts`, laid out by `facade_layout.ts`): it
+   is derived from the footprints and heights already in the tile — no extra
+   tile data — merged into one mesh per tile and rebuilt as the zoom crosses the
+   gate. There is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
 
 ### Precomputed traffic
@@ -147,6 +152,11 @@ idle/pan p50, `perf-results` A/B below) and the most on memory: the loaded
 geometry drops from ~366 MB to ~165 MB of vertex+index buffers. See `notes.md`
 for what is still open (a `getBounds()`-driven tile window, spreading tile builds
 across frames).
+
+The facade windows/balconies/doors are the opposite trade: they add geometry
+(about 4.4M vertices for the 9 tiles near the center at zoom 17, versus 2.1M for
+the base buildings across all 49), so they are built only while zoomed in and
+only for those center tiles — nothing is built or drawn while zoomed out.
 
 ### Measuring performance
 

@@ -46,6 +46,12 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
+- `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
+  and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
+  turns it into one merged geometry per tile (quads wound to match their normal,
+  since OSM rings come in both windings). `CoolMap` builds it only above zoom 17
+  and only for the tiles around the center (`loadedDetail`), and drops it when
+  zoomed out or when the origin resets.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
@@ -89,6 +95,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 - **crossing / traffic signal** — an OSM `highway=crossing` or
   `highway=traffic_signals` node. Both are emitted as point tiles and in the
   debug GeoJSON; the frontend slows vehicles as they pass over them.
+- **facade detail** — the procedural windows, balconies and one door per
+  building, derived from a footprint's rings and height (no tile data), merged
+  per tile and shown only at zoom 17 and above. The layout is seeded from the
+  building's position, so it is stable across reloads and origin resets;
+  balconies only appear on buildings with at least two floors.
 - **speed bump** — the cosmetic slowdown `src/traffic.ts` adds around a crossing:
   the renderer matches the points to a loop's vertices and turns the distance
   windows into loop-time with the local speed. The global light (**axis** 0
