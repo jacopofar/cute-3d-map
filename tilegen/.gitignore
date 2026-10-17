@@ -3,3 +3,7 @@ files/
 # output
 tiles/
 raw_tiles/
+# pytest-cov
+.coverage
+.coverage.*
+htmlcov/

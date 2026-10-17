@@ -27,9 +27,10 @@ done by walking the geometry in arc-length space instead of clipping.
 
 import hashlib
 import heapq
+import logging
 import math
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import pairwise
 
@@ -60,6 +61,11 @@ DRIVABLE_HIGHWAYS = frozenset(
 # railway values whose ways carry trains/trams. Metros (railway=subway) are
 # ignored.
 RAILWAYS = frozenset({"rail", "tram"})
+
+# OSM node tags the tiles carry as points: a light or a pedestrian crossing. The
+# frontend detects when a vehicle passes one and adds a purely cosmetic speed
+# bump (see src/traffic.ts); the generator only stores where they are.
+STOP_KINDS = {"traffic_signals": "traffic_signal", "crossing": "crossing"}
 
 # approximate cruise speed (m/s) per drivable highway class, used to derive a
 # loop's speed (and therefore its period). Deliberately city-level.
@@ -96,6 +102,12 @@ CAR_COLORS = ("ff5555", "5555ff", "ffcc33", "33cc99")
 GRAY_COLORS = ("e0e0e0", "b0b0b0", "888888", "555555", "333333", "a8a8a8")
 GRAY_FRACTION = 0.6
 TRAIN_COLORS = ("ff8c00",)
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 def road_oneway(tags) -> str | None:
@@ -177,6 +189,16 @@ class Edge:
     highway: str | None
     length: float
     maxspeed: float | None = None  # m/s
+
+
+@dataclass
+class CrossingPoint:
+    """An OSM node the tiles carry as a point: a light or a pedestrian crossing.
+    Loaded from the parquet by main.py; traffic.py itself does no OSM I/O."""
+
+    lon: float
+    lat: float
+    kind: str  # "traffic_signal" | "crossing"
 
 
 @dataclass
@@ -446,6 +468,8 @@ def find_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[L
         if loop is not None:
             loop.kind = kind
             loops.append(loop)
+            if len(loops) % 100 == 0:
+                logger.info(f"Found {len(loops)} so far")
     loops.sort(key=lambda loop: loop.id)
     return loops
 
@@ -792,6 +816,7 @@ def build_fleets(
     for kind, ways in ways_by_kind.items():
         config = configs[kind]
         graph = build_graph(ways)
+        logger.info(f"built graph for {kind=}")
         loops = build_loops(graph, config, kind)
         assign_vehicles(loops, config)
         fleets[kind] = loops
@@ -850,9 +875,13 @@ def _bucket_label(low: float, high: float) -> str:
     return f"{low:.0f}+" if high == math.inf else f"{low:.0f}-{high:.0f}"
 
 
-def loop_report(fleets: dict[str, list[Loop]]) -> str:
+def loop_report(
+    fleets: dict[str, list[Loop]],
+    crossing_points: list[CrossingPoint] | None = None,
+) -> str:
     """A markdown description of each fleet's loop sizes (count, min/mean/max,
-    histogram). Pure text, so it is easy to test and to diff between runs."""
+    histogram). Pure text, so it is easy to test and to diff between runs. When
+    the signal/crossing points are given, their counts are appended."""
     lines = ["# Vehicle loop report", ""]
     for kind in sorted(fleets):
         loops = fleets[kind]
@@ -892,12 +921,32 @@ def loop_report(fleets: dict[str, list[Loop]]) -> str:
                 f"{sum(len(loop.vehicles) for loop in bucket)} |"
             )
         lines.append("")
+    if crossing_points is not None:
+        counts = Counter(point.kind for point in crossing_points)
+        lines.extend(
+            [
+                "## signals and crossings",
+                "",
+                f"- Traffic signals: **{counts.get('traffic_signal', 0)}**",
+                f"- Crossings: **{counts.get('crossing', 0)}**",
+                "",
+                (
+                    "These are stored as points in the tiles; the frontend "
+                    "slows vehicles down as they pass them."
+                ),
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
-def loops_to_geojson(loops: list[Loop]) -> list[dict]:
-    """The loops as LineString features, for visual troubleshooting."""
-    return [
+def loops_to_geojson(
+    loops: list[Loop],
+    crossing_points: list[CrossingPoint] | None = None,
+) -> list[dict]:
+    """The loops as LineString features, for visual troubleshooting. When the
+    signal/crossing points are given they are appended as Point features."""
+    features: list[dict] = [
         {
             "type": "Feature",
             "geometry": {
@@ -917,3 +966,15 @@ def loops_to_geojson(loops: list[Loop]) -> list[dict]:
         }
         for loop in loops
     ]
+    for point in crossing_points or []:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [round(point.lon, 7), round(point.lat, 7)],
+                },
+                "properties": {"kind": point.kind},
+            }
+        )
+    return features

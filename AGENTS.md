@@ -10,7 +10,7 @@ decorative volumetric cloud layer.
   `center`, `meter`, `gray`, `normalize`, `behavior`, `catalog`. No British
   spellings.
 - **Comments are in English.** They may be expressive (surprise, annoyance,
-  delight) and may sprinkle in a Yiddish / Italian / German word when it fits.
+  delight) and may sprinkle in an Italian or German word when it fits.
 - Prefer comments that explain **why** — the tradeoff, the rejected
   alternative, the perf reason — over describing what the next line does.
 - No emoji in code, comments or docs.
@@ -27,12 +27,16 @@ decorative volumetric cloud layer.
 
 - `npm run dev` — Vite dev server (needs `VITE_MAPTILER_KEY` in `.env`).
 - `npx tsc --noEmit` / `npm run build` — type check / production build.
+- `npm run test:unit` — vitest for the pure traffic math (`src/traffic_math.ts`),
+  with coverage.
 - `npm run test:e2e` — Playwright smoke tests (boots the app, loads tiles).
 - `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
 - `npm run prettify` — Prettier over `src/**.ts`. It also reformats unrelated
   lines, so prefer formatting only the files you touched.
 
-Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
+Run `tsc`, `npm run test:unit` and `npm run test:e2e` before reporting a
+frontend change as done. `uv run pytest` in `tilegen/` reports coverage
+(`--cov`, floor 80%).
 
 ## Architecture
 
@@ -65,8 +69,8 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row` (the road/rail network is not emitted; routes come from
-  `traffic`).
+  `tree_row`, `traffic_signal`, `crossing` (the road/rail network is not
+  emitted; routes come from `traffic`).
 - **fleet** — a `TrafficRenderer`; everything the traffic block holds.
 - **loop** — a closed walk of the road (or rail) graph; the unit of precomputed
   traffic.
@@ -82,6 +86,16 @@ Run `tsc` and `npm run test:e2e` before reporting a frontend change as done.
   period`.
 - **speed** — per edge: the `maxspeed` tag when present, else the highway-class
   default; clamped to a sane range.
+- **crossing / traffic signal** — an OSM `highway=crossing` or
+  `highway=traffic_signals` node. Both are emitted as point tiles and in the
+  debug GeoJSON; the frontend slows vehicles as they pass over them.
+- **speed bump** — the cosmetic slowdown `src/traffic.ts` adds around a crossing:
+  the renderer matches the points to a loop's vertices and turns the distance
+  windows into loop-time with the local speed. The global light (**axis** 0
+  roughly E-W, 1 N-S, swapping every 8 s) decides: on a red axis the vehicle
+  eases down from 60 m out to ~15% of cruise and back over ~255 m, on green it
+  nudges up and settles. Both bumps are smooth and return to zero, so the loop's
+  path and timing are unchanged — nothing waits.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap

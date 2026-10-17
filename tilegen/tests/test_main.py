@@ -1,6 +1,9 @@
+import json
+
 import geo
 import main
 import shapely
+import traffic
 from shapely.geometry.base import BaseGeometry
 
 POLYGON = "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"
@@ -94,6 +97,22 @@ def test_to_tree_row_line_only():
     assert main.to_tree_row(7, {"natural": "tree_row"}, geom("POINT (0 0)")) is None
 
 
+def test_to_stop_points_are_point_only():
+    f = main.to_traffic_signal(
+        8, {"highway": "traffic_signals"}, geom("POINT (9.18 45.5)")
+    )
+    assert f is not None
+    assert f["properties"]["cmtype"] == "traffic_signal"
+    c = main.to_crossing(9, {"highway": "crossing"}, geom("POINT (9.18 45.5)"))
+    assert c is not None
+    assert c["properties"]["cmtype"] == "crossing"
+    # the odd crossing way in the extract must not abort the tile
+    assert (
+        main.to_crossing(10, {"highway": "crossing"}, geom("LINESTRING (0 0, 1 1)"))
+        is None
+    )
+
+
 def test_tile_lonlat_bounds_contains_center():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     assert min_lon < 9.186 < max_lon
@@ -110,6 +129,80 @@ def test_tile_to_geojson_splits_render_and_raw():
     render, raw = main.tile_to_geojson(data, 17220, 11723, 15)
     assert [f["properties"]["cmtype"] for f in render] == ["building"]
     assert len(raw) == 2
+
+
+def test_tile_to_geojson_includes_signals_and_crossings():
+    signal = shapely.to_wkb(geom("POINT (9.19 45.497)"))
+    crossing = shapely.to_wkb(geom("POINT (9.191 45.497)"))
+    data = [
+        (1, {"highway": "traffic_signals"}, signal),
+        (2, {"highway": "crossing"}, crossing),
+    ]
+    render, raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == [
+        "traffic_signal",
+        "crossing",
+    ]
+    assert len(raw) == 2
+
+
+def test_tile_to_geojson_includes_trees_and_rows():
+    tree = shapely.to_wkb(geom("POINT (9.19 45.497)"))
+    row = shapely.to_wkb(geom("LINESTRING (9.19 45.497, 9.191 45.497)"))
+    data = [
+        (1, {"natural": "tree"}, tree),
+        (2, {"natural": "tree_row"}, row),
+    ]
+    render, _raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["tree", "tree_row"]
+
+
+def test_crossing_points_from_rows_keeps_points_only():
+    point = shapely.to_wkb(geom("POINT (9.18 45.5)"))
+    line = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
+    rows = [
+        ("traffic_signals", point),
+        ("crossing", shapely.to_wkb(geom("POINT (9.19 45.5)"))),
+        ("crossing", line),  # the odd crossing LineString in the extract
+        ("residential", point),  # not a stop kind
+    ]
+    points = main.crossing_points_from_rows(rows)
+    assert [(p.kind, round(p.lon, 2)) for p in points] == [
+        ("traffic_signal", 9.18),
+        ("crossing", 9.19),
+    ]
+
+
+def square_loops():
+    lon, lat, d = 9.18, 45.5, 0.001
+    corners = [
+        (lon - d, lat - d),
+        (lon + d, lat - d),
+        (lon + d, lat + d),
+        (lon - d, lat + d),
+    ]
+    ways = [
+        traffic.Way([corners[i], corners[(i + 1) % 4]], highway="residential")
+        for i in range(4)
+    ]
+    graph = traffic.build_graph(ways)
+    loops = traffic.find_loops(graph, traffic.TrafficConfig(min_loop_length=80.0))
+    traffic.assign_vehicles(loops, traffic.TrafficConfig(spacing=50.0))
+    return loops
+
+
+def test_write_loop_report_writes_markdown_and_geojson(tmp_path):
+    loops = square_loops()
+    points = [traffic.CrossingPoint(lon=9.18, lat=45.5, kind="traffic_signal")]
+    polygon = geom(
+        "POLYGON ((9.17 45.49, 9.19 45.49, 9.19 45.51, 9.17 45.51, 9.17 45.49))"
+    )
+    main.write_loop_report({"car": loops}, tmp_path, polygon, points)
+
+    assert "signals and crossings" in (tmp_path / "loops.md").read_text()
+    document = json.loads((tmp_path / "loops.geojson").read_text())
+    geometries = {f["geometry"]["type"] for f in document["features"]}
+    assert geometries == {"LineString", "Point"}
 
 
 def test_road_oneway():

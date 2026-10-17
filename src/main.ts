@@ -143,6 +143,8 @@ class CoolMap {
   private loadedTraffic: { [key: string]: TrafficLoop[] } = {};
   // building footprints per loaded tile, for click-picking
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
+  // signal/crossing points per loaded tile, for the traffic speed bump
+  private loadedCrossings: { [key: string]: [number, number][] } = {};
   private highlight?: THREE.Object3D;
   private popup?: Popup;
   private carsTraffic?: TrafficRenderer;
@@ -659,6 +661,7 @@ class CoolMap {
         });
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
+        delete this.loadedCrossings[k];
         deleteUsKeys.push(k);
       }
     });
@@ -693,7 +696,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, buildings, traffic } = await objectsAt(
+      const { meshes, buildings, traffic, crossings } = await objectsAt(
         this.tileCenter,
         x,
         y,
@@ -717,6 +720,7 @@ class CoolMap {
       meshes.forEach((m) => this.customLayer.scene.add(m));
       this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
+      this.loadedCrossings[tileKey] = crossings;
       this.syncTraffic();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -763,11 +767,18 @@ class CoolMap {
   }
 
   // hand the union of the loaded tiles' precomputed loops to the renderers,
-  // split by kind
+  // split by kind (both get the crossing points; only the car loops pass them)
   private syncTraffic() {
     const loops = Object.values(this.loadedTraffic).flat();
-    this.carsTraffic?.setLoops(loops.filter((loop) => loop.kind === "car"));
-    this.trainsTraffic?.setLoops(loops.filter((loop) => loop.kind === "train"));
+    const crossings = Object.values(this.loadedCrossings).flat();
+    this.carsTraffic?.setLoops(
+      loops.filter((loop) => loop.kind === "car"),
+      crossings,
+    );
+    this.trainsTraffic?.setLoops(
+      loops.filter((loop) => loop.kind === "train"),
+      crossings,
+    );
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the

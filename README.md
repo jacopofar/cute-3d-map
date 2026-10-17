@@ -21,7 +21,11 @@ The project has two halves:
      height falls back to `building:levels * 3` or 10 m;
    - `cmtype: "tree"` (point) — with `type` (broadleaf/conifer) and `size`
      (crown radius, m) derived from OSM tags or a hash;
-   - `cmtype: "tree_row"` (LineString) — one shared type/size for the row.
+   - `cmtype: "tree_row"` (LineString) — one shared type/size for the row;
+   - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
+     `highway=traffic_signals` or `highway=crossing` node. Data-only: the
+     frontend does not draw them, but it slows vehicles as they pass over them
+     (see below) and they show up in the debug GeoJSON.
 
    A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
    the precomputed vehicle routes that fall inside the tile. See below.
@@ -61,6 +65,16 @@ is a stateless renderer that samples it. There is no runtime simulation.
 - Two fleets come out of the same machinery: cars on drivable highways (up to
   15k vehicles across the 1000 loops) and trains/trams on `railway=rail`/`tram`
   (spacing 800 m, orange).
+- Vehicles slow down at **signals and crossings**, cosmetically only. The tiles
+  carry the OSM `highway=traffic_signals` / `highway=crossing` nodes as points;
+  the renderer matches them to each loop's vertices, turns the windows into
+  loop-time with the local speed, and adds a smooth speed bump. A global light —
+  axis 0 (roughly E-W) green while axis 1 (N-S) is red, swapping every 8 s —
+  decides which: on a red axis the vehicle eases down from 60 m out to ~15% of
+  cruise, is back at cruise by the crossing, and eases back over ~255 m; on
+  green it nudges up to 1.15x and settles. The bump is smooth and returns to
+  zero, so the lap (path and timing) is unchanged: nothing waits, nothing is
+  simulated.
 - Vehicles are gated on the zoom (and the traffic checkbox) as before.
 
 ### Loop report
@@ -69,11 +83,11 @@ Because loop length is the main tuning knob, the generator writes a report
 (`tilegen/report/`, or `--report-dir`):
 
 - `loops.md` — per fleet, the loop count, vehicle count, min/mean/max length and
-  a length histogram.
-- `loops.geojson` — every loop as a `LineString` (no vehicles), for looking at
-  them on a map. By default it keeps only loops intersecting
-  `data/milano_polygon.json`; pass `--report-polygon` to clip to another area,
-  or `--no-report` to skip the report entirely.
+  a length histogram, plus a `signals and crossings` section with their counts.
+- `loops.geojson` — every loop as a `LineString` (no vehicles), plus a `Point`
+  per signal/crossing, for looking at them on a map. By default it keeps only
+  loops intersecting `data/milano_polygon.json`; pass `--report-polygon` to clip
+  to another area, or `--no-report` to skip the report entirely.
 
 `tilegen/report/` is gitignored (it is generated from local data).
 
@@ -84,6 +98,10 @@ through Vite's `?worker&url` handling.
 ## Setup
 
 Prerequisites: Node (with npm) and [uv](https://docs.astral.sh/uv/) for tilegen.
+
+Generate tiles with:
+
+    uv run main.py ../data/milano_20261016.pbf --polygon-filter ../data/milano_polygon.json --output ../public/tiles --no-raw
 
 ```bash
 npm install
@@ -97,6 +115,7 @@ npm run preview      # serve the production build
 npm run prettify     # prettier on src/*.ts
 
 npx playwright install   # once, for the e2e browser
+npm run test:unit        # vitest unit tests for the pure traffic math
 npm run test:e2e         # Playwright smoke tests
 npm run bench            # frame-time benchmark (see below)
 ```
@@ -199,7 +218,8 @@ skip).
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,
-`natural=tree_row`; everything else is skipped.
+`natural=tree_row`, and `highway=traffic_signals` / `highway=crossing` (as
+points); everything else is skipped.
 
 `tilegen/` is checked by Ruff and [`ty`](https://docs.astral.sh/ty/) via
 pre-commit (config at the repo root). After `uv sync --group dev` in `tilegen/`,
@@ -226,9 +246,10 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
   tiles beyond the ±3 margin are dropped and reloaded against the new origin.
 - WebXR/VR support is stubbed out (currently broken upstream, see the comment in
   `src/main.ts`).
-- Frontend has only Playwright smoke tests (the app boots and the tile
-  pipeline responds); there are no visual/geometry assertions. `tilegen/` has a
-  small pytest suite.
+- Frontend has Playwright smoke tests (the app boots and the tile pipeline
+  responds) plus vitest unit tests for the pure traffic math
+  (`src/traffic_math.test.ts`); there are no visual/geometry assertions.
+  `tilegen/` has a pytest suite (reported with coverage).
 
 ## Ideas / TODO
 

@@ -8,15 +8,18 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "prettify": "npx prettier src/**.ts --write",
+    "test:unit": "vitest run --coverage",
     "test:e2e": "playwright test",
     "bench": "playwright test --config playwright.bench.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/three": "^0.186.0",
+    "@vitest/coverage-v8": "^4.1.12",
     "prettier": "3.9.10",
     "typescript": "~7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@turf/turf": "^7.4.0",

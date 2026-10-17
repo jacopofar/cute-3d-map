@@ -5,6 +5,13 @@ import {
   type TrafficLoop,
   type TrafficRun,
 } from "./geojson_data";
+import {
+  crossingShift,
+  crossingsAlongLoop,
+  coordKey,
+  type PreparedCrossing,
+  type PreparedRun,
+} from "./traffic_math";
 
 // a fleet of precomputed vehicles: one InstancedMesh of boxes, placed from the
 // route data every frame
@@ -32,19 +39,13 @@ export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   maxVehicles: 500,
 };
 
-// a run with its time keyframes; speed may vary along it
-interface PreparedRun {
-  t0: number;
-  t1: number;
-  coords: [number, number][];
-  times: number[];
-}
-
 interface PreparedVehicle {
   phase: number;
   period: number;
   // shared by every vehicle on the loop, so the geometry is prepared once
   runs: PreparedRun[];
+  // shared too: the loop's crossings, matched from the tile's point features
+  crossings: PreparedCrossing[];
 }
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
@@ -160,8 +161,10 @@ export class TrafficRenderer {
 
   // the union of the loaded tiles' traffic; the per-tile pieces of one loop
   // (same id) are merged here so a vehicle crossing a tile boundary keeps a
-  // single identity
-  setLoops(loops: TrafficLoop[]): void {
+  // single identity. `crossingPoints` are the tile features; they are matched to
+  // each loop's vertices so a vehicle can slow down through them.
+  setLoops(loops: TrafficLoop[], crossingPoints: [number, number][]): void {
+    const keys = new Set(crossingPoints.map((p) => coordKey(p[0], p[1])));
     const byId = new Map<
       string,
       {
@@ -188,6 +191,7 @@ export class TrafficRenderer {
     for (const group of byId.values()) {
       if (slot >= this.capacity) break;
       group.runs.sort((a, b) => a.t0 - b.t0);
+      const crossings = crossingsAlongLoop(group.runs, keys);
       for (const vehicle of group.vehicles) {
         if (slot >= this.capacity) break;
         // colors are static, so they are written once here; the update loop
@@ -197,6 +201,7 @@ export class TrafficRenderer {
           phase: vehicle.phase,
           period: group.period,
           runs: group.runs,
+          crossings,
         });
         slot++;
       }
@@ -219,7 +224,11 @@ export class TrafficRenderer {
       const period = vehicle.period;
       let tau = (now + vehicle.phase * period) % period;
       if (tau < 0) tau += period;
-      const run = findRun(vehicle.runs, tau);
+      // the cosmetic speed bump through crossings shifts which point of the
+      // loop is drawn, but returns to zero, so the schedule is untouched
+      let drawn = tau + crossingShift(tau, vehicle.crossings, now);
+      drawn = ((drawn % period) + period) % period;
+      const run = findRun(vehicle.runs, drawn);
       if (!run) {
         // the tile holding this part of the loop is not loaded: hide the
         // vehicle with a zero-scale matrix but keep its slot for the color
@@ -227,7 +236,7 @@ export class TrafficRenderer {
         count++;
         continue;
       }
-      const seconds = tau - run.t0;
+      const seconds = drawn - run.t0;
       const { lon, lat, heading } = sampleRun(run, seconds);
       const m = toModelCoords([lon, lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], this.config.height / 2);

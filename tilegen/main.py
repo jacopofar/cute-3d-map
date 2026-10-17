@@ -14,7 +14,9 @@ from traffic import (
     CAR_CONFIG,
     DRIVABLE_HIGHWAYS,
     RAILWAYS,
+    STOP_KINDS,
     TRAIN_CONFIG,
+    CrossingPoint,
     Loop,
     Way,
     build_fleets,
@@ -160,6 +162,29 @@ def to_tree_row(feature_id, tags, s) -> dict | None:
     }
 
 
+def to_stop_point(feature_id, tags, s, cmtype: str) -> dict | None:
+    """A signal or crossing as a Point feature. Data-only for the frontend (the
+    vehicles that yield to it are gated from the precomputed traffic block); it
+    exists so the tiles and the debug GeoJSON can show where the yields are."""
+    if s.geom_type != "Point":
+        logger.warning(f"non-point {cmtype}?? {feature_id} ({s.geom_type})")
+        return None
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {"cmtype": cmtype},
+    }
+
+
+def to_traffic_signal(feature_id, tags, s) -> dict | None:
+    return to_stop_point(feature_id, tags, s, "traffic_signal")
+
+
+def to_crossing(feature_id, tags, s) -> dict | None:
+    return to_stop_point(feature_id, tags, s, "crossing")
+
+
 def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, list]:
     """Build the render features (buildings, trees) and the raw-tag features.
 
@@ -185,6 +210,10 @@ def tile_to_geojson(data, tile_x: int, tile_y: int, zoom: int) -> tuple[list, li
             ret.append(to_tree(feature_id, tags, s))
         elif tags.get("natural") == "tree_row":
             ret.append(to_tree_row(feature_id, tags, s))
+        elif tags.get("highway") == "traffic_signals":
+            ret.append(to_traffic_signal(feature_id, tags, s))
+        elif tags.get("highway") == "crossing":
+            ret.append(to_crossing(feature_id, tags, s))
 
     return [r for r in ret if r is not None], ret_raw
 
@@ -231,16 +260,47 @@ def load_ways(
     return ways
 
 
+def crossing_points_from_rows(rows) -> list[CrossingPoint]:
+    """Map query rows (highway tag value, WKB) to signal/crossing points, keeping
+    only the node points. Split out from the query so it is unit-testable."""
+    points: list[CrossingPoint] = []
+    for value, wkb in rows:
+        kind = STOP_KINDS.get(value)
+        if kind is None:
+            continue
+        geometry = shapely.from_wkb(wkb)
+        if geometry.geom_type != "Point":
+            continue
+        points.append(CrossingPoint(lon=geometry.x, lat=geometry.y, kind=kind))
+    return points
+
+
+def load_crossing_points(input_parquet: Path) -> list[CrossingPoint]:
+    """Every signal/crossing node once, for the report. They are emitted as
+    point features per tile too; this is the whole-area list the report clips to
+    the polygon's extent. `traffic.py` takes them as plain inputs (no OSM I/O)."""
+    rows = duckdb.execute(
+        """
+        select tags['highway'], ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['highway'] in ('traffic_signals', 'crossing')
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    return crossing_points_from_rows(rows)
+
+
 def write_loop_report(
     fleets: dict[str, list[Loop]],
     report_dir: Path,
     polygon: BaseGeometry | None,
+    crossing_points: list[CrossingPoint] | None = None,
 ) -> None:
     """Write the loop-size report (`loops.md`) and the troubleshooting GeoJSON
     (`loops.geojson`). When `polygon` is given, the GeoJSON keeps only loops
     that intersect it (the comune di Milano by default)."""
     report_dir.mkdir(parents=True, exist_ok=True)
-    (report_dir / "loops.md").write_text(loop_report(fleets))
+    (report_dir / "loops.md").write_text(loop_report(fleets, crossing_points))
     features: list[dict] = []
     for loops in fleets.values():
         selected = loops
@@ -251,6 +311,7 @@ def write_loop_report(
                 if shapely.LineString(loop_coords(loop)).intersects(polygon)
             ]
         features.extend(loops_to_geojson(selected))
+    features.extend(loops_to_geojson([], crossing_points))
     (report_dir / "loops.geojson").write_text(
         json.dumps(
             {"type": "FeatureCollection", "features": features},
@@ -258,7 +319,7 @@ def write_loop_report(
             ensure_ascii=False,
         )
     )
-    logger.info(f"loop report: {len(features)} loops written to {report_dir}")
+    logger.info(f"loop report: {len(features)} features written to {report_dir}")
 
 
 def parquet_to_tiles(
@@ -307,7 +368,11 @@ def parquet_to_tiles(
             "train": load_ways(input_parquet, "railway", RAILWAYS),
         }
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
+        crossing_points = load_crossing_points(input_parquet)
+        logger.info(f"{len(crossing_points)} crossing points (signals and crossings)")
         fleets = build_fleets(ways_by_kind, configs)
+        for fleet_type, loops in fleets.items():
+            logger.info(f"for {fleet_type=} got {len(loops)} loops")
         traffic_by_tile = fleets_to_tiles(fleets, zoom_level)
         logger.info(
             "traffic: %s -> %d tiles with loops",
@@ -315,7 +380,7 @@ def parquet_to_tiles(
             len(traffic_by_tile),
         )
         if report_dir is not None:
-            write_loop_report(fleets, report_dir, report_polygon)
+            write_loop_report(fleets, report_dir, report_polygon, crossing_points)
     for x in range(min_x, max_x + 1):
         for y in range(min_y, max_y + 1):
             logger.info(f"Generating tile {x}/{y}")

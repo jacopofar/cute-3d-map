@@ -258,6 +258,38 @@ def test_loop_report_and_geojson():
     assert features[0]["properties"]["vehicles"] == len(loops[0].vehicles)
 
 
+def test_report_and_geojson_include_crossing_points():
+    _graph, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(min_loop_length=80.0, spacing=50.0))
+    points = [
+        traffic.CrossingPoint(lon=9.18, lat=45.5, kind="traffic_signal"),
+        traffic.CrossingPoint(lon=9.2, lat=45.6, kind="crossing"),
+    ]
+    report = traffic.loop_report({"car": loops}, points)
+    assert "## signals and crossings" in report
+    assert "Traffic signals: **1**" in report
+    assert "Crossings: **1**" in report
+
+    features = traffic.loops_to_geojson(loops, points)
+    geometries = [f["geometry"]["type"] for f in features]
+    assert geometries.count("LineString") == 1
+    assert geometries.count("Point") == 2
+    point_kinds = {
+        f["properties"]["kind"] for f in features if f["geometry"]["type"] == "Point"
+    }
+    assert point_kinds == {"traffic_signal", "crossing"}
+
+
+def test_loops_to_tiles_has_no_stop_annotations():
+    # the generator stores the points only; the per-loop stop list is gone
+    _graph, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    entry = next(iter(traffic.loops_to_tiles(loops, 15).values()))[0]
+    assert "stops" not in entry
+    assert "period_eff" not in entry
+    assert not hasattr(loops[0], "stops")
+
+
 def test_random_loops_are_closed_and_within_bounds():
     graph = traffic.build_graph(grid_ways())
     config = TrafficConfig(

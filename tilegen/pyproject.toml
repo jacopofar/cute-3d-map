@@ -16,6 +16,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "pytest-cov>=7.0.0",
     "ruff>=0.17.0",
     "ty>=0.0.86",
     "types-shapely>=2.1.0.20260728",
@@ -24,3 +25,14 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# coverage is on by default so `uv run pytest` reports it every time
+addopts = "--cov=geo --cov=main --cov=traffic --cov-report=term-missing"
+
+[tool.coverage.run]
+# the DuckDB/PBF I/O in main.py is not unit-tested; the pure logic is
+source = ["geo", "main", "traffic"]
+
+[tool.coverage.report]
+# a floor, not a goal: keep the pure modules covered while main.py's I/O shell
+# stays untested
+fail_under = 80

@@ -140,6 +140,8 @@ export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
   traffic: TrafficLoop[];
+  // signals/crossings as [lon, lat]; the renderer matches them to the routes
+  crossings: [number, number][];
 }
 
 export async function objectsAt(
@@ -155,7 +157,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], buildings: [], traffic: [] };
+    return { meshes: [], buildings: [], traffic: [], crossings: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -168,8 +170,17 @@ export async function objectsAt(
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
+  const crossings: [number, number][] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
+    if (cmtype === "traffic_signal" || cmtype === "crossing") {
+      // not rendered, but the renderer detects when a car passes one and adds
+      // a cosmetic speed bump
+      if (f.geometry?.type === "Point") {
+        crossings.push(f.geometry.coordinates as [number, number]);
+      }
+      return;
+    }
     if (cmtype === "road" || cmtype === "rail" || cmtype === "tram_stop") {
       // the traffic routes are precomputed into `traffic`; the network
       // features are not rendered (older tiles still carry them)
@@ -203,7 +214,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, traffic };
+  return { meshes, buildings, traffic, crossings };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
