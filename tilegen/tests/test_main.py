@@ -261,15 +261,28 @@ def test_parse_level():
     assert main.parse_level(None) is None
 
 
-def test_to_water_reports_a_negative_level():
+def test_vertical_level_prefers_layer_then_level():
+    assert main.vertical_level({"layer": "-2"}) == -2
+    assert main.vertical_level({"level": "-1"}) == -1
+    assert main.vertical_level({"layer": "1", "level": "0"}) == 1  # layer wins
+    assert main.vertical_level({"layer": "0;-1"}) == 0  # first number
+    assert main.vertical_level({}) is None
+
+
+def test_to_water_reports_a_negative_vertical_level():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)
     lake = shapely.box(min_lon, min_lat, max_lon, max_lat)
-    underwater = main.to_water(7, {"natural": "water", "level": "-1"}, lake, box)
+    # OSM marks a below-ground waterway with `layer` (Seveso is layer=-2)
+    underwater = main.to_water(7, {"natural": "water", "layer": "-2"}, lake, box)
     assert underwater is not None
-    assert underwater["properties"]["level"] == -1
-    # no level tag -> no level key, so the frontend sees a surface feature
-    plain = main.to_water(8, {"natural": "water"}, lake, box)
+    assert underwater["properties"]["level"] == -2
+    # a plain `level` is still honoured
+    by_level = main.to_water(8, {"natural": "water", "level": "-1"}, lake, box)
+    assert by_level is not None
+    assert by_level["properties"]["level"] == -1
+    # no vertical tag -> no level key, so the frontend sees a surface feature
+    plain = main.to_water(9, {"natural": "water"}, lake, box)
     assert plain is not None
     assert "level" not in plain["properties"]
 

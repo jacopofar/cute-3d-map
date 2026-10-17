@@ -106,12 +106,14 @@ has one), its kind (Lake, Canal, ...) and a link to the feature's OSM page when
 the tile carries an id. Picking is a point-in-polygon test for areas and a
 distance-to-centreline test for waterways.
 
-A water body with a **negative OSM `level`** is below ground (underwater), so it
-is drawn at 10% opacity (`UNDERWATER_OPACITY`). That is baked into a per-vertex
+A water body below ground is drawn at 10% opacity (`UNDERWATER_OPACITY`): OSM
+marks this with a negative **`layer`** (the tunnel/bridge ordering — Seveso is
+`layer=-2`; `level` is the fallback). The fade is baked into a per-vertex
 `aFade` attribute, so a tile's merged water mesh can mix surface and underwater
-features. tilegen reports the `level` values it finds: water below level 0 (the
-ones that fade) and the levels present on roads, the latter recorded for a
-future bridge pass (the road network itself is not emitted).
+features. tilegen emits the effective vertical position as the feature's
+`level` and reports the positions it finds: water below 0 (the ones that fade)
+and roads above 0 (bridges, recorded for a future pass; the road network itself
+is not emitted).
 
 ### Precomputed traffic
 

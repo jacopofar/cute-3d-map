@@ -134,9 +134,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
-- **level** — the OSM `level` tag on water or a road; a negative level is below
-  ground. Water below level 0 is drawn faint (`UNDERWATER_OPACITY`); tilegen only
-  reports road levels, recorded for a future bridge pass (roads are not emitted).
+- **level** — the effective OSM vertical position of water or a road: `layer`
+  when set (Seveso is `layer=-2`, a bridge `layer=1`), else `level`; negative is
+  below ground. Water below 0 is drawn faint (`UNDERWATER_OPACITY`); tilegen only
+  reports road positions, recorded for a future bridge pass (roads are not
+  emitted).
 - **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
   leaves them out: `tilegen/impute.py` draws one from the observed distribution
   of that tag in the same extract, seeded from the building id. The frontend

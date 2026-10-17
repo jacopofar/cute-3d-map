@@ -86,6 +86,13 @@ def parse_level(value) -> float | None:
     return int(number) if number.is_integer() else number
 
 
+def vertical_level(tags) -> float | None:
+    """A feature's OSM vertical position: `layer` when it is set (the tunnel /
+    bridge ordering: Seveso is `layer=-2`, a bridge is `layer=1`), else `level`.
+    Negative means below ground."""
+    return parse_level(tags.get("layer") or tags.get("level"))
+
+
 def to_building(feature_id, tags, s, distributions=None) -> dict | None:
     if s.geom_type == "Point":
         logger.warning(f"Point building?? {feature_id}")
@@ -286,9 +293,10 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
         "cmtype": "water",
         "water": kind,
         "name": tags.get("name"),
-        # a negative level means below ground (underwater); the frontend draws
-        # those faint
-        "level": parse_level(tags.get("level")),
+        # a negative vertical level means below ground (underwater); the
+        # frontend draws those faint. OSM marks this with `layer` (Seveso is
+        # `layer=-2`), so `level` here is layer-or-level.
+        "level": vertical_level(tags),
     }
     return {
         "type": "feature",
@@ -497,42 +505,43 @@ WATER_SQL = " or ".join(
 )
 
 
-def level_report(input_parquet: Path) -> None:
-    """Report the OSM `level` values that matter for rendering: water below
-    level 0 (underwater, drawn faint in the frontend) and the levels present on
-    roads (recorded for a future bridge pass; the road network is not emitted)."""
-    water = duckdb.execute(
+def _vertical_counts(input_parquet: Path, predicate: str) -> list[tuple]:
+    """(vertical position, count) per feature matching `predicate`, taking
+    `layer` when set (the tunnel/bridge ordering), else `level`."""
+    return duckdb.execute(
         f"""
-        select tags['level'], count(*)
+        select coalesce(tags['layer'], tags['level']) as value, count(*)
         from read_parquet($input_path)
-        where ({WATER_SQL}) and tags['level'] is not null
+        where ({predicate})
+          and coalesce(tags['layer'], tags['level']) is not null
         group by 1
         """,
         {"input_path": str(input_parquet)},
     ).fetchall()
-    underwater = sum(count for level, count in water if (parse_level(level) or 0) < 0)
+
+
+def level_report(input_parquet: Path) -> None:
+    """Report the OSM vertical positions that matter for rendering: water below
+    ground (underwater, drawn faint in the frontend) and roads above or below it
+    (bridges and tunnels, recorded for a future bridge pass; the road network is
+    not emitted). The position is `layer` when set, else `level`."""
+    water = _vertical_counts(input_parquet, WATER_SQL)
+    underwater = sum(count for value, count in water if (parse_level(value) or 0) < 0)
     logger.info(
         f"water levels: {underwater} of {sum(count for _, count in water)} "
-        "features below level 0 (drawn faint)"
+        "features below 0 (underwater, drawn faint)"
     )
-    for level, count in sorted(water, key=lambda row: str(row[0])):
-        logger.info(f"  water level {level!r}: {count}")
+    for value, count in sorted(water, key=lambda row: str(row[0])):
+        logger.info(f"  water level {value!r}: {count}")
 
-    roads = duckdb.execute(
-        """
-        select tags['level'], count(*)
-        from read_parquet($input_path)
-        where tags['highway'] is not null and tags['level'] is not null
-        group by 1
-        """,
-        {"input_path": str(input_parquet)},
-    ).fetchall()
+    roads = _vertical_counts(input_parquet, "tags['highway'] is not null")
+    bridges = sum(count for value, count in roads if (parse_level(value) or 0) > 0)
     logger.info(
-        f"road levels: {sum(count for _, count in roads)} ways carry a level "
-        "(for a future bridge pass)"
+        f"road levels: {bridges} of {sum(count for _, count in roads)} ways "
+        "above 0 (bridges, for a future pass)"
     )
-    for level, count in sorted(roads, key=lambda row: str(row[0])):
-        logger.info(f"  road level {level!r}: {count}")
+    for value, count in sorted(roads, key=lambda row: str(row[0])):
+        logger.info(f"  road level {value!r}: {count}")
 
 
 def load_or_build_fleets(
