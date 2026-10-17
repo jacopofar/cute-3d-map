@@ -159,9 +159,20 @@ export interface BuildingInfo {
   imputed: string[];
 }
 
+// a water feature for click-picking + info. Areas carry their (clipped) outer
+// rings; waterways carry their centrelines, in lon/lat.
+export interface WaterInfo {
+  id?: string;
+  name?: string;
+  kind: string;
+  rings: [number, number][][];
+  lines: [number, number][][];
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
+  water: WaterInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -183,7 +194,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], buildings: [], traffic: [], crossings: [] };
+    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
   // /tiles/... path with index.html and a 200, so a permalink pointing outside
@@ -191,7 +202,7 @@ export async function objectsAt(
   // every move. Not JSON means "nothing here" as far as the map is concerned.
   if (!(response.headers.get("content-type") ?? "").includes("json")) {
     console.warn(`tile ${x}/${y} is not JSON, treating it as empty`);
-    return { meshes: [], buildings: [], traffic: [], crossings: [] };
+    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -204,6 +215,7 @@ export async function objectsAt(
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
+  const water: WaterInfo[] = [];
   const crossings: [number, number][] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
@@ -222,6 +234,8 @@ export async function objectsAt(
     }
     if (cmtype === "building") {
       buildings.push(buildingInfo(f));
+    } else if (cmtype === "water") {
+      water.push(waterInfo(f));
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
@@ -251,7 +265,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, traffic, crossings };
+  return { meshes, buildings, water, traffic, crossings };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -276,6 +290,35 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     roofShape: props.roof_shape as string | undefined,
     roofColor: props.roof_color as string | undefined,
     imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
+  };
+}
+
+// a water feature for click-picking: areas contribute outer rings, waterways
+// their centrelines. Exported so the picking shape is unit-tested.
+export function waterInfo(f: Geojson.Feature): WaterInfo {
+  const rings: [number, number][][] = [];
+  const lines: [number, number][][] = [];
+  const geom = f.geometry;
+  if (geom.type === "Polygon") {
+    rings.push(geom.coordinates[0] as [number, number][]);
+  } else if (geom.type === "MultiPolygon") {
+    for (const polygon of geom.coordinates) {
+      rings.push(polygon[0] as [number, number][]);
+    }
+  } else if (geom.type === "LineString") {
+    lines.push(geom.coordinates as [number, number][]);
+  } else if (geom.type === "MultiLineString") {
+    for (const line of geom.coordinates) {
+      lines.push(line as [number, number][]);
+    }
+  }
+  const props = f.properties ?? {};
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: props.name as string | undefined,
+    kind: typeof props.water === "string" ? props.water : "",
+    rings,
+    lines,
   };
 }
 

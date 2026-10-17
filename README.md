@@ -101,6 +101,11 @@ advanced every frame from wall-clock time, so the surface keeps moving while the
 map is still. Water is its own per-tile mesh, so the **water** checkbox in the
 layers menu is a plain visibility switch.
 
+Clicking water inspects it, like a building: a popup shows its name (when OSM
+has one), its kind (Lake, Canal, ...) and a link to the feature's OSM page when
+the tile carries an id. Picking is a point-in-polygon test for areas and a
+distance-to-centreline test for waterways.
+
 ### Precomputed traffic
 
 Every vehicle is precomputed offline in `tilegen/traffic.py`; `src/traffic.ts`

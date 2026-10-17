@@ -263,11 +263,12 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
     clipped = _flatten(s.intersection(tile_box), want)
     if clipped is None:
         return None
+    properties = {"cmtype": "water", "water": kind, "name": tags.get("name")}
     return {
         "type": "feature",
         "id": feature_id,
         "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {"cmtype": "water", "water": kind},
+        "properties": {k: v for k, v in properties.items() if v is not None},
     }
 
 

@@ -19,11 +19,11 @@ import {
   epsg4326toEpsg3857,
   toModelCoords,
 } from "./geojson_data.ts";
-import type { BuildingInfo, TrafficLoop } from "./geojson_data.ts";
+import type { BuildingInfo, TrafficLoop, WaterInfo } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
 import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
-import { waterMaterial } from "./elements3d/water.ts";
+import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
 
 // Import our custom CSS
 // import "./scss/styles.scss";
@@ -77,17 +77,22 @@ function ringContains(
   return inside;
 }
 
-// distance (m) from a model-space point to a ring, used as a picking fallback
+// distance (m) from a model-space point to a ring, used as a picking fallback.
+// With closed=false it measures to an open polyline instead (a waterway
+// centreline), so the last point does not connect back to the first.
 function ringDistance(
   ring: [number, number][],
   point: THREE.Vector3,
   originMeters: [number, number],
   scaleFactor: number,
+  closed = true,
 ): number {
   let best = Infinity;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+  const count = ring.length;
+  const segments = closed ? count : count - 1;
+  for (let i = 0; i < segments; i++) {
     const a = toModelCoords(ring[i], originMeters, scaleFactor);
-    const b = toModelCoords(ring[j], originMeters, scaleFactor);
+    const b = toModelCoords(ring[(i + 1) % count], originMeters, scaleFactor);
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
     const len2 = dx * dx + dy * dy;
@@ -157,6 +162,8 @@ class CoolMap {
   private loadedTraffic: { [key: string]: TrafficLoop[] } = {};
   // building footprints per loaded tile, for click-picking
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
+  // water features per loaded tile, for click-picking
+  private loadedWater: { [key: string]: WaterInfo[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
   // facade detail (windows/doors and balconies) meshes per tile, built only
@@ -546,13 +553,14 @@ class CoolMap {
     this.loadedTiles = {};
     this.loadedTraffic = {};
     this.loadedBuildings = {};
+    this.loadedWater = {};
     this.loadedCrossings = {};
     this.clearBuildingDetail();
     this.syncTraffic();
     this.loadUnloadCoord(this.map.getCenter());
   }
 
-  // click a building to highlight it and show its height/address
+  // click a building or a water body to highlight it and show its info
   private onMapClick(event: {
     point: { x: number; y: number };
     lngLat: LngLat;
@@ -572,23 +580,33 @@ class CoolMap {
     const near = new THREE.Vector3(ndc.x, ndc.y, -1).applyMatrix4(inv);
     const far = new THREE.Vector3(ndc.x, ndc.y, 1).applyMatrix4(inv);
     raycaster.set(near, far.sub(near).normalize());
-    const buildingMeshes: THREE.Object3D[] = [];
+    const pickable: THREE.Object3D[] = [];
     for (const meshes of Object.values(this.loadedTiles)) {
       for (const mesh of meshes) {
-        if (mesh.userData.kind === "building") buildingMeshes.push(mesh);
+        const kind = mesh.userData.kind;
+        // a hidden water layer is not pickable either
+        if (kind === "building" || (kind === "water" && mesh.visible)) {
+          pickable.push(mesh);
+        }
       }
     }
-    const hits = raycaster.intersectObjects(buildingMeshes, false);
+    const hits = raycaster.intersectObjects(pickable, false);
     if (hits.length === 0) {
       this.clearSelection();
       return;
     }
     const hit = hits[0];
-    const tileKey = hit.object.userData.tileKey as string | undefined;
+    const tileKey = (hit.object.userData.tileKey as string | undefined) ?? "";
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const candidates = this.loadedBuildings[tileKey ?? ""] ?? [];
+    if (hit.object.userData.kind === "water") {
+      const info = this.waterAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectWater(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    const candidates = this.loadedBuildings[tileKey] ?? [];
     let building = candidates.find((b) =>
       b.rings.some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -612,6 +630,59 @@ class CoolMap {
       return;
     }
     this.selectBuilding(building, event.lngLat);
+  }
+
+  // the water feature under a hit point: an area whose ring contains it, else
+  // the nearest waterway centreline within the ribbon's half width
+  private waterAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): WaterInfo | undefined {
+    const candidates = this.loadedWater[tileKey] ?? [];
+    const inside = candidates.find((w) =>
+      w.rings.some((ring) =>
+        ringContains(ring, point, originMeters, scaleFactor),
+      ),
+    );
+    if (inside) return inside;
+    let best: WaterInfo | undefined;
+    let bestDistance = Infinity;
+    for (const candidate of candidates) {
+      const threshold = waterwayWidth(candidate.kind) * 0.5 + 1;
+      for (const line of candidate.lines) {
+        const distance = ringDistance(
+          line,
+          point,
+          originMeters,
+          scaleFactor,
+          false,
+        );
+        if (distance <= threshold && distance < bestDistance) {
+          bestDistance = distance;
+          best = candidate;
+        }
+      }
+    }
+    return best;
+  }
+
+  private selectWater(info: WaterInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const label = info.kind
+      ? info.kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())
+      : "Water";
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      escapeHtml(label),
+      osmLink(info.id),
+    ].filter(Boolean);
+    if (lines.length === 0) return;
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
   }
 
   private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
@@ -801,6 +872,7 @@ class CoolMap {
         });
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
+        delete this.loadedWater[k];
         delete this.loadedCrossings[k];
         this.disposeDetail(k);
         deleteUsKeys.push(k);
@@ -837,7 +909,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, buildings, traffic, crossings } = await objectsAt(
+      const { meshes, buildings, water, traffic, crossings } = await objectsAt(
         this.tileCenter,
         x,
         y,
@@ -862,6 +934,7 @@ class CoolMap {
       meshes.forEach((m) => this.customLayer.scene.add(m));
       this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
+      this.loadedWater[tileKey] = water;
       this.loadedCrossings[tileKey] = crossings;
       this.syncTraffic();
       this.syncBuildingDetail();

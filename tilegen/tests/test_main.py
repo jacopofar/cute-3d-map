@@ -238,6 +238,19 @@ def test_to_water_clips_a_waterway_line_to_the_tile():
     assert round(clipped.bounds[0], 9) == round(min_lon, 9)
 
 
+def test_to_water_keeps_the_name():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    lake = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    f = main.to_water(5, {"natural": "water", "name": "Lago"}, lake, box)
+    assert f is not None
+    assert f["properties"]["name"] == "Lago"
+    # an unnamed water body has no name key at all
+    plain = main.to_water(6, {"natural": "water"}, lake, box)
+    assert plain is not None
+    assert "name" not in plain["properties"]
+
+
 def test_to_water_ignores_a_non_channel_waterway():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

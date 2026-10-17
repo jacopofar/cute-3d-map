@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857 } from "../geojson_data";
+import { epsg4326toEpsg3857, waterInfo } from "../geojson_data";
 import {
   DEFAULT_WATER_COLOR,
   WATERWAY_WIDTH,
@@ -130,5 +130,32 @@ describe("water", () => {
     expect(waterColor("mystery").getHexString()).toBe(
       new THREE.Color(DEFAULT_WATER_COLOR).getHexString(),
     );
+  });
+});
+
+describe("waterInfo", () => {
+  it("collects area rings for picking", () => {
+    const info = waterInfo(areaFeature("lake"));
+    expect(info.rings).toHaveLength(1);
+    expect(info.lines).toHaveLength(0);
+    expect(info.kind).toBe("lake");
+  });
+
+  it("collects waterway centrelines for picking", () => {
+    const info = waterInfo(lineFeature("canal"));
+    expect(info.lines).toHaveLength(1);
+    expect(info.rings).toHaveLength(0);
+    expect(info.kind).toBe("canal");
+  });
+
+  it("keeps the OSM id and the name for the popup", () => {
+    const feature = {
+      ...areaFeature("river"),
+      id: "way/42",
+      properties: { cmtype: "water", water: "river", name: "Naviglio" },
+    } as unknown as Geojson.Feature;
+    const info = waterInfo(feature);
+    expect(info.id).toBe("way/42");
+    expect(info.name).toBe("Naviglio");
   });
 });
