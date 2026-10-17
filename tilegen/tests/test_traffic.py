@@ -1,3 +1,4 @@
+import json
 import math
 from itertools import pairwise
 
@@ -373,3 +374,34 @@ def test_split_runs_times_follow_segment_speeds():
         assert times == sorted(times)  # never goes back in time
         assert t1 - t0 == pytest.approx(times[-1])
     assert runs[-1][2] == pytest.approx(loop.period)
+
+
+def test_fleet_records_round_trip_through_json():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    records = traffic.fleets_to_records({"car": loops})
+    # JSON-safe (no tuples), so it survives the cache's json.dumps/loads
+    restored = traffic.fleets_from_records(json.loads(json.dumps(records)))
+    loop, original = restored["car"][0], loops[0]
+    assert loop.id == original.id
+    assert loop.kind == original.kind
+    assert loop.length == original.length
+    assert loop.period == original.period
+    assert loop.seg_speeds == original.seg_speeds
+    assert loop.segs == original.segs
+    assert loop.vehicles == original.vehicles
+    # coordinates come back as tuples, so split_runs still matches on them
+    assert all(isinstance(coord, tuple) for seg in loop.segs for coord in seg)
+
+
+def test_fleet_cache_key_is_stable_and_input_sensitive():
+    ways = {"car": square_ways(9.18, 45.5, 0.001)}
+    configs = {"car": TrafficConfig(method="random", seed=1, loop_count=3)}
+    key = traffic.fleets_cache_key(ways, configs)
+    assert traffic.fleets_cache_key(ways, configs) == key  # stable
+    # a retuned config is a different cache entry
+    other = {"car": TrafficConfig(method="random", seed=2, loop_count=3)}
+    assert traffic.fleets_cache_key(ways, other) != key
+    # so is a different graph
+    moved = {"car": square_ways(9.19, 45.5, 0.001)}
+    assert traffic.fleets_cache_key(moved, configs) != key

@@ -31,7 +31,7 @@ import logging
 import math
 import random
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from itertools import pairwise
 
 from geo import coord_to_tile
@@ -821,6 +821,66 @@ def build_fleets(
         assign_vehicles(loops, config)
         fleets[kind] = loops
     return fleets
+
+
+def loops_to_records(loops: list[Loop]) -> list[dict]:
+    """The loops as JSON-safe records, for the on-disk cache. Coordinates stay
+    as (lon, lat) pairs; `loops_from_records` rebuilds the tuples, so a cached
+    fleet is byte-for-byte the one `build_fleets` would have produced."""
+    return [
+        {
+            "id": loop.id,
+            "kind": loop.kind,
+            "length": loop.length,
+            "period": loop.period,
+            "seg_speeds": list(loop.seg_speeds),
+            "segs": [[list(coord) for coord in seg] for seg in loop.segs],
+            "vehicles": [dict(vehicle) for vehicle in loop.vehicles],
+        }
+        for loop in loops
+    ]
+
+
+def loops_from_records(records: list[dict]) -> list[Loop]:
+    return [
+        Loop(
+            id=record["id"],
+            kind=record["kind"],
+            length=record["length"],
+            period=record["period"],
+            seg_speeds=list(record["seg_speeds"]),
+            segs=[[(coord[0], coord[1]) for coord in seg] for seg in record["segs"]],
+            vehicles=[
+                {"phase": vehicle["phase"], "color": vehicle["color"]}
+                for vehicle in record["vehicles"]
+            ],
+        )
+        for record in records
+    ]
+
+
+def fleets_to_records(fleets: dict[str, list[Loop]]) -> dict[str, list[dict]]:
+    return {kind: loops_to_records(loops) for kind, loops in fleets.items()}
+
+
+def fleets_from_records(records: dict[str, list[dict]]) -> dict[str, list[Loop]]:
+    return {kind: loops_from_records(loops) for kind, loops in records.items()}
+
+
+def fleets_cache_key(
+    ways_by_kind: dict[str, list[Way]],
+    configs: dict[str, TrafficConfig],
+) -> str:
+    """Content hash of everything that feeds the loop builders: the ways and the
+    per-kind config. A changed parquet (different ways) or a retuned config
+    changes the key, so the cache never serves loops for other inputs."""
+    digest = hashlib.sha1()
+    for kind in sorted(ways_by_kind):
+        digest.update(kind.encode())
+        for way in ways_by_kind[kind]:
+            digest.update(repr(way).encode())
+        digest.update(repr(asdict(configs[kind])).encode())
+    return digest.hexdigest()[:16]
 
 
 def fleets_to_tiles(

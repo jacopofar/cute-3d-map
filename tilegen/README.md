@@ -7,3 +7,12 @@ Usage:
 
 `--polygon-filter` expects a GeoJSON polygon to be used as a filter.
 If missing the whole data in the PBF file is used
+
+## Traffic loop cache
+
+Building the vehicle loops is one of the slowest steps (tens of minutes for a
+city-sized extract: the random car generator runs thousands of A* searches over
+the whole road graph). The result is cached under `cache/`, keyed by a hash of
+the ways and the traffic configs, so a rerun on the same extract reuses the
+loops instead of recomputing them. Pass `--no-cache` to force a rebuild, or
+`--cache-dir` to move the cache.

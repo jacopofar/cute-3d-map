@@ -19,8 +19,12 @@ from traffic import (
     TRAIN_CONFIG,
     CrossingPoint,
     Loop,
+    TrafficConfig,
     Way,
     build_fleets,
+    fleets_cache_key,
+    fleets_from_records,
+    fleets_to_records,
     fleets_to_tiles,
     loop_coords,
     loop_report,
@@ -367,6 +371,34 @@ def building_distributions(input_parquet: Path) -> dict[str, Distribution]:
     return distributions
 
 
+def load_or_build_fleets(
+    ways_by_kind: dict[str, list[Way]],
+    configs: dict[str, TrafficConfig],
+    cache_dir: Path,
+    use_cache: bool,
+) -> dict[str, list[Loop]]:
+    """Per-kind loops, from the disk cache when one matches the inputs.
+
+    The random car generator is one of the slowest steps (tens of minutes for a
+    city-sized extract: thousands of A* searches over the whole road graph), so
+    the result is cached under a hash of the ways and the configs. A rebuild
+    only happens on a cache miss or with --no-cache.
+    """
+    if not use_cache:
+        logger.info("Traffic loop cache disabled, building loops")
+        return build_fleets(ways_by_kind, configs)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"loops-{fleets_cache_key(ways_by_kind, configs)}.json"
+    if cache_path.exists():
+        logger.info(f"Loading traffic loops from cache: {cache_path}")
+        return fleets_from_records(json.loads(cache_path.read_text()))
+    logger.info("Traffic loop cache miss, building loops")
+    fleets = build_fleets(ways_by_kind, configs)
+    cache_path.write_text(json.dumps(fleets_to_records(fleets), separators=(",", ":")))
+    logger.info(f"Wrote traffic loops to cache: {cache_path}")
+    return fleets
+
+
 def parquet_to_tiles(
     input_parquet: Path,
     target_folder: Path,
@@ -375,6 +407,8 @@ def parquet_to_tiles(
     traffic: bool = True,
     report_dir: Path | None = None,
     report_polygon: BaseGeometry | None = None,
+    cache_dir: Path = Path("cache"),
+    use_cache: bool = True,
 ) -> None:
     duckdb.load_extension("spatial")
     zoom_level = TILE_ZOOM
@@ -418,7 +452,7 @@ def parquet_to_tiles(
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
         crossing_points = load_crossing_points(input_parquet)
         logger.info(f"{len(crossing_points)} crossing points (signals and crossings)")
-        fleets = build_fleets(ways_by_kind, configs)
+        fleets = load_or_build_fleets(ways_by_kind, configs, cache_dir, use_cache)
         for fleet_type, loops in fleets.items():
             logger.info(f"for {fleet_type=} got {len(loops)} loops")
         traffic_by_tile = fleets_to_tiles(fleets, zoom_level)
@@ -541,6 +575,21 @@ def parquet_to_tiles(
         f"Defaults to {DEFAULT_REPORT_POLYGON} when that file exists."
     ),
 )
+@click.option(
+    "--cache/--no-cache",
+    default=True,
+    help=(
+        "Reuse precomputed traffic loops cached by input hash. The loop build "
+        "is one of the slowest steps, so recompute only when the inputs change."
+    ),
+)
+@click.option(
+    "--cache-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=Path("cache"),
+    show_default=True,
+    help="Directory for the traffic loop cache (only used with --traffic).",
+)
 def main(
     input_pbf: Path,
     polygon_filter: Path | None,
@@ -551,6 +600,8 @@ def main(
     report: bool,
     report_dir: Path,
     report_polygon: Path | None,
+    cache: bool,
+    cache_dir: Path,
 ) -> None:
     logger.info(f"Processing {input_pbf}")
     # Note: you can reduce the file size using a border geojson:
@@ -577,6 +628,8 @@ def main(
         traffic=traffic,
         report_dir=report_dir if report and traffic else None,
         report_polygon=report_shape,
+        cache_dir=cache_dir,
+        use_cache=cache,
     )
 
 

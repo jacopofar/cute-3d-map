@@ -248,3 +248,56 @@ def test_road_oneway():
     assert main.road_oneway({"oneway": "no"}) is None
     assert main.road_oneway({"junction": "roundabout"}) == "yes"
     assert main.road_oneway({}) is None
+
+
+def squareloops_ways():
+    lon, lat, d = 9.18, 45.5, 0.001
+    corners = [
+        (lon - d, lat - d),
+        (lon + d, lat - d),
+        (lon + d, lat + d),
+        (lon - d, lat + d),
+    ]
+    return [
+        traffic.Way([corners[i], corners[(i + 1) % 4]], highway="residential")
+        for i in range(4)
+    ]
+
+
+def test_load_or_build_fleets_reuses_the_cache(tmp_path, monkeypatch):
+    ways = {"car": squareloops_ways()}
+    configs = {"car": traffic.TrafficConfig(min_loop_length=80.0)}
+    calls = {"n": 0}
+    real_build = traffic.build_fleets
+
+    def counting_build(ways_by_kind, configs):
+        calls["n"] += 1
+        return real_build(ways_by_kind, configs)
+
+    monkeypatch.setattr(main, "build_fleets", counting_build)
+
+    first = main.load_or_build_fleets(ways, configs, tmp_path, use_cache=True)
+    assert calls["n"] == 1
+    assert list(tmp_path.iterdir())  # a cache file was written
+
+    second = main.load_or_build_fleets(ways, configs, tmp_path, use_cache=True)
+    assert calls["n"] == 1  # served from disk, not rebuilt
+    assert second == first
+
+
+def test_load_or_build_fleets_without_cache_always_builds(tmp_path, monkeypatch):
+    ways = {"car": squareloops_ways()}
+    configs = {"car": traffic.TrafficConfig(min_loop_length=80.0)}
+    calls = {"n": 0}
+    real_build = traffic.build_fleets
+
+    def counting_build(ways_by_kind, configs):
+        calls["n"] += 1
+        return real_build(ways_by_kind, configs)
+
+    monkeypatch.setattr(main, "build_fleets", counting_build)
+
+    main.load_or_build_fleets(ways, configs, tmp_path, use_cache=False)
+    main.load_or_build_fleets(ways, configs, tmp_path, use_cache=False)
+    assert calls["n"] == 2
+    assert not list(tmp_path.iterdir())  # nothing was cached

@@ -3,6 +3,8 @@ files/
 # output
 tiles/
 raw_tiles/
+# precomputed traffic loops (--cache-dir)
+cache/
 # pytest-cov
 .coverage
 .coverage.*
