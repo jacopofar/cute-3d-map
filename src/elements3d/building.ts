@@ -2,6 +2,8 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
+import { hashSeed } from "./random";
+import { roofGeometry } from "./roof";
 import { applyVertexColor } from "./vertex_color";
 
 function coordsToShape(
@@ -76,13 +78,32 @@ export function building(
   fin: Geojson.Feature,
 ): THREE.BufferGeometry[] {
   const f = fin as unknown as BuildingFeature;
+  const height = geoJSONtoHeight(f);
   const extrudeSettings = {
-    depth: geoJSONtoHeight(f),
+    depth: height,
     bevelEnabled: false,
   };
   const color = parseBuildingColor(f.properties.color);
+  // one roof shape per building, seeded from where it is, so it never changes
+  const seedFor = (polygon: Geojson.Position[][]): number => {
+    const [lon, lat] = polygon[0][0];
+    return hashSeed(`${lon},${lat}:roof`);
+  };
+  const withRoof = (
+    ring: Geojson.Position[][],
+    geometry: THREE.BufferGeometry,
+  ): THREE.BufferGeometry[] => {
+    const roof = roofGeometry(
+      ring.map((r) => r.map((c): [number, number] => [c[0], c[1]])),
+      height,
+      originMeters,
+      scaleFactor,
+      seedFor(ring),
+    );
+    return roof ? [geometry, roof] : [geometry];
+  };
   if (f.geometry.type === "MultiPolygon") {
-    return f.geometry.coordinates.map((polygon) => {
+    return f.geometry.coordinates.flatMap((polygon) => {
       const featureBaseShape = coordsToShape(
         polygon,
         originMeters,
@@ -93,7 +114,7 @@ export function building(
         extrudeSettings,
       );
       applyVertexColor(geometry, color);
-      return geometry;
+      return withRoof(polygon, geometry);
     });
   }
   if (f.geometry.type === "Polygon") {
@@ -107,7 +128,7 @@ export function building(
       extrudeSettings,
     );
     applyVertexColor(geometry, color);
-    return [geometry];
+    return withRoof(f.geometry.coordinates, geometry);
   }
   throw Error(`Cannot have building of type ${f.geometry.type}`);
 }

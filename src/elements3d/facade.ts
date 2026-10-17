@@ -12,9 +12,8 @@ import {
   doorSpan,
   facadeWindows,
   floorBands,
-  hashSeed,
-  makeRng,
 } from "./facade_layout";
+import { hashSeed, makeRng } from "./random";
 
 // one shared material for all facade detail; like the building/tree materials it
 // is a module singleton and is never disposed

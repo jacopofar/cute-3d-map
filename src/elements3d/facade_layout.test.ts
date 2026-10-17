@@ -17,9 +17,8 @@ import {
   doorSpan,
   facadeWindows,
   floorBands,
-  hashSeed,
-  makeRng,
 } from "./facade_layout";
+import { hashSeed, makeRng } from "./random";
 
 describe("makeRng", () => {
   it("is deterministic for a seed and differs between seeds", () => {

@@ -184,12 +184,12 @@ class CoolMap {
     rotateZ: number;
     scale: number;
   };
-  constructor(tileCenter: [number, number]) {
+  constructor(tileCenter: [number, number], zoomLevel: number = 16) {
     this.tileCenter = tileCenter;
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
-      zoom: 16,
+      zoom: zoomLevel,
       pitch: 30,
       style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
     });

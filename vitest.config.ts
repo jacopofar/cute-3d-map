@@ -9,7 +9,12 @@ export default defineConfig({
       provider: "v8",
       // only the pure modules are unit-tested; the rest of src/ is covered by
       // the Playwright smoke tests and is measured nowhere
-      include: ["src/traffic_math.ts", "src/elements3d/facade_layout.ts"],
+      include: [
+        "src/traffic_math.ts",
+        "src/elements3d/facade_layout.ts",
+        "src/elements3d/roof_layout.ts",
+        "src/elements3d/random.ts",
+      ],
       reporter: ["text"],
     },
   },

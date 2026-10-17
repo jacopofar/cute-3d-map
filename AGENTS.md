@@ -52,6 +52,14 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   since OSM rings come in both windings). `CoolMap` builds it only above zoom 17
   and only for the tiles around the center (`loadedDetail`), and drops it when
   zoomed out or when the origin resets.
+- `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
+  built into the building geometry itself (in `building.ts`) so it is always
+  drawn. The shape comes from the footprint (long/narrow gables, squarish hips or
+  pyramids, big blocks stay flat) plus a seeded nudge; the layout is pure maths
+  and unit-tested. Footprints with an inner ring, a concave outline, or more than
+  `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks up on them.
+  `src/elements3d/random.ts` holds the seeded PRNG and hash shared by the facade
+  and roof code.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
@@ -100,6 +108,12 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   per tile and shown only at zoom 17 and above. The layout is seeded from the
   building's position, so it is stable across reloads and origin resets;
   balconies only appear on buildings with at least two floors.
+- **roof** — the flat/gabled/hipped/pyramidal cap built into each building's
+  mesh from its footprint (no tile data), in a seeded roof tone. It is only
+  pitched over a single, convex ring of at most `MAX_ROOF_VERTICES` (8) corners;
+  a concave outline or a courtyard stays flat, since the ridge fan breaks up on
+  those. Only flat roofs are the extrusion's own top cap; the others are extra
+  geometry.
 - **speed bump** — the cosmetic slowdown `src/traffic.ts` adds around a crossing:
   the renderer matches the points to a loop's vertices and turns the distance
   windows into loop-time with the local speed. The global light (**axis** 0

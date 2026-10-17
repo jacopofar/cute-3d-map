@@ -42,7 +42,13 @@ The project has two halves:
    (geometry in `src/elements3d/facade.ts`, laid out by `facade_layout.ts`): it
    is derived from the footprints and heights already in the tile — no extra
    tile data — merged into one mesh per tile and rebuilt as the zoom crosses the
-   gate. There is also a (commented out) GLTFExporter
+   gate. Every building also gets a **roof** — flat, gabled, hipped or pyramidal,
+   chosen from the footprint's shape with a seeded nudge
+   (`src/elements3d/roof.ts`), in one of a few roof tones — built into the
+   building mesh itself, so roofs are always there rather than zoom-gated.
+   Footprints that are concave, have a courtyard, or have more than 8 corners
+   stay flat: the ridge fan that builds the pitched shapes breaks up on those.
+   There is also a (commented out) GLTFExporter
    path to download the current scene as a `.glb`.
 
 ### Precomputed traffic
@@ -157,6 +163,10 @@ The facade windows/balconies/doors are the opposite trade: they add geometry
 (about 4.4M vertices for the 9 tiles near the center at zoom 17, versus 2.1M for
 the base buildings across all 49), so they are built only while zoomed in and
 only for those center tiles — nothing is built or drawn while zoomed out.
+
+Roofs sit in between: they are part of the building mesh, so they are always
+drawn, and they add about a third to the building geometry (2.08M → 2.79M
+vertices across the 49 loaded tiles).
 
 ### Measuring performance
 
