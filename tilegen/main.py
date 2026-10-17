@@ -1,6 +1,7 @@
 import json
 import logging
 import zlib
+from collections import defaultdict
 from pathlib import Path
 
 import click
@@ -399,6 +400,81 @@ def load_or_build_fleets(
     return fleets
 
 
+def group_features_by_tile(rows) -> dict[tuple[int, int], list[tuple]]:
+    """(tile_x, tile_y) -> [(feature_id, tags, wkb)] from the grouped query.
+
+    Each tile's features are sorted by id so a rebuild reproduces the same file
+    even though the query's join/unnest order is not guaranteed."""
+    by_tile: dict[tuple[int, int], list[tuple]] = defaultdict(list)
+    for tile_x, tile_y, feature_id, tags, wkb in rows:
+        by_tile[(tile_x, tile_y)].append((feature_id, tags, wkb))
+    for features in by_tile.values():
+        features.sort(key=lambda feature: feature[0])
+    return by_tile
+
+
+def parquet_features_by_tile(
+    input_parquet: Path, zoom: int
+) -> dict[tuple[int, int], list[tuple]]:
+    """Every feature grouped by the tiles it intersects, from a single scan.
+
+    The per-tile alternative ran one ST_Intersects query per tile over the whole
+    parquet; the tile grid is mostly empty, so that scanned the file tens of
+    thousands of times. Here each feature is placed in its envelope's tile range
+    and filtered with the same ST_Intersects, so the result matches the per-tile
+    query exactly."""
+    rows = duckdb.execute(
+        """
+        with features as (
+            select
+                feature_id,
+                tags,
+                geometry,
+                floor((ST_XMin(ST_Envelope(geometry)) + 180) / 360 * $n)::bigint
+                    as min_tx,
+                floor((ST_XMax(ST_Envelope(geometry)) + 180) / 360 * $n)::bigint
+                    as max_tx,
+                floor(
+                    (
+                        1 - ln(
+                            tan(radians(ST_YMax(ST_Envelope(geometry))))
+                            + 1 / cos(radians(ST_YMax(ST_Envelope(geometry))))
+                        ) / pi()
+                    ) / 2 * $n
+                )::bigint as min_ty,
+                floor(
+                    (
+                        1 - ln(
+                            tan(radians(ST_YMin(ST_Envelope(geometry))))
+                            + 1 / cos(radians(ST_YMin(ST_Envelope(geometry))))
+                        ) / pi()
+                    ) / 2 * $n
+                )::bigint as max_ty
+            from read_parquet($input_parquet)
+        )
+        select tx, ty, feature_id, tags, ST_AsWKB(geometry)
+        from features,
+             unnest(range(min_tx, max_tx + 1)) as t(tx),
+             unnest(range(min_ty, max_ty + 1)) as u(ty)
+        where ST_Intersects(
+            geometry,
+            ST_transform(
+                ST_TileEnvelope($zoom_level, tx::integer, ty::integer),
+                'EPSG:3857',
+                'EPSG:4326',
+                xy := true
+            )
+        )
+        """,
+        {
+            "input_parquet": str(input_parquet),
+            "n": 2**zoom,
+            "zoom_level": zoom,
+        },
+    ).fetchall()
+    return group_features_by_tile(rows)
+
+
 def parquet_to_tiles(
     input_parquet: Path,
     target_folder: Path,
@@ -463,64 +539,45 @@ def parquet_to_tiles(
         )
         if report_dir is not None:
             write_loop_report(fleets, report_dir, report_polygon, crossing_points)
-    for x in range(min_x, max_x + 1):
-        for y in range(min_y, max_y + 1):
-            logger.info(f"Generating tile {x}/{y}")
-            target_path = target_folder / str(x)
-            target_path.mkdir(parents=True, exist_ok=True)
-            target_path_raw = None
-            if target_folder_raw is not None:
-                target_path_raw = target_folder_raw / str(x)
-                target_path_raw.mkdir(parents=True, exist_ok=True)
-            tile_data = duckdb.execute(
-                """
-                select
-                        feature_id,
-                        tags,
-                        ST_AsWKB(geometry)
-                    from read_parquet($input_parquet)
-                    where ST_Intersects(
-                        geometry,
-                        ST_transform(
-                            ST_TileEnvelope($zoom_level, $x, $y),
-                            'EPSG:3857',
-                            'EPSG:4326',
-                            xy := true
-                        )
-                    )
-                """,
-                {
-                    "input_parquet": str(input_parquet),
-                    "zoom_level": zoom_level,
-                    "x": x,
-                    "y": y,
-                },
-            )
-            features, raw_features = tile_to_geojson(
-                tile_data.fetchall(), x, y, zoom_level, distributions
-            )
-            traffic_loops = traffic_by_tile.get((x, y))
-            # compact JSON (indent=2 put every coordinate on its own line and
-            # dominated the payload) and no files for empty tiles
-            if features or traffic_loops:
-                document: dict = {"type": "FeatureCollection", "features": features}
-                if traffic_loops:
-                    document["traffic"] = traffic_loops
-                (target_path / f"{y}.json").write_text(
-                    json.dumps(
-                        document,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    )
+    # one scan groups every feature into the tiles it intersects, instead of a
+    # full-parquet query per tile (the grid is mostly empty, and even an empty
+    # query costs a full scan)
+    features_by_tile = parquet_features_by_tile(input_parquet, zoom_level)
+    logger.info(f"features fall in {len(features_by_tile)} tiles")
+    # a tile that holds traffic but no OSM feature still gets a file
+    for x, y in sorted(set(features_by_tile) | set(traffic_by_tile)):
+        logger.info(f"Generating tile {x}/{y}")
+        target_path = target_folder / str(x)
+        target_path.mkdir(parents=True, exist_ok=True)
+        target_path_raw = None
+        if target_folder_raw is not None:
+            target_path_raw = target_folder_raw / str(x)
+            target_path_raw.mkdir(parents=True, exist_ok=True)
+        features, raw_features = tile_to_geojson(
+            features_by_tile.get((x, y), []), x, y, zoom_level, distributions
+        )
+        traffic_loops = traffic_by_tile.get((x, y))
+        # compact JSON (indent=2 put every coordinate on its own line and
+        # dominated the payload) and no files for empty tiles
+        if features or traffic_loops:
+            document: dict = {"type": "FeatureCollection", "features": features}
+            if traffic_loops:
+                document["traffic"] = traffic_loops
+            (target_path / f"{y}.json").write_text(
+                json.dumps(
+                    document,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
                 )
-            if target_path_raw is not None and raw_features:
-                (target_path_raw / f"{y}.json").write_text(
-                    json.dumps(
-                        {"type": "FeatureCollection", "features": raw_features},
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                    )
+            )
+        if target_path_raw is not None and raw_features:
+            (target_path_raw / f"{y}.json").write_text(
+                json.dumps(
+                    {"type": "FeatureCollection", "features": raw_features},
+                    separators=(",", ":"),
+                    ensure_ascii=False,
                 )
+            )
 
 
 @click.command()

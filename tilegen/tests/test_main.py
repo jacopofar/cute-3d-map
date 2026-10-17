@@ -210,6 +210,20 @@ def test_crossing_points_from_rows_keeps_points_only():
     ]
 
 
+def test_group_features_by_tile():
+    wkb = shapely.to_wkb(geom("POINT (9.18 45.5)"))
+    rows = [
+        (17220, 11723, 2, {"natural": "tree"}, wkb),
+        (17220, 11723, 1, {"building": "yes"}, wkb),
+        (17221, 11723, 3, {"building": "yes"}, wkb),
+    ]
+    by_tile = main.group_features_by_tile(rows)
+    assert set(by_tile) == {(17220, 11723), (17221, 11723)}
+    # sorted by id, so the order does not depend on the query's join order
+    assert [feature[0] for feature in by_tile[(17220, 11723)]] == [1, 2]
+    assert by_tile[(17221, 11723)][0][0] == 3
+
+
 def square_loops():
     lon, lat, d = 9.18, 45.5, 0.001
     corners = [
