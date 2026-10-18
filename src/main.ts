@@ -22,8 +22,19 @@ import {
 import type { BuildingInfo, TrafficLoop, WaterInfo } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
-import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
+import {
+  facadeMaterial,
+  tileFacadeDetail,
+  windowMaterial,
+} from "./elements3d/facade.ts";
 import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
+import {
+  DAY_HOUR,
+  NIGHT_HOUR,
+  lerpColor,
+  lightingAt,
+  type Lighting,
+} from "./daynight.ts";
 
 // Import our custom CSS
 // import "./scss/styles.scss";
@@ -38,6 +49,16 @@ const VEHICLE_MIN_ZOOM = 15;
 // off-screen)
 const FACADE_MIN_ZOOM = 17;
 const FACADE_TILE_MARGIN = 1;
+
+// MapTiler basemap styles. The map opens on the day style and swaps to the dark
+// one at night, so the bright basemap does not clash with the dark 3D scene.
+const BASEMAP_DAY = "basic-v2";
+const BASEMAP_NIGHT = "basic-v2-dark";
+const basemapStyleUrl = (name: string): string =>
+  `https://api.maptiler.com/maps/${name}/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`;
+// the night/day boundary that decides which basemap to show (the lighting model
+// fades smoothly, but a style can only be one or the other)
+const BASEMAP_NIGHT_AT = 0.5;
 
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -186,6 +207,17 @@ class CoolMap {
   private carsTraffic?: TrafficRenderer;
   private trainsTraffic?: TrafficRenderer;
   private clouds?: CloudLayer;
+  // the scene lights, kept so the time-of-day model can drive them. They are
+  // created in onAdd (with the renderer) and are undefined until then.
+  private sunLight?: THREE.DirectionalLight;
+  private fillLight?: THREE.DirectionalLight;
+  private hemisphereLight?: THREE.HemisphereLight;
+  private groundMesh?: THREE.Mesh;
+  // hours 0..24; the slider and the night checkbox both set this
+  private timeOfDay = DAY_HOUR;
+  private lighting: Lighting = lightingAt(DAY_HOUR);
+  // which basemap is mounted, so a night/day flip only swaps the style once
+  private darkBasemap = false;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
   // whether clicking a building inspects it
@@ -220,7 +252,7 @@ class CoolMap {
       // position can be linked; the prefix makes maplibre use that shape, and
       // it reads a fragment pasted on load and updates it as the map moves
       hash: "map",
-      style: `https://api.maptiler.com/maps/basic-v2/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`,
+      style: basemapStyleUrl(BASEMAP_DAY),
     });
     // the projection origin follows whatever the map actually opened on (a
     // #map= fragment may have moved it), so no tiles are fetched for the
@@ -273,18 +305,30 @@ class CoolMap {
       camera: new THREE.PerspectiveCamera(),
       scene: new THREE.Scene(),
       onAdd(map, gl) {
+        // A style swap (the night basemap) can re-add this layer on the same
+        // canvas and GL context. Rebuilding the renderer, the lights and the
+        // scene layers would duplicate them, so only refresh the map reference
+        // and leave the existing scene as it is.
+        this.map = map;
+        if (this.renderer) return;
+
         // lighting: a warm sun, a cool fill from the opposite side, and a
-        // hemisphere light so faces away from the sun are not pitch black
+        // hemisphere light so faces away from the sun are not pitch black.
+        // Their colors and intensities are set from the time of day in
+        // applyLighting(), so the starting values here do not matter much.
         const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
         sun.position.set(-40, 60, 100).normalize();
         this.scene.add(sun);
+        coolMap.sunLight = sun;
 
         const fill = new THREE.DirectionalLight(0xbfd4ff, 0.6);
         fill.position.set(60, -50, 60).normalize();
         this.scene.add(fill);
+        coolMap.fillLight = fill;
 
         const hemisphere = new THREE.HemisphereLight(0xcfe0ff, 0x4a4030, 1.0);
         this.scene.add(hemisphere);
+        coolMap.hemisphereLight = hemisphere;
 
         // faint ground plane under everything (also a shadow catcher later)
         const ground = new THREE.Mesh(
@@ -299,6 +343,7 @@ class CoolMap {
         ground.position.z = -0.05;
         ground.renderOrder = -1;
         this.scene.add(ground);
+        coolMap.groundMesh = ground;
 
         // this.scene.add(heartMesh());
 
@@ -333,6 +378,8 @@ class CoolMap {
         // are relative to the visible area rather than to a tile
         coolMap.clouds = new CloudLayer(this.scene);
         coolMap.clouds.setEnabled(coolMap.cloudsEnabled);
+        // the lights now exist, so push the current time-of-day state onto them
+        coolMap.applyLighting();
         // tiles may already have loaded before this layer was added, so seed
         // the renderer with whatever routes are present
         coolMap.syncTraffic();
@@ -417,7 +464,11 @@ class CoolMap {
     };
 
     this.map.on("style.load", () => {
-      this.map.addLayer(this.customLayer);
+      // a style swap keeps the custom layer (only a full reload drops it), so
+      // guard against adding it twice
+      if (!this.map.getLayer(this.customLayer.id)) {
+        this.map.addLayer(this.customLayer);
+      }
       // load map data at setup before the user moves
       this.loadUnloadCoord(this.map.getCenter());
       this.applyTrafficState();
@@ -476,6 +527,28 @@ class CoolMap {
         this.setCloudsEnabled(cloudsToggle.checked),
       );
     }
+
+    // day/night: the checkbox jumps between 13:00 (day) and 01:00 (night), the
+    // slider picks any hour in between and can reach both
+    const nightToggle = document.querySelector<HTMLInputElement>(
+      "#night-toggle input",
+    );
+    const timeSlider = document.querySelector<HTMLInputElement>("#time-slider");
+    const syncTimeControls = () => {
+      if (nightToggle) {
+        nightToggle.checked = this.lighting.night > BASEMAP_NIGHT_AT;
+      }
+      if (timeSlider) timeSlider.value = String(this.timeOfDay);
+    };
+    nightToggle?.addEventListener("change", () => {
+      this.setTimeOfDay(nightToggle.checked ? NIGHT_HOUR : DAY_HOUR);
+      syncTimeControls();
+    });
+    timeSlider?.addEventListener("input", () => {
+      this.setTimeOfDay(Number(timeSlider.value));
+      syncTimeControls();
+    });
+    syncTimeControls();
 
     // facade and roof detail toggles: the meshes are built per tile, so these
     // are plain visibility switches
@@ -998,7 +1071,12 @@ class CoolMap {
     geometry: THREE.BufferGeometry | null,
   ): THREE.Mesh | null {
     if (!geometry) return null;
-    const mesh = new THREE.Mesh(geometry, facadeMaterial);
+    // the windows light up at night, so they get their own shader material; the
+    // balconies keep the shared lambert one
+    const mesh = new THREE.Mesh(
+      geometry,
+      group === "windows" ? windowMaterial : facadeMaterial,
+    );
     mesh.userData = { kind: "facade", group, tileKey };
     this.customLayer.scene.add(mesh);
     return mesh;
@@ -1066,6 +1144,76 @@ class CoolMap {
     // the layer may not exist yet (it is created when the style loads); onAdd
     // seeds it from this flag
     this.clouds?.setEnabled(enabled);
+  }
+
+  // the checkbox and the slider both funnel through here; cheap to recompute
+  private setTimeOfDay(hour: number) {
+    this.timeOfDay = hour;
+    this.applyLighting();
+  }
+
+  // Push the time-of-day model onto the scene: the three lights, the renderer
+  // exposure, the window shader, the clouds and the basemap. Called when the
+  // time changes and once from onAdd, not every frame.
+  private applyLighting() {
+    const lighting = lightingAt(this.timeOfDay);
+    this.lighting = lighting;
+    if (this.sunLight) {
+      this.sunLight.color.setHex(lighting.keyColor);
+      this.sunLight.intensity = lighting.keyIntensity;
+      this.sunLight.position.set(...lighting.keyDirection).normalize();
+    }
+    if (this.fillLight) {
+      this.fillLight.color.setHex(lighting.fillColor);
+      this.fillLight.intensity = lighting.fillIntensity;
+    }
+    if (this.hemisphereLight) {
+      this.hemisphereLight.color.setHex(lighting.skyColor);
+      this.hemisphereLight.groundColor.setHex(lighting.groundColor);
+      this.hemisphereLight.intensity = lighting.hemisphereIntensity;
+    }
+    if (this.groundMesh) {
+      (this.groundMesh.material as THREE.MeshBasicMaterial).color.setHex(
+        lerpColor(0x11151c, 0x8a8f95, 1 - lighting.night),
+      );
+    }
+    if (this.customLayer.renderer) {
+      this.customLayer.renderer.toneMappingExposure = lighting.exposure;
+    }
+    // the window shader reads the same key light, so the glass tracks dawn/dusk
+    windowMaterial.uniforms.uNight.value = lighting.night;
+    windowMaterial.uniforms.uKeyDirection.value
+      .set(...lighting.keyDirection)
+      .normalize();
+    windowMaterial.uniforms.uKeyColor.value.setHex(lighting.keyColor);
+    windowMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
+    windowMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
+    windowMaterial.uniforms.uAmbientIntensity.value =
+      lighting.hemisphereIntensity;
+    waterMaterial.uniforms.uNight.value = lighting.night;
+    this.clouds?.setNight(lighting.night);
+    this.applyBasemap(lighting.night > BASEMAP_NIGHT_AT);
+  }
+
+  // Swap the basemap to the dark MapTiler style at night (and back by day).
+  // setStyle diffs, so the custom layer usually survives it; the style.load
+  // handler and onAdd are both written to tolerate a re-add just in case.
+  // Remembering the mounted style keeps the swap to once per crossing, not on
+  // every lighting update.
+  private applyBasemap(night: boolean) {
+    if (night === this.darkBasemap) return;
+    this.darkBasemap = night;
+    this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
+  }
+
+  // read-only day/night state for the e2e test (like stats()): the current
+  // hour, the 0..1 night factor and the key-light intensity
+  lightingState(): { hour: number; night: number; sunIntensity: number } {
+    return {
+      hour: this.timeOfDay,
+      night: this.lighting.night,
+      sunIntensity: this.lighting.keyIntensity,
+    };
   }
 
   // the clouds are anchored in the world and fade out as the map zooms in;

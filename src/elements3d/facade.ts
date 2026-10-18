@@ -15,10 +15,88 @@ import {
 } from "./facade_layout";
 import { hashSeed, makeRng } from "./random";
 
-// one shared material for all facade detail; like the building/tree materials it
-// is a module singleton and is never disposed
+// the balconies keep the shared lambert material; only the windows get their own
+// material below, because they light up at night. Like the building/tree
+// materials it is a module singleton and is never disposed
 export const facadeMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
+});
+
+// How many windows light up at night, and how often a whole building stays
+// dark. Tuned so a street reads as a city at night: mostly dark glass with a
+// scatter of warm windows, not a uniform glow.
+export const LIT_WINDOW_FRACTION = 0.34;
+export const DARK_BUILDING_FRACTION = 0.08;
+
+// The warm interior light of a lit window, in linear space (see uGlow below).
+// Kept a saturated amber so a lit window reads as a lamp, not a white blob.
+const WINDOW_GLOW = 0xffb15a;
+
+/*
+ * Windows and doors as one merged geometry per tile, drawn with their own
+ * ShaderMaterial: a vertex carries its glass `color` plus `aLight` (1 for the
+ * seeded subset of lit windows, 0 otherwise). A `uNight` uniform blends between
+ * the glass of the day and the amber lamps of the night, so the whole city can
+ * go dark without rebuilding any geometry.
+ *
+ * It does its own lighting rather than using a lambert material because it also
+ * needs the night branch; the day branch is a plain lambert term (key light +
+ * ambient, times RECIPROCAL_PI like three's BRDF_Lambert), fed the same sun the
+ * scene lights use, so it still tracks dawn and dusk.
+ */
+export const windowMaterial = new THREE.ShaderMaterial({
+  vertexColors: true,
+  uniforms: {
+    uNight: { value: 0 },
+    uKeyDirection: { value: new THREE.Vector3(0, -0.35, 1).normalize() },
+    uKeyColor: { value: new THREE.Color(0xfff2df) },
+    uKeyIntensity: { value: 2.4 },
+    uAmbientColor: { value: new THREE.Color(0xcfe0ff) },
+    uAmbientIntensity: { value: 1.0 },
+    uGlow: { value: new THREE.Color(WINDOW_GLOW) },
+  },
+  vertexShader: /* glsl */ `
+    attribute float aLight;
+    varying vec3 vColor;
+    varying float vLight;
+    varying vec3 vNormal;
+    void main() {
+      vColor = color;
+      vLight = aLight;
+      // the facade meshes carry no local transform, so the object-space normal
+      // is already the model-space one the lights are expressed in
+      vNormal = normal;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform float uNight;
+    uniform vec3 uKeyDirection;
+    uniform vec3 uKeyColor;
+    uniform float uKeyIntensity;
+    uniform vec3 uAmbientColor;
+    uniform float uAmbientIntensity;
+    uniform vec3 uGlow;
+    varying vec3 vColor;
+    varying float vLight;
+    varying vec3 vNormal;
+
+    const float INV_PI = 0.3183099;
+
+    void main() {
+      // day: the same lambert term the rest of the facade gets from the lights
+      float ndl = max(dot(normalize(vNormal), uKeyDirection), 0.0);
+      vec3 light = uAmbientColor * uAmbientIntensity + uKeyColor * uKeyIntensity * ndl;
+      vec3 day = vColor * light * INV_PI;
+      // night: unlit glass goes near-black, a lit window glows warm amber
+      vec3 darkGlass = vColor * 0.05;
+      vec3 litWindow = vColor * 0.2 + uGlow;
+      vec3 night = mix(darkGlass, litWindow, vLight);
+      gl_FragColor = vec4(mix(day, night, uNight), 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `,
 });
 
 // push the detail quads just off the wall so they do not z-fight the facade
@@ -38,8 +116,9 @@ export const FACADE_COLORS = {
 type Triple = [number, number, number];
 type Point = [number, number];
 
-// the four vertex buffers of a geometry being built
-type Buffers = [number[], number[], number[], number[]];
+// the five vertex buffers of a geometry being built: position, normal, uv,
+// color and the per-window night light flag
+type Buffers = [number[], number[], number[], number[], number[]];
 
 interface Edge {
   a: Point;
@@ -50,14 +129,16 @@ interface Edge {
 
 // append a quad. The winding is set so the face points along `facing`: three.js
 // culls back faces, and OSM rings come in both windings, so getting this wrong
-// makes quads invisible from the side that matters.
+// makes quads invisible from the side that matters. `light` is the per-vertex
+// night flag (a lit window is 1).
 function pushFace(
   buffers: Buffers,
   corners: Triple[],
   facing: Triple,
   rgb: THREE.Color,
+  light = 0,
 ): void {
-  const [position, normal, uv, color] = buffers;
+  const [position, normal, uv, color, lit] = buffers;
   const e1: Triple = [
     corners[1][0] - corners[0][0],
     corners[1][1] - corners[0][1],
@@ -81,6 +162,7 @@ function pushFace(
     normal.push(facing[0], facing[1], facing[2]);
     uv.push(0, 0);
     color.push(rgb.r, rgb.g, rgb.b);
+    lit.push(light);
   }
 }
 
@@ -93,6 +175,7 @@ function pushQuad(
   z1: number,
   facing: Point,
   rgb: THREE.Color,
+  light = 0,
 ): void {
   pushFace(
     buffers,
@@ -104,6 +187,7 @@ function pushQuad(
     ],
     [facing[0], facing[1], 0],
     rgb,
+    light,
   );
 }
 
@@ -205,8 +289,8 @@ export function tileFacadeDetail(
   scaleFactor: number,
   infos: BuildingInfo[],
 ): FacadeDetail {
-  const windows: Buffers = [[], [], [], []];
-  const balconies: Buffers = [[], [], [], []];
+  const windows: Buffers = [[], [], [], [], []];
+  const balconies: Buffers = [[], [], [], [], []];
   const rgb = new THREE.Color();
 
   for (const info of infos) {
@@ -221,6 +305,10 @@ export function tileFacadeDetail(
     const seed = first ? `${first[0]},${first[1]}` : "";
     const rng = makeRng(hashSeed(seed));
     const balconyRng = makeRng(hashSeed(`${seed}:balcony`));
+    // a third stream decides which windows are lit, so drawing the night lights
+    // does not disturb the window layout
+    const lightRng = makeRng(hashSeed(`${seed}:light`));
+    const buildingDark = lightRng() < DARK_BUILDING_FRACTION;
     const bands = floorBands(info.height, rng);
     const balconyFloors = balconyBands(bands);
     // one glass tone for the whole building
@@ -239,6 +327,7 @@ export function tileFacadeDetail(
         const columnBalconies = balconyColumn(balconyFloors, balconyRng);
         for (let floor = 0; floor < bands.length; floor++) {
           const band = bands[floor];
+          const lit = !buildingDark && lightRng() < LIT_WINDOW_FRACTION ? 1 : 0;
           pushQuad(
             windows,
             along(edge, column.start),
@@ -247,6 +336,7 @@ export function tileFacadeDetail(
             band.start + band.width,
             edge.normal,
             windowColor,
+            lit,
           );
           if (columnBalconies.includes(floor)) {
             pushBalcony(
@@ -262,7 +352,7 @@ export function tileFacadeDetail(
       }
     }
 
-    // one door, on the longest ground-floor facade
+    // one door, on the longest ground-floor facade. A door is never lit.
     const door =
       longest && info.height > DOOR_HEIGHT + 0.1
         ? doorSpan(longest.length)
@@ -286,9 +376,9 @@ export function tileFacadeDetail(
   };
 }
 
-// positions/normals/uvs/colors -> a BufferGeometry, or null when empty
+// positions/normals/uvs/colors/light -> a BufferGeometry, or null when empty
 function geometryFrom(buffers: number[][]): THREE.BufferGeometry | null {
-  const [position, normal, uv, color] = buffers;
+  const [position, normal, uv, color, light] = buffers;
   if (position.length === 0) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -298,5 +388,6 @@ function geometryFrom(buffers: number[][]): THREE.BufferGeometry | null {
   geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
+  geometry.setAttribute("aLight", new THREE.Float32BufferAttribute(light, 1));
   return geometry;
 }

@@ -191,6 +191,54 @@ describe("tileFacadeDetail", () => {
     expect(tones.size).toBeGreaterThan(1);
     expect(tones.size).toBeLessThanOrEqual(FACADE_COLORS.window.length);
   });
+
+  it("flags a seeded subset of windows for the night, and no doors", () => {
+    const tall = { rings: [square(2.6e-4, 1.8e-4)], height: 30 };
+    let windowQuads = 0;
+    let litQuads = 0;
+    let allDark = 0;
+    for (let i = 0; i < 80; i++) {
+      // a fresh position per building, so the light seed varies
+      const ring = square(2.6e-4, 1.8e-4).map(
+        ([lon, lat]): [number, number] => [lon + i * 0.002, lat],
+      );
+      const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+        building({ ...tall, rings: [ring] }),
+      ]).windows!;
+      const position = geometry.getAttribute("position");
+      const light = geometry.getAttribute("aLight");
+      const color = geometry.getAttribute("color");
+      expect(light).not.toBeUndefined();
+      expect(light.count).toBe(position.count);
+      let litOnBuilding = 0;
+      for (let q = 0; q < position.count; q += 6) {
+        const value = light.getX(q);
+        expect(value === 0 || value === 1).toBe(true);
+        // the whole quad shares the flag
+        for (let v = 1; v < 6; v++) expect(light.getX(q + v)).toBe(value);
+        const isDoor =
+          Math.abs(color.getX(q) - DOOR.r) < 1e-6 &&
+          Math.abs(color.getY(q) - DOOR.g) < 1e-6 &&
+          Math.abs(color.getZ(q) - DOOR.b) < 1e-6;
+        if (isDoor) {
+          expect(value).toBe(0);
+        } else {
+          windowQuads++;
+          if (value === 1) {
+            litQuads++;
+            litOnBuilding++;
+          }
+        }
+      }
+      if (litOnBuilding === 0) allDark++;
+    }
+    // some windows are lit, but far from all of them
+    const fraction = litQuads / windowQuads;
+    expect(fraction).toBeGreaterThan(0.15);
+    expect(fraction).toBeLessThan(0.5);
+    // and a few buildings stay completely dark
+    expect(allDark).toBeGreaterThan(0);
+  });
 });
 
 // the color of the first window vertex, or null when there is none
