@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 import zlib
 from collections import defaultdict
@@ -249,6 +250,63 @@ def is_water(tags) -> bool:
     return water_kind(tags) is not None or tags.get("waterway") in WATERWAY_KINDS
 
 
+# green areas: parks, woods, lawns and pitches. The frontend draws them with a
+# shader that has two styles, so each feature is classified into the style it
+# wants. "grass" is a mown lawn / pitch / garden, "dense" a park, wood or scrub.
+# Farmland is deliberately absent: there are thousands of farmland polygons and
+# they would green the whole province.
+GREEN_GRASS_LANDUSE = frozenset(
+    {"grass", "village_green", "meadow", "recreation_ground"}
+)
+GREEN_GRASS_NATURAL = frozenset({"grassland", "grass"})
+GREEN_GRASS_LEISURE = frozenset({"garden", "pitch"})
+GREEN_DENSE_LEISURE = frozenset({"park", "common", "nature_reserve"})
+GREEN_DENSE_NATURAL = frozenset({"wood", "scrub", "heath"})
+GREEN_DENSE_LANDUSE = frozenset({"forest", "orchard"})
+
+# a green area below this many square meters (after clipping to the tile) is
+# dropped: a tile boundary clips a park into slivers, and thousands of specks
+# cost geometry for no visible green.
+MIN_GREEN_AREA = 40.0
+
+
+def green_kind(tags) -> str | None:
+    """The shader style ("grass" or "dense") a green area wants, or None when
+    the feature is not green at all."""
+    if tags.get("landuse") in GREEN_GRASS_LANDUSE:
+        return "grass"
+    if tags.get("natural") in GREEN_GRASS_NATURAL:
+        return "grass"
+    if tags.get("leisure") in GREEN_GRASS_LEISURE:
+        return "grass"
+    if tags.get("leisure") in GREEN_DENSE_LEISURE:
+        return "dense"
+    if tags.get("natural") in GREEN_DENSE_NATURAL:
+        return "dense"
+    if tags.get("landuse") in GREEN_DENSE_LANDUSE:
+        return "dense"
+    return None
+
+
+def is_green(tags) -> bool:
+    return green_kind(tags) is not None
+
+
+# meters per degree of latitude; the longitude shrinks by cos(latitude)
+_METERS_PER_DEGREE = 6378137.0 * math.radians(1.0)
+
+
+def area_square_meters(geometry) -> float:
+    """A lon/lat polygon's area in square meters, approximated locally. Fine for
+    a sliver threshold, and it needs no projection."""
+    latitude = geometry.centroid.y
+    return (
+        shapely.area(geometry)
+        * _METERS_PER_DEGREE**2
+        * math.cos(math.radians(latitude))
+    )
+
+
 def _flatten(geometry, want: str):
     """The parts of a clipped geometry of the wanted type (Polygon or
     LineString), dropping the point/sliver artifacts a boundary touch can leave
@@ -306,6 +364,28 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
+def to_green(feature_id, tags, s, tile_box) -> dict | None:
+    """A green area as a render feature, clipped to the tile like water (a park
+    spans many tiles). The `green` sub-kind selects the frontend shader style."""
+    kind = green_kind(tags)
+    if kind is None or s.geom_type not in ("Polygon", "MultiPolygon"):
+        return None
+    clipped = _flatten(s.intersection(tile_box), "Polygon")
+    if clipped is None or area_square_meters(clipped) < MIN_GREEN_AREA:
+        return None
+    properties = {
+        "cmtype": "green",
+        "green": kind,
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def tile_to_geojson(
     data,
     tile_x: int,
@@ -347,6 +427,8 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
+        elif is_green(tags):
+            ret.append(to_green(feature_id, tags, s, tile_box))
 
     return [r for r in ret if r is not None], ret_raw
 
