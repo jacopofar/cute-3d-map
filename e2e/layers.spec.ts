@@ -128,3 +128,53 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
 
   expect(errors).toEqual([]);
 });
+
+// a bridge way and a `man_made=bridge` deck over the Naviglio Grande; the tile
+// set must have been regenerated with the bridge/tunnel pass for this to find
+// any (see tilegen/main.py)
+test("the bridges & tunnels toggle hides the deck and portal meshes", async ({
+  page,
+}) => {
+  await page.goto("/#map=19/45.4503/9.16786");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+  await expect
+    .poll(async () => (await countMeshes(page, "bridge")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+
+  await page.click("#layer-menu-button");
+  expect((await countMeshes(page, "bridge")).visible).toBeGreaterThan(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "bridge")).visible).toBe(0);
+  expect((await countMeshes(page, "tunnel")).visible).toBe(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "bridge")).visible).toBeGreaterThan(0);
+});
+
+// the rail throat where the tracks dive under the city: the tunnel ways' ends
+// become dark portal frames
+test("a tunnel end draws a portal that the toggle can hide", async ({
+  page,
+}) => {
+  await page.goto("/#map=19/45.48855/9.16085");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+  await expect
+    .poll(async () => (await countMeshes(page, "tunnel")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+
+  await page.click("#layer-menu-button");
+  expect((await countMeshes(page, "tunnel")).visible).toBeGreaterThan(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "tunnel")).visible).toBe(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "tunnel")).visible).toBeGreaterThan(0);
+});

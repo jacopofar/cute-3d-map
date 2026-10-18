@@ -112,8 +112,31 @@ marks this with a negative **`layer`** (the tunnel/bridge ordering — Seveso is
 `aFade` attribute, so a tile's merged water mesh can mix surface and underwater
 features. tilegen emits the effective vertical position as the feature's `layer`
 and reports the positions it finds: water below 0 (the ones that fade) and roads
-above 0 (bridges, recorded for a future pass; the road network itself is not
+above 0 (bridges; see *Bridges and tunnels* below; the road network itself is not
 emitted).
+
+### Bridges and tunnels
+
+The road and rail network is not emitted (the vehicle routes are precomputed
+separately), so a bridge would otherwise be invisible: the road it carries does
+not exist as geometry. tilegen therefore emits the bridge ways themselves
+(`bridge` set and not `no`, on a highway or railway) and the `man_made=bridge` /
+`building=bridge` deck footprints as `cmtype: "bridge"`, clipped to the tile like
+water. The frontend raises them into a slab (`src/elements3d/bridge.ts`): a deck
+at `h = max(4, 4.5 * layer)` m with a parapet on each edge and both ends ramped
+back to the ground over ~15 m, so the deck meets the basemap road instead of
+ending in mid-air. The deck width comes from the `highway`/`railway` class.
+
+A tunnel is underground and invisible, so the only honest, visible thing is its
+**portal**: tilegen emits a Point (`cmtype: "tunnel"`) at each true end of a
+tunnel way that falls in the tile, and the frontend draws a dark frame (two
+pillars and a lintel) around the opening there. The ends are the true ones, not
+the tile-clipped ones, so no portal appears on an arbitrary tile boundary. Only
+roads and railways get one — the extract's thousands of `tunnel=yes` footway and
+step underpasses, and culverts/building passages, are left out — and a buried
+waterway is still drawn as water. **The underground part is deliberately not
+drawn.** Both kinds are per-tile meshes, so the **bridges & tunnels** checkbox is
+a plain visibility switch.
 
 ### Precomputed traffic
 

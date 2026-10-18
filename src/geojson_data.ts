@@ -5,6 +5,12 @@ import { building } from "./elements3d/building";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
+import {
+  bridge,
+  tunnel,
+  bridgeMaterial,
+  tunnelMaterial,
+} from "./elements3d/bridge";
 
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
@@ -69,7 +75,7 @@ export function geoJSONtoGeometries(
   scaleFactor: number,
   imputedColors = true,
 ): {
-  kind: "building" | "roof" | "tree" | "water";
+  kind: "building" | "roof" | "tree" | "water" | "bridge" | "tunnel";
   geometries: THREE.BufferGeometry[];
 }[] {
   if (!f.properties) {
@@ -101,6 +107,16 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "water") {
     return [{ kind: "water", geometries: water(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "bridge") {
+    return [
+      { kind: "bridge", geometries: bridge(originMeters, scaleFactor, f) },
+    ];
+  }
+  if (f.properties.cmtype === "tunnel") {
+    return [
+      { kind: "tunnel", geometries: tunnel(originMeters, scaleFactor, f) },
+    ];
   }
 
   console.error("Cannot handle feature:", f);
@@ -253,7 +269,11 @@ export async function objectsAt(
           ? buildingMaterial
           : kind === "water"
             ? waterMaterial
-            : treeMaterial;
+            : kind === "bridge"
+              ? bridgeMaterial
+              : kind === "tunnel"
+                ? tunnelMaterial
+                : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);

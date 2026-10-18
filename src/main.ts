@@ -178,6 +178,9 @@ class CoolMap {
   private roofShapesEnabled = true;
   // water is its own per-tile mesh, so this is a plain visibility switch
   private waterEnabled = true;
+  // bridges and tunnels are their own per-tile meshes too, so this is a plain
+  // visibility switch covering both kinds
+  private bridgesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -500,6 +503,10 @@ class CoolMap {
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
       this.applyWaterVisibility();
+    });
+    wireToggle("#bridges-toggle", (on) => {
+      this.bridgesEnabled = on;
+      this.applyBridgeVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -1035,10 +1042,24 @@ class CoolMap {
     }
   }
 
+  // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
+  // tunnels) drives both kinds
+  private applyBridgeVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        const kind = mesh.userData.kind;
+        if (kind === "bridge" || kind === "tunnel") {
+          mesh.visible = this.bridgesEnabled;
+        }
+      }
+    }
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
+    this.applyBridgeVisibility();
   }
 
   private disposeDetail(key: string) {
