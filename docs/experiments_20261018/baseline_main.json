@@ -1,0 +1,94 @@
+{
+  "when": "2026-10-18T17:05:45.564Z",
+  "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "startupTiles": 49,
+  "panTileFetches": 28,
+  "startup": {
+    "tiles": 49,
+    "meshes": 178,
+    "vertices": 3617323,
+    "drawCalls": 25,
+    "triangles": 456869,
+    "byKind": {
+      "tree": {
+        "meshes": 49,
+        "vertices": 1422337,
+        "triangles": 1280380
+      },
+      "building": {
+        "meshes": 49,
+        "vertices": 2077380,
+        "triangles": 692460
+      },
+      "water": {
+        "meshes": 31,
+        "vertices": 6435,
+        "triangles": 2145
+      },
+      "roof": {
+        "meshes": 49,
+        "vertices": 111171,
+        "triangles": 37057
+      }
+    },
+    "buildings": 23220,
+    "vehicles": 12702,
+    "trains": 60,
+    "facadeTiles": 0,
+    "facadeVertices": 0
+  },
+  "afterPan": {
+    "tiles": 49,
+    "meshes": 178,
+    "vertices": 3617323,
+    "drawCalls": 24,
+    "triangles": 440268,
+    "byKind": {
+      "tree": {
+        "meshes": 49,
+        "vertices": 1422337,
+        "triangles": 1280380
+      },
+      "building": {
+        "meshes": 49,
+        "vertices": 2077380,
+        "triangles": 692460
+      },
+      "water": {
+        "meshes": 31,
+        "vertices": 6435,
+        "triangles": 2145
+      },
+      "roof": {
+        "meshes": 49,
+        "vertices": 111171,
+        "triangles": 37057
+      }
+    },
+    "buildings": 23220,
+    "vehicles": 12702,
+    "trains": 60,
+    "facadeTiles": 0,
+    "facadeVertices": 0
+  },
+  "idle": {
+    "frames": 19,
+    "fps": 6.4,
+    "p50": 165.4,
+    "p90": 184.6,
+    "p99": 188.4,
+    "worst": 188.4,
+    "longTasks": 18,
+    "longTaskMs": 2945
+  },
+  "pan": {
+    "frames": 386,
+    "fps": 6.3,
+    "p50": 146.6,
+    "p90": 181.4,
+    "p99": 335.2,
+    "worst": 373,
+    "longTasks": 836,
+    "longTaskMs": 122468
+  }
+}
