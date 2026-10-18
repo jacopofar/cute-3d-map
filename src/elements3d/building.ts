@@ -3,6 +3,13 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
 import { parseColor } from "./color";
+import {
+  CHURCH_PITCH,
+  CHURCH_ROOF_SHAPE,
+  churchRoofColor,
+  churchWallColor,
+  isChurch,
+} from "./church";
 import { roofGeometry } from "./roof";
 import { applyVertexColor } from "./vertex_color";
 
@@ -52,6 +59,10 @@ export type BuildingFeature = {
     roof_shape?: string;
     roof_color?: string;
     imputed?: string[];
+    // the OSM building value and, for a place of worship, its religion: the
+    // marker the church look is keyed on
+    building?: string;
+    religion?: string;
   };
 };
 
@@ -67,6 +78,21 @@ function isImputed(f: BuildingFeature, field: string): boolean {
   return (f.properties.imputed ?? []).includes(field);
 }
 
+// the building's first footprint coordinate, as a string: the seed the church
+// tones are drawn from (church.ts documents it)
+function anchorOf(f: BuildingFeature): string {
+  const geom = f.geometry;
+  if (geom.type === "Polygon") {
+    const first = geom.coordinates[0]?.[0];
+    return first ? first.join(",") : "";
+  }
+  if (geom.type === "MultiPolygon") {
+    const first = geom.coordinates[0]?.[0]?.[0];
+    return first ? first.join(",") : "";
+  }
+  return "";
+}
+
 export function building(
   originMeters: [number, number],
   scaleFactor: number,
@@ -79,13 +105,27 @@ export function building(
     depth: height,
     bevelEnabled: false,
   };
-  // with imputed colors off, a sampled color falls back to the plain default
-  const color =
-    !imputedColors && isImputed(f, "color")
+  const church = isChurch(f.properties);
+  const anchor = anchorOf(f);
+  // A church keeps its own stone tone even when the imputed colors are off: the
+  // palette is this feature's look, not a value tilegen drew from the dataset's
+  // distribution, and without it a church would be a plain grey block again.
+  // A real building:colour still wins over it.
+  const churchWalls =
+    church && (f.properties.color === undefined || isImputed(f, "color"));
+  const color = churchWalls
+    ? new THREE.Color(churchWallColor(anchor))
+    : !imputedColors && isImputed(f, "color")
       ? new THREE.Color(DEFAULT_BUILDING_COLOR)
       : parseColor(f.properties.color, DEFAULT_BUILDING_COLOR);
-  const roofColor =
-    !imputedColors && isImputed(f, "roof_color")
+  // slate over a sampled roof color too, for the same reason: a church roof is
+  // part of the look
+  const churchRoof =
+    church &&
+    (f.properties.roof_color === undefined || isImputed(f, "roof_color"));
+  const roofColor: string | undefined = churchRoof
+    ? churchRoofColor(anchor)
+    : !imputedColors && isImputed(f, "roof_color")
       ? undefined
       : f.properties.roof_color;
   const roofFor = (ring: Geojson.Position[][]): THREE.BufferGeometry | null =>
@@ -94,8 +134,12 @@ export function building(
       height,
       originMeters,
       scaleFactor,
-      f.properties.roof_shape,
+      // a church gets a gabled roof ... a footprint too complex for one (a
+      // courtyard, a concave outline) still stays flat inside roofGeometry
+      church ? CHURCH_ROOF_SHAPE : f.properties.roof_shape,
       roofColor,
+      // ... pitched steeper than the default
+      church ? CHURCH_PITCH : 1,
     );
   const withRoof = (
     ring: Geojson.Position[][],

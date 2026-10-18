@@ -68,6 +68,15 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   or more than `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks
   up on them. `src/elements3d/random.ts` holds the seeded PRNG and hash shared by
   the facade and roof code.
+- `src/elements3d/church.ts` — the church look. `isChurch` classifies a
+  building from the tile's `building`/`religion` tags (tilegen only reports
+  them: a church is an ordinary `building=*` polygon). A church whose color OSM
+  left out takes a seeded stone/ochre wall and a slate roof, its roof is forced
+  gabled and `CHURCH_PITCH` (1.3x) steeper, and `church()` builds a gold cross
+  on the ridge from the same `roofPlan` the roof uses, so it neither floats nor
+  sinks; a footprint too complex to roof keeps its flat cap and the cross stands
+  just above it. The cross is its own per-tile kind (`church`), so its checkbox
+  hides just the ornament.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
@@ -97,6 +106,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `traffic_signal`, `crossing` (the road/rail network is
   not emitted; routes come from `traffic`).
+- **church** — a building whose tile tags make `isChurch` true (`building` is
+  church/chapel/cathedral/..., or a place of worship with a Christian religion).
+  It is also the name of the per-tile kind holding just its cross, so the
+  church-crosses checkbox leaves the walls to the building layer.
 - **fleet** — a `TrafficRenderer`; everything the traffic block holds.
 - **loop** — a closed walk of the road (or rail) graph; the unit of precomputed
   traffic.
@@ -164,8 +177,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
   are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
-  `#imputed-colors-toggle`. Windows, balconies, roofs and water are their own
-  meshes, so those are plain visibility switches; imputed colors are baked into
-  the geometry, so changing that one reloads the loaded tiles.
+  `#churches-toggle`, `#imputed-colors-toggle`. Windows, balconies, roofs, water
+  and church crosses are their own meshes, so those are plain visibility
+  switches; imputed colors are baked into the geometry, so changing that one
+  reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

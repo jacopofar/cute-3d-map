@@ -92,6 +92,36 @@ def test_to_building_levels_fallback():
     assert f["properties"]["height"] == 12.0
 
 
+def test_to_building_reports_the_building_value_and_religion():
+    # the frontend needs to know a polygon is a church: `building` always, and
+    # `religion` for a place of worship
+    church = main.to_building(
+        11,
+        {
+            "building": "church",
+            "amenity": "place_of_worship",
+            "religion": "christian",
+        },
+        geom(POLYGON),
+    )
+    assert church is not None
+    assert church["properties"]["building"] == "church"
+    assert church["properties"]["religion"] == "christian"
+
+    # a plain apartment block carries the value but no religion
+    flats = main.to_building(12, {"building": "apartments"}, geom(POLYGON))
+    assert flats is not None
+    assert flats["properties"]["building"] == "apartments"
+    assert "religion" not in flats["properties"]
+
+    # religion outside a place of worship is not what the frontend keys on
+    hotel = main.to_building(
+        13, {"building": "hotel", "religion": "christian"}, geom(POLYGON)
+    )
+    assert hotel is not None
+    assert "religion" not in hotel["properties"]
+
+
 def test_to_building_skips_non_polygon():
     assert main.to_building(3, {"building": "yes"}, geom("POINT (0 0)")) is None
 
