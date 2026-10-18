@@ -178,6 +178,8 @@ class CoolMap {
   private roofShapesEnabled = true;
   // water is its own per-tile mesh, so this is a plain visibility switch
   private waterEnabled = true;
+  // benches are their own per-tile mesh too
+  private benchesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -500,6 +502,10 @@ class CoolMap {
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
       this.applyWaterVisibility();
+    });
+    wireToggle("#benches-toggle", (on) => {
+      this.benchesEnabled = on;
+      this.applyBenchVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -1035,10 +1041,22 @@ class CoolMap {
     }
   }
 
+  // benches are a per-tile mesh too
+  private applyBenchVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "bench") {
+          mesh.visible = this.benchesEnabled;
+        }
+      }
+    }
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
+    this.applyBenchVisibility();
   }
 
   private disposeDetail(key: string) {

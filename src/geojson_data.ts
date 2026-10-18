@@ -5,6 +5,7 @@ import { building } from "./elements3d/building";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
+import { bench } from "./elements3d/bench";
 
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
@@ -69,7 +70,7 @@ export function geoJSONtoGeometries(
   scaleFactor: number,
   imputedColors = true,
 ): {
-  kind: "building" | "roof" | "tree" | "water";
+  kind: "building" | "roof" | "tree" | "water" | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
   if (!f.properties) {
@@ -102,6 +103,9 @@ export function geoJSONtoGeometries(
   if (f.properties.cmtype === "water") {
     return [{ kind: "water", geometries: water(originMeters, scaleFactor, f) }];
   }
+  if (f.properties.cmtype === "bench") {
+    return [{ kind: "bench", geometries: bench(originMeters, scaleFactor, f) }];
+  }
 
   console.error("Cannot handle feature:", f);
   return [];
@@ -113,6 +117,8 @@ export function geoJSONtoGeometries(
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 // trees are lit too, so they shade with the sun instead of being flat
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+// benches are lit the same way, so their wood and metal shade
+const benchMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 // one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
 // `period`; the piece is drawn while the phase is in [t0, t1). `times[i]` is
@@ -253,7 +259,9 @@ export async function objectsAt(
           ? buildingMaterial
           : kind === "water"
             ? waterMaterial
-            : treeMaterial;
+            : kind === "bench"
+              ? benchMaterial
+              : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);

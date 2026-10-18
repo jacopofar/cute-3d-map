@@ -3,6 +3,7 @@ import logging
 import re
 import zlib
 from collections import defaultdict
+from math import atan2, cos, degrees, radians
 from pathlib import Path
 
 import click
@@ -221,6 +222,74 @@ def to_crossing(feature_id, tags, s) -> dict | None:
     return to_stop_point(feature_id, tags, s, "crossing")
 
 
+# compass letters to degrees clockwise from north, the way the frontend rotates
+# a bench (0 = facing north, 90 = east). OSM also writes `direction` as plain
+# degrees, so both are accepted.
+COMPASS = {
+    "N": 0.0,
+    "NE": 45.0,
+    "E": 90.0,
+    "SE": 135.0,
+    "S": 180.0,
+    "SW": 225.0,
+    "W": 270.0,
+    "NW": 315.0,
+}
+
+
+def bench_direction(tags) -> float | None:
+    """The way a bench faces, in degrees clockwise from north, or None when the
+    tag says nothing usable. "parallel"/"perpendicular" describe the bench
+    relative to a nearby way that is not part of the data, so they are ignored,
+    as is anything else that is not a compass letter or a number."""
+    value = str(tags.get("direction", "")).strip().upper()
+    if value in COMPASS:
+        return COMPASS[value]
+    try:
+        return float(value) % 360
+    except ValueError:
+        return None
+
+
+def line_bearing(line) -> float | None:
+    """The compass bearing of a line (degrees clockwise from north), for a
+    bench mapped as a way: the bench runs along the line, so the line's own
+    direction is the best facing the data offers. None for a degenerate line.
+    Longitude is squeezed by cos(latitude) so the bearing is a real compass
+    one, not a raw lon/lat angle."""
+    start, end = line.coords[0], line.coords[-1]
+    east = (end[0] - start[0]) * cos(radians((start[1] + end[1]) / 2))
+    north = end[1] - start[1]
+    if abs(east) < 1e-12 and abs(north) < 1e-12:
+        return None
+    return degrees(atan2(east, north)) % 360
+
+
+def to_bench(feature_id, tags, s) -> dict | None:
+    """A bench as a point render feature. A bench mapped as a way collapses to
+    the midpoint of the line, with the facing taken along it; benches come in
+    thousands, so the properties stay minimal (the frontend derives everything
+    else)."""
+    if s.geom_type == "Point":
+        direction = bench_direction(tags)
+    elif s.geom_type == "LineString":
+        direction = bench_direction(tags)
+        if direction is None:
+            direction = line_bearing(s)
+        s = s.interpolate(0.5, normalized=True)
+    else:
+        # one stray Polygon bench (and anything odder) must not abort the tile
+        logger.warning(f"non-point/line bench?? {feature_id} ({s.geom_type})")
+        return None
+    properties = {"cmtype": "bench", "direction": direction}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 # water areas: bodies of water mapped as polygons. `water` alone catches the
 # water=* areas that carry no natural=water.
 WATER_NATURAL = frozenset({"water", "bay", "strait", "wetland"})
@@ -345,6 +414,8 @@ def tile_to_geojson(
             ret.append(to_traffic_signal(feature_id, tags, s))
         elif tags.get("highway") == "crossing":
             ret.append(to_crossing(feature_id, tags, s))
+        elif tags.get("amenity") == "bench":
+            ret.append(to_bench(feature_id, tags, s))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
 
