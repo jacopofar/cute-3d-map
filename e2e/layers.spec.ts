@@ -121,6 +121,18 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
   expect(windowsHidden).toBeGreaterThan(0);
   await page.click("#windows-toggle input");
 
+  // fences ride on the same zoom gate, so the jump above is what shows them
+  await expect
+    .poll(async () => (await countMeshes(page, "fence")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+  expect((await countMeshes(page, "fence")).visible).toBeGreaterThan(0);
+  await page.click("#fences-toggle input");
+  expect((await countMeshes(page, "fence")).visible).toBe(0);
+  await page.click("#fences-toggle input");
+  expect((await countMeshes(page, "fence")).visible).toBeGreaterThan(0);
+
   // and the chevron folds the list away again
   await page.click("#layer-menu-collapse");
   await expect(page.locator("#layer-menu-panel")).toBeHidden();

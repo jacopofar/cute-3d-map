@@ -38,6 +38,11 @@ const VEHICLE_MIN_ZOOM = 15;
 // off-screen)
 const FACADE_MIN_ZOOM = 17;
 const FACADE_TILE_MARGIN = 1;
+// fences are just over a meter tall, so below this zoom a band is under a pixel
+// and reads as a jagged line; the fragment discard is cheap but not free over
+// the whole city, so show them where they read (measured: posts and rails from
+// 19, a dotted line at 18, noise at 17)
+const FENCE_MIN_ZOOM = 18;
 
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -178,6 +183,8 @@ class CoolMap {
   private roofShapesEnabled = true;
   // water is its own per-tile mesh, so this is a plain visibility switch
   private waterEnabled = true;
+  // fences are their own per-tile mesh too, but only shown once zoomed in
+  private fencesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -500,6 +507,10 @@ class CoolMap {
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
       this.applyWaterVisibility();
+    });
+    wireToggle("#fences-toggle", (on) => {
+      this.fencesEnabled = on;
+      this.applyFenceVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -1035,10 +1046,24 @@ class CoolMap {
     }
   }
 
+  // fences are a per-tile mesh too, gated on the zoom: the geometry is in the
+  // tile either way (it is cheap), only the drawing waits for the zoom
+  private applyFenceVisibility() {
+    const on = this.fencesEnabled && this.map.getZoom() >= FENCE_MIN_ZOOM;
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "fence") {
+          mesh.visible = on;
+        }
+      }
+    }
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
+    this.applyFenceVisibility();
   }
 
   private disposeDetail(key: string) {
