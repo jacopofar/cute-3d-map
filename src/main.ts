@@ -19,9 +19,15 @@ import {
   epsg4326toEpsg3857,
   toModelCoords,
 } from "./geojson_data.ts";
-import type { BuildingInfo, TrafficLoop, WaterInfo } from "./geojson_data.ts";
+import type {
+  BuildingInfo,
+  RunwayLine,
+  TrafficLoop,
+  WaterInfo,
+} from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
+import { PlaneLayer } from "./airplanes.ts";
 import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
 import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
 
@@ -164,6 +170,8 @@ class CoolMap {
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   // water features per loaded tile, for click-picking
   private loadedWater: { [key: string]: WaterInfo[] } = {};
+  // runway centrelines per loaded tile, for the airplane layer
+  private loadedRunways: { [key: string]: RunwayLine[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
   // facade detail (windows/doors and balconies) meshes per tile, built only
@@ -178,6 +186,9 @@ class CoolMap {
   private roofShapesEnabled = true;
   // water is its own per-tile mesh, so this is a plain visibility switch
   private waterEnabled = true;
+  // tarmac is its own per-tile mesh too, and the planes a scene layer; the one
+  // checkbox switches both
+  private airplanesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -186,6 +197,7 @@ class CoolMap {
   private carsTraffic?: TrafficRenderer;
   private trainsTraffic?: TrafficRenderer;
   private clouds?: CloudLayer;
+  private airplanes?: PlaneLayer;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
   // whether clicking a building inspects it
@@ -333,10 +345,15 @@ class CoolMap {
         // are relative to the visible area rather than to a tile
         coolMap.clouds = new CloudLayer(this.scene);
         coolMap.clouds.setEnabled(coolMap.cloudsEnabled);
+        // decorative airliners, a scene layer like the clouds: they fly the
+        // loaded runways and are a pure function of time
+        coolMap.airplanes = new PlaneLayer(this.scene);
+        coolMap.airplanes.setEnabled(coolMap.airplanesEnabled);
         // tiles may already have loaded before this layer was added, so seed
         // the renderer with whatever routes are present
         coolMap.syncTraffic();
         coolMap.syncTraffic();
+        coolMap.syncAirplanes();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -401,6 +418,11 @@ class CoolMap {
           coolMap.trainsTraffic.update(originMeters, scaleFactor);
         }
         coolMap.updateClouds(originMeters, scaleFactor);
+        // planes are placed from wall-clock time and the loaded runways
+        coolMap.airplanes?.update(originMeters, scaleFactor, {
+          zoom: coolMap.map.getZoom(),
+          now: performance.now(),
+        });
         // drive the water ripples from wall-clock time (the render loop runs
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
@@ -501,6 +523,10 @@ class CoolMap {
       this.waterEnabled = on;
       this.applyWaterVisibility();
     });
+    wireToggle("#airplanes-toggle", (on) => {
+      this.airplanesEnabled = on;
+      this.applyAirplaneVisibility();
+    });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
       // the color is baked into the geometry, so the loaded tiles have to be
@@ -555,8 +581,10 @@ class CoolMap {
     this.loadedBuildings = {};
     this.loadedWater = {};
     this.loadedCrossings = {};
+    this.loadedRunways = {};
     this.clearBuildingDetail();
     this.syncTraffic();
+    this.syncAirplanes();
     this.loadUnloadCoord(this.map.getCenter());
   }
 
@@ -874,6 +902,7 @@ class CoolMap {
         delete this.loadedBuildings[k];
         delete this.loadedWater[k];
         delete this.loadedCrossings[k];
+        delete this.loadedRunways[k];
         this.disposeDetail(k);
         deleteUsKeys.push(k);
       }
@@ -882,7 +911,10 @@ class CoolMap {
     // the routes of an unloaded tile are gone; hand the renderer the remaining
     // ones. setLoops only reprepares plain data, so this is cheap enough to run
     // on the moves that actually unload a tile.
-    if (deleteUsKeys.length > 0) this.syncTraffic();
+    if (deleteUsKeys.length > 0) {
+      this.syncTraffic();
+      this.syncAirplanes();
+    }
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
     // above (|x - cx| <= margin), otherwise the +margin row/column is kept
@@ -909,12 +941,8 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, buildings, water, traffic, crossings } = await objectsAt(
-        this.tileCenter,
-        x,
-        y,
-        this.imputedColorsEnabled,
-      );
+      const { meshes, buildings, water, traffic, crossings, runways } =
+        await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -936,7 +964,9 @@ class CoolMap {
       this.loadedBuildings[tileKey] = buildings;
       this.loadedWater[tileKey] = water;
       this.loadedCrossings[tileKey] = crossings;
+      this.loadedRunways[tileKey] = runways;
       this.syncTraffic();
+      this.syncAirplanes();
       this.syncBuildingDetail();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -1035,10 +1065,23 @@ class CoolMap {
     }
   }
 
+  // the airplane checkbox switches both the tarmac meshes and the plane layer
+  private applyAirplaneVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "aeroway") {
+          mesh.visible = this.airplanesEnabled;
+        }
+      }
+    }
+    this.airplanes?.setEnabled(this.airplanesEnabled);
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
+    this.applyAirplaneVisibility();
   }
 
   private disposeDetail(key: string) {
@@ -1095,6 +1138,20 @@ class CoolMap {
       loops.filter((loop) => loop.kind === "train"),
       crossings,
     );
+  }
+
+  // hand the plane layer the loaded runways. A runway stored whole repeats
+  // across the tiles it spans, so dedupe by id here (the first copy wins; they
+  // are the same line).
+  private syncAirplanes() {
+    if (!this.airplanes) return;
+    const byId = new Map<string, RunwayLine>();
+    for (const runways of Object.values(this.loadedRunways)) {
+      for (const runway of runways) {
+        if (!byId.has(runway.id)) byId.set(runway.id, runway);
+      }
+    }
+    this.airplanes.setRunways([...byId.values()]);
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
