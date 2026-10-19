@@ -31,6 +31,8 @@ decorative volumetric cloud layer.
   with coverage.
 - `npm run test:e2e` — Playwright smoke tests (boots the app, loads tiles).
 - `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
+- `npm run bench:gpu` — the same app in headed Chrome on the real GPU (needs a
+  display), panning/tilting/zooming; writes `perf-results/latest-gpu.json`.
 - `npm run prettify` — Prettier over `src/**.ts`. It also reformats unrelated
   lines, so prefer formatting only the files you touched.
 

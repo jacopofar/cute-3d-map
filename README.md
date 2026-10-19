@@ -306,6 +306,16 @@ no GPU and runs on SwiftShader, where the app is rasterizer bound and absolute
 fps is far lower than on a device — so read the numbers as relative, and compare
 like with like.
 
+For a realistic number, `npm run bench:gpu` runs `perf/interactive.spec.ts`
+through `playwright.gpu.config.ts`: the installed Google Chrome, headed with GPU
+rasterization, on a 1280x800 viewport. After a warm-up long enough to load tiles
+and build the facade detail, it measures three phases — pan (large enough to
+cross the tile grid), tilt, and zoom (across the facade-detail threshold) — and
+writes `perf-results/latest-gpu.json`. It needs a display and a GPU; without one
+Chrome falls back to software and the `renderer` field in the result says so.
+The pan/zoom numbers include the app's debounced tile/detail pass, so they
+reflect the hitches a user feels, not just steady-state fill.
+
 Results are written to `perf-results/latest.json` (gitignored) as well as
 printed, so a run can be kept next to a commit. Two gotchas when comparing:
 
