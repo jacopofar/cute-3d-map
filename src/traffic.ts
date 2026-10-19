@@ -108,6 +108,14 @@ function sampleRun(
   return { lon, lat, heading };
 }
 
+// the body shared by moving and parked cars: a simple box in the fleet's
+// dimensions, so the two layers always match
+export function vehicleGeometry(
+  config: TrafficFleetConfig,
+): THREE.BufferGeometry {
+  return new THREE.BoxGeometry(config.length, config.width, config.height);
+}
+
 /**
  * Renders precomputed traffic: every vehicle is a pure function of wall-clock
  * time, so there is no simulation to advance, nothing to rebuild when a tile
@@ -134,11 +142,7 @@ export class TrafficRenderer {
     this.config = config;
     this.now = now;
     this.capacity = Math.max(1, config.maxVehicles);
-    const geometry = new THREE.BoxGeometry(
-      config.length,
-      config.width,
-      config.height,
-    );
+    const geometry = vehicleGeometry(config);
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(geometry, material, this.capacity);
     this.mesh.count = 0;

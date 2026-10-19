@@ -88,6 +88,13 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   hides just the ornament.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
+- `src/parked_cars.ts` — static parked cars. The tile's `parking` block
+  (`[lon, lat, heading]` per occupied bay) becomes one InstancedMesh with the
+  moving cars' body (`CAR_TRAFFIC`), rebuilt only when the centre tiles or the
+  projection origin change. It follows the facade gate: above `FACADE_MIN_ZOOM`
+  and only for the 3x3 tiles around the centre, so it holds ~60k instances rather
+  than the ~370k of the whole loaded window. `#parked-cars-toggle` is a plain
+  visibility switch.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
@@ -102,6 +109,12 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
+- `tilegen/parking.py` — places static parked cars: both sides of every
+  parking-eligible highway, bays at a pitch set by a seeded style (`parallel`,
+  `perpendicular`, `fishbone`), 95% occupied. Skips motorways/trunks/links,
+  roundabouts and ways under `MIN_WAY_LENGTH`; spots are grouped per tile. Pure
+  (plain `ParkingWay` inputs; `main.load_parking_ways` reads the parquet), so it
+  is unit-tested like `traffic.py`.
 
 ## Domain lexicon
 
@@ -183,6 +196,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   path and timing are unchanged — nothing waits.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
+- **parking bay / parked car** — a potential kerbside space at a style pitch
+  (parallel, perpendicular or fishbone), and an occupied one, stored as
+  `[lon, lat, heading]` in a tile's top-level `parking` block. 95% of bays are
+  occupied; the layer is static and gated like the facade detail.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap
   that keeps sky overhead when panning; **variant / slot** — the shared cloud
   mesh shapes and their instance slots.
@@ -196,10 +213,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
   `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
-  `#fences-toggle`, `#bridges-toggle`, `#imputed-colors-toggle`. Windows,
-  balconies, roofs, water, benches, church crosses, parks, airplanes, fences and
-  bridges & tunnels are their own meshes, so those are plain visibility
-  switches; imputed colors are baked into the geometry, so changing that one
-  reloads the loaded tiles.
+  `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
+  `#imputed-colors-toggle`. Windows, balconies, roofs, water, benches, church
+  crosses, parks, airplanes, fences, bridges & tunnels and parked cars are their
+  own meshes, so those are plain visibility switches; imputed colors are baked
+  into the geometry, so changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

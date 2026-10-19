@@ -23,11 +23,13 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
+  ParkedCar,
   RunwayLine,
   TrafficLoop,
   WaterInfo,
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
+import { ParkedCarLayer } from "./parked_cars.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
 import {
@@ -205,6 +207,13 @@ class CoolMap {
   private loadedAprons: { [key: string]: ApronRing[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
+  // parked cars per loaded tile, for the static cars around the centre
+  private loadedParking: { [key: string]: ParkedCar[] } = {};
+  // the tile set + origin the parked cars were built for, so the layer is only
+  // rebuilt when that changes
+  private parkedCarsKey = "";
+  private parkedCars?: ParkedCarLayer;
+  private parkedCarsEnabled = true;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -432,6 +441,9 @@ class CoolMap {
         // loaded runways and are a pure function of time
         coolMap.airplanes = new PlaneLayer(this.scene);
         coolMap.airplanes.setEnabled(coolMap.airplanesEnabled);
+        // static parked cars: same body as the moving ones, around the centre
+        coolMap.parkedCars = new ParkedCarLayer(this.scene);
+        coolMap.parkedCars.setEnabled(coolMap.parkedCarsEnabled);
         // the lights now exist, so push the current time-of-day state onto them
         coolMap.applyLighting();
         // tiles may already have loaded before this layer was added, so seed
@@ -439,6 +451,7 @@ class CoolMap {
         coolMap.syncTraffic();
         coolMap.syncTraffic();
         coolMap.syncAirplanes();
+        coolMap.syncParkedCars();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -655,6 +668,10 @@ class CoolMap {
       this.fencesEnabled = on;
       this.applyFenceVisibility();
     });
+    wireToggle("#parked-cars-toggle", (on) => {
+      this.parkedCarsEnabled = on;
+      this.applyParkedCarVisibility();
+    });
     wireToggle("#bridges-toggle", (on) => {
       this.bridgesEnabled = on;
       this.applyBridgeVisibility();
@@ -715,6 +732,8 @@ class CoolMap {
     this.loadedCrossings = {};
     this.loadedRunways = {};
     this.loadedAprons = {};
+    this.loadedParking = {};
+    this.parkedCarsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
@@ -995,6 +1014,7 @@ class CoolMap {
     // clear their bookkeeping to let the load loop request them again
     this.originGeneration += 1;
     this.pendingTiles.clear();
+    this.syncParkedCars();
     console.log("reset projection origin to", center.lng, center.lat);
   }
 
@@ -1037,6 +1057,7 @@ class CoolMap {
         delete this.loadedCrossings[k];
         delete this.loadedRunways[k];
         delete this.loadedAprons[k];
+        delete this.loadedParking[k];
         this.disposeDetail(k);
         deleteUsKeys.push(k);
       }
@@ -1048,6 +1069,7 @@ class CoolMap {
     if (deleteUsKeys.length > 0) {
       this.syncTraffic();
       this.syncAirplanes();
+      this.syncParkedCars();
     }
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
@@ -1075,8 +1097,16 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, buildings, water, traffic, crossings, runways, aprons } =
-        await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
+      const {
+        meshes,
+        buildings,
+        water,
+        traffic,
+        crossings,
+        runways,
+        aprons,
+        parking,
+      } = await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -1100,6 +1130,7 @@ class CoolMap {
       this.loadedCrossings[tileKey] = crossings;
       this.loadedRunways[tileKey] = runways;
       this.loadedAprons[tileKey] = aprons;
+      this.loadedParking[tileKey] = parking;
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
@@ -1125,6 +1156,7 @@ class CoolMap {
   // rest. Called on the debounced move, on tile load/unload and after an origin
   // reset, so it is cheap when nothing changed (it only checks keys).
   private syncBuildingDetail() {
+    this.syncParkedCars();
     // roofs and water follow their checkboxes whatever the zoom
     this.applyTileVisibility();
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
@@ -1436,6 +1468,42 @@ class CoolMap {
     this.airplanes.setAprons([...apronsById.values()].map((a) => a.ring));
   }
 
+  // Parked cars follow the facade detail: only the tiles around the centre and
+  // only above the windows zoom. The full loaded window is seven tiles across,
+  // which would be hundreds of thousands of cars almost all off-screen; the
+  // 3x3 centre is what is actually in view at this zoom.
+  private syncParkedCars() {
+    if (!this.parkedCars) return;
+    if (this.map.getZoom() < FACADE_MIN_ZOOM) {
+      this.applyParkedCarVisibility();
+      return;
+    }
+    const [cx, cy] = getTileIndex(this.map.getCenter());
+    const keys: string[] = [];
+    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
+      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
+        const key = `${x}_${y}`;
+        if (this.loadedParking[key]) keys.push(key);
+      }
+    }
+    // rebuild only when the centre tiles or the projection origin changed
+    const key = `${this.originGeneration}:${keys.join(",")}`;
+    if (key !== this.parkedCarsKey) {
+      this.parkedCarsKey = key;
+      const spots: ParkedCar[] = [];
+      for (const tileKey of keys) spots.push(...this.loadedParking[tileKey]);
+      const originMeters = epsg4326toEpsg3857(this.tileCenter);
+      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+      this.parkedCars.setSpots(spots, originMeters, scaleFactor);
+    }
+    this.applyParkedCarVisibility();
+  }
+
+  private applyParkedCarVisibility() {
+    const on = this.parkedCarsEnabled && this.map.getZoom() >= FACADE_MIN_ZOOM;
+    this.parkedCars?.setEnabled(on);
+  }
+
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
   // app itself never calls this
   stats(): {
@@ -1453,6 +1521,7 @@ class CoolMap {
     trains: number;
     facadeTiles: number;
     facadeVertices: number;
+    parkedCars: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -1506,6 +1575,7 @@ class CoolMap {
       trains: this.trainsTraffic?.count ?? 0,
       facadeTiles,
       facadeVertices,
+      parkedCars: this.parkedCars?.count ?? 0,
     };
   }
 
