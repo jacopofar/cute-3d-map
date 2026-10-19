@@ -13,7 +13,7 @@ import quackosm as qosm
 import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 from traffic import (
     CAR_CONFIG,
@@ -440,6 +440,153 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
+# a bridge is a way carrying `bridge` (any value other than "no"): the common
+# `bridge=yes`, plus the viaducts/aqueducts/covered/boardwalk. `man_made=bridge`
+# is the deck drawn as its own polygon, and `building=bridge` is a bridge
+# mis-mapped as a building (the diary flags it: it used to get a full roof and
+# facade); both become a deck here instead.
+def is_bridge(tags) -> bool:
+    if tags.get("man_made") == "bridge" or tags.get("building") == "bridge":
+        return True
+    # a carried way: the deck only makes sense for a road or rail class
+    return tags.get("bridge") not in (None, "no") and transport_class(tags) is not None
+
+
+# a tunnel is a way carrying `tunnel` (any value other than "no"). A
+# building_passage is an arcade under a house and a culvert is a drain: neither
+# is a road tunnel the user would recognize, so they stay out.
+TUNNEL_SKIP = frozenset({"no", "culvert", "building_passage"})
+
+
+def is_tunnel(tags) -> bool:
+    return tags.get("tunnel") is not None and tags.get("tunnel") not in TUNNEL_SKIP
+
+
+# the only tunnels worth a portal: roads and railways. Most `tunnel=yes` ways in
+# the extract are footway/steps underpasses (thousands of them), which are not
+# the road tunnel the user pictures and would bury the scene in tiny frames.
+PORTAL_CLASSES = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+        "residential",
+        "unclassified",
+        "living_street",
+        "service",
+        "rail",
+        "light_rail",
+        "narrow_gauge",
+        "tram",
+    }
+)
+
+
+# the road/rail class a bridge carries; the frontend turns it into a deck width
+def transport_class(tags) -> str | None:
+    return tags.get("highway") or tags.get("railway")
+
+
+def to_bridge(feature_id, tags, s, tile_box) -> dict | None:
+    """A bridge as a render feature: a way's line (the deck the frontend raises
+    into a slab), or a `man_made=bridge` / `building=bridge` polygon (the deck
+    footprint, drawn as a slab).
+
+    Like water, the geometry is clipped to the tile: a bridge crosses several
+    tiles and storing it whole in each would draw it over and over. Tunnels are
+    handled separately (they only show as portals)."""
+    if s.geom_type in ("Polygon", "MultiPolygon"):
+        clipped = _flatten(s.intersection(tile_box), "Polygon")
+    else:
+        clipped = _flatten(s.intersection(tile_box), "LineString")
+    if clipped is None:
+        return None
+    properties = {
+        "cmtype": "bridge",
+        # the OSM `layer` when set (a deck above a road is 1); the frontend uses
+        # it as the deck height proxy
+        "layer": vertical_level(tags),
+        "class": transport_class(tags),
+        # the deck footprint is a bridge in its own right; give it a value so
+        # the frontend can tell it apart from a carried way if it ever wants to
+        "bridge": tags.get("bridge") or "deck",
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
+def portal_angle(lon0: float, lat0: float, lon1: float, lat1: float) -> float:
+    """The tunnel's direction at a portal, as the atan2 in model space. Lon/lat
+    are not isotropic (a degree of longitude is `cos(lat)` of a degree of
+    latitude in meters), so the scale is folded in here rather than making the
+    frontend redo it."""
+    dx = (lon1 - lon0) * math.cos(math.radians(lat0))
+    dy = lat1 - lat0
+    return math.atan2(dy, dx)
+
+
+def tunnel_portals(s, tile_box) -> list[tuple[Point, float]]:
+    """The true ends of a tunnel way that lie inside the tile, with the tunnel's
+    direction there: where the tunnel meets the surface, i.e. a portal. Emitting
+    the clipped line instead would put a portal on every tile boundary, which is
+    not a portal at all."""
+    ends: list[tuple[Point, float]] = []
+    for part in shapely.get_parts(s):
+        if part.geom_type != "LineString":
+            continue
+        coords = list(part.coords)
+        if len(coords) < 2:
+            continue
+        for point, neighbour in ((coords[0], coords[1]), (coords[-1], coords[-2])):
+            if tile_box.contains(Point(point)):
+                ends.append(
+                    (
+                        Point(point),
+                        portal_angle(point[0], point[1], neighbour[0], neighbour[1]),
+                    )
+                )
+    return ends
+
+
+def to_tunnel(feature_id, tags, s, tile_box) -> list[dict]:
+    """A tunnel's portal(s): a Point per end of the way that falls in the tile,
+    carrying the tunnel's direction. The underground part is deliberately not
+    drawn — a tunnel is invisible, and the honest, visible thing is the opening
+    where it meets the surface. A way whose ends are all outside the tile (the
+    tunnel merely passes under it) contributes nothing."""
+    transport = transport_class(tags)
+    if transport not in PORTAL_CLASSES:
+        return []
+    portal = {
+        "cmtype": "tunnel",
+        "layer": vertical_level(tags),
+        "class": transport,
+        "name": tags.get("name"),
+    }
+    properties = {k: v for k, v in portal.items() if v is not None}
+    return [
+        {
+            "type": "feature",
+            "id": feature_id,
+            "geometry": json.loads(shapely.to_geojson(point)),
+            "properties": {**properties, "angle": round(angle, 4)},
+        }
+        for point, angle in tunnel_portals(s, tile_box)
+    ]
+
+
 def to_green(feature_id, tags, s, tile_box) -> dict | None:
     """A green area as a render feature, clipped to the tile like water (a park
     spans many tiles). The `green` sub-kind selects the frontend shader style."""
@@ -588,7 +735,14 @@ def tile_to_geojson(
                 "properties": tags,
             }
         )
-        if "building" in tags:
+        if is_bridge(tags):
+            # before `building`: building=bridge is a bridge, not a house
+            ret.append(to_bridge(feature_id, tags, s, tile_box))
+        elif is_tunnel(tags) and transport_class(tags) in PORTAL_CLASSES:
+            # before `water`: a culverted river keeps its water rendering (the
+            # guard falls through), only a road/rail tunnel becomes a portal
+            ret.extend(to_tunnel(feature_id, tags, s, tile_box))
+        elif "building" in tags:
             ret.append(to_building(feature_id, tags, s, distributions))
         elif tags.get("natural") == "tree":
             ret.append(to_tree(feature_id, tags, s))
@@ -784,8 +938,9 @@ def _vertical_counts(input_parquet: Path, predicate: str) -> list[tuple]:
 def level_report(input_parquet: Path) -> None:
     """Report the OSM vertical positions that matter for rendering: water below
     ground (underwater, drawn faint in the frontend) and roads above or below it
-    (bridges and tunnels, recorded for a future bridge pass; the road network is
-    not emitted). The position is `layer` when set, else `level`."""
+    (bridges and tunnels; the road network itself is not emitted, the bridge and
+    tunnel pass in `to_bridge`/`to_tunnel` reads them). The position is `layer`
+    when set, else `level`."""
     water = _vertical_counts(input_parquet, WATER_SQL)
     underwater = sum(count for value, count in water if (parse_level(value) or 0) < 0)
     logger.info(

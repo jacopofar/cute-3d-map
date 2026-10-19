@@ -10,6 +10,12 @@ import { water, waterMaterial } from "./elements3d/water";
 import { bench } from "./elements3d/bench";
 import { aeroway, aerowayMaterial } from "./elements3d/aeroway";
 import { fence, fenceMaterial } from "./elements3d/fence";
+import {
+  bridge,
+  tunnel,
+  bridgeMaterial,
+  tunnelMaterial,
+} from "./elements3d/bridge";
 
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
@@ -83,6 +89,8 @@ export function geoJSONtoGeometries(
     | "green"
     | "aeroway"
     | "fence"
+    | "bridge"
+    | "tunnel"
     | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
@@ -137,6 +145,16 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "fence") {
     return [{ kind: "fence", geometries: fence(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "bridge") {
+    return [
+      { kind: "bridge", geometries: bridge(originMeters, scaleFactor, f) },
+    ];
+  }
+  if (f.properties.cmtype === "tunnel") {
+    return [
+      { kind: "tunnel", geometries: tunnel(originMeters, scaleFactor, f) },
+    ];
   }
 
   console.error("Cannot handle feature:", f);
@@ -339,9 +357,13 @@ export async function objectsAt(
                   ? aerowayMaterial
                   : kind === "fence"
                     ? fenceMaterial
-                    : kind === "bench"
-                      ? benchMaterial
-                      : treeMaterial;
+                    : kind === "bridge"
+                      ? bridgeMaterial
+                      : kind === "tunnel"
+                        ? tunnelMaterial
+                        : kind === "bench"
+                          ? benchMaterial
+                          : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);

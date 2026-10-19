@@ -61,6 +61,13 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   per-vertex `aFade`. tilegen clips water to the tile (a lake spans many tiles),
   unlike buildings; water is its own per-tile mesh (kind `water`), so the
   checkbox is a visibility switch.
+- `src/elements3d/bridge.ts` — bridges and tunnels. A bridge way becomes a
+  raised slab (deck + parapets, both ends ramped to the ground) and a
+  `man_made=bridge` footprint a flat deck slab; a tunnel becomes a dark portal
+  frame at each true way end. tilegen clips a bridge to the tile (like water) and
+  emits tunnel ends as portal Points; the underground part is not drawn. Each is
+  its own per-tile mesh (kinds `bridge` and `tunnel`), so the single "bridges &
+  tunnels" checkbox is a visibility switch.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
   drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
@@ -147,11 +154,20 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
-- **layer** — the OSM vertical position of water or a road, carried as a tile's
-  `layer` property: `layer` when set (Seveso is `layer=-2`, a bridge `layer=1`),
-  else `level` as a fallback; negative is below ground. Water below 0 is drawn
-  faint (`UNDERWATER_OPACITY`); tilegen only reports road positions, recorded for
-  a future bridge pass (roads are not emitted).
+- **layer** — the OSM vertical position of water, a bridge or a tunnel, carried
+  as a tile's `layer` property: `layer` when set (Seveso is `layer=-2`, a bridge
+  `layer=1`), else `level` as a fallback; negative is below ground. Water below 0
+  is drawn faint (`UNDERWATER_OPACITY`); a bridge's layer is its deck-height
+  proxy; tilegen reports the road positions it finds.
+- **bridge** — a `bridge=*` way (on a highway or railway) or a `man_made=bridge` /
+  `building=bridge` footprint, emitted as `cmtype` `bridge` and clipped to the
+  tile. The frontend raises a way into a slab and a footprint into a flat deck.
+- **tunnel / portal** — a `tunnel=yes` road or rail way; a tunnel is underground
+  and invisible, so only its **portal** (a dark frame at each true way end) is
+  drawn. tilegen emits the ends as `cmtype` `tunnel` Points (never the clipped
+  line, which would put a portal on every tile boundary); footway/step
+  underpasses, culverts and building passages get none, and a buried waterway
+  stays water.
 - **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
   leaves them out: `tilegen/impute.py` draws one from the observed distribution
   of that tag in the same extract, seeded from the building id. The frontend
@@ -177,8 +193,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
   are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
-  `#churches-toggle`, `#imputed-colors-toggle`. Windows, balconies, roofs, water
-  and church crosses are their own meshes, so those are plain visibility
+  `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
+  `#fences-toggle`, `#bridges-toggle`, `#imputed-colors-toggle`. Windows,
+  balconies, roofs, water, benches, church crosses, parks, airplanes, fences and
+  bridges & tunnels are their own meshes, so those are plain visibility
   switches; imputed colors are baked into the geometry, so changing that one
   reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared

@@ -620,6 +620,152 @@ def test_tile_to_geojson_includes_fence():
     assert len(raw) == 1
 
 
+def test_is_bridge_and_tunnel_tags():
+    assert main.is_bridge({"bridge": "yes", "highway": "residential"})
+    assert main.is_bridge({"bridge": "viaduct", "railway": "rail"})
+    assert main.is_bridge({"man_made": "bridge"})
+    assert main.is_bridge({"building": "bridge"})
+    assert not main.is_bridge({"bridge": "no", "highway": "residential"})
+    assert not main.is_bridge({"building": "yes"})
+    # a bridge tag on a way with no road/rail class is not a carried deck
+    assert not main.is_bridge({"bridge": "yes"})
+    assert main.is_tunnel({"tunnel": "yes"})
+    assert not main.is_tunnel({"tunnel": "no"})
+    # a drain and an arcade are not the road tunnels the user means
+    assert not main.is_tunnel({"tunnel": "culvert"})
+    assert not main.is_tunnel({"tunnel": "building_passage"})
+    assert not main.is_tunnel({})
+
+
+def test_transport_class_prefers_highway_then_railway():
+    assert main.transport_class({"highway": "primary"}) == "primary"
+    assert main.transport_class({"railway": "rail"}) == "rail"
+    assert main.transport_class({}) is None
+
+
+def test_to_bridge_clips_a_line_and_carries_the_class():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(min_lon - 0.001, cy), (max_lon + 0.001, cy)])
+    f = main.to_bridge(
+        1, {"bridge": "yes", "highway": "primary", "layer": "1"}, line, box
+    )
+    assert f is not None
+    assert f["properties"]["cmtype"] == "bridge"
+    assert f["properties"]["class"] == "primary"
+    assert f["properties"]["bridge"] == "yes"
+    assert f["properties"]["layer"] == 1
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "LineString"
+    assert round(clipped.bounds[0], 9) == round(min_lon, 9)
+
+
+def test_to_bridge_accepts_a_deck_polygon_and_defaults_its_value():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    deck = shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4)
+    f = main.to_bridge(2, {"man_made": "bridge"}, deck, box)
+    assert f is not None
+    assert f["properties"]["cmtype"] == "bridge"
+    # a footprint with no `bridge` value still names itself
+    assert f["properties"]["bridge"] == "deck"
+    # and no class: the footprint is not a carried way
+    assert "class" not in f["properties"]
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "Polygon"
+
+
+def test_to_tunnel_emits_a_portal_only_at_an_inside_end():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cy = (min_lat + max_lat) / 2
+    cx = (min_lon + max_lon) / 2
+    # one end inside the tile, the other outside: exactly one portal
+    line = shapely.LineString([(cx, cy), (max_lon + 0.005, cy)])
+    portals = main.tunnel_portals(line, box)
+    assert len(portals) == 1
+    point, angle = portals[0]
+    assert point.equals(shapely.Point(cx, cy))
+    assert round(angle, 6) == 0.0  # the neighbour is due east
+    # both ends inside -> two portals
+    inside = shapely.LineString([(cx, cy), (cx + 1e-4, cy)])
+    assert len(main.tunnel_portals(inside, box)) == 2
+    # the tunnel merely passes under the tile -> nothing
+    under = shapely.LineString([(min_lon - 0.005, cy), (max_lon + 0.005, cy)])
+    assert main.tunnel_portals(under, box) == []
+
+
+def test_to_tunnel_features_carry_layer_and_angle():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(cx, cy), (cx + 1e-4, cy + 1e-4)])
+    features = main.to_tunnel(
+        3, {"tunnel": "yes", "railway": "rail", "layer": "-1"}, line, box
+    )
+    assert len(features) == 2
+    assert all(f["properties"]["cmtype"] == "tunnel" for f in features)
+    assert all(f["properties"]["class"] == "rail" for f in features)
+    assert all(f["properties"]["layer"] == -1 for f in features)
+    assert all("angle" in f["properties"] for f in features)
+
+
+def test_tile_to_geojson_routes_building_bridge_to_a_deck():
+    # building=bridge used to get a full house treatment; now it is a bridge
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    deck = shapely.to_wkb(shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4))
+    render, _raw = main.tile_to_geojson(
+        [(1, {"building": "bridge"}, deck)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["bridge"]
+
+
+def test_tile_to_geojson_keeps_a_normal_building():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    building = shapely.to_wkb(shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4))
+    render, _raw = main.tile_to_geojson(
+        [(1, {"building": "yes"}, building)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["building"]
+
+
+def test_to_tunnel_skips_pedestrian_underpasses():
+    # a footway underpass is technically a tunnel but not the one the user means
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(cx, cy), (cx + 1e-4, cy)])
+    assert main.to_tunnel(4, {"tunnel": "yes", "highway": "footway"}, line, box) == []
+    assert main.to_tunnel(5, {"tunnel": "yes", "highway": "steps"}, line, box) == []
+
+
+def test_tile_to_geojson_keeps_a_culverted_river_as_water():
+    # a buried waterway carries tunnel=yes but is not a road tunnel: it must
+    # still be drawn as water, not dropped or turned into a portal
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cy = (min_lat + max_lat) / 2
+    river = shapely.to_wkb(
+        geom(f"LINESTRING ({min_lon - 0.001} {cy}, {max_lon + 0.001} {cy})")
+    )
+    render, _raw = main.tile_to_geojson(
+        [(1, {"waterway": "river", "tunnel": "yes", "layer": "-2"}, river)],
+        17220,
+        11723,
+        15,
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["water"]
+    assert render[0]["properties"]["water"] == "river"
+
+
 def test_crossing_points_from_rows_keeps_points_only():
     point = shapely.to_wkb(geom("POINT (9.18 45.5)"))
     line = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
