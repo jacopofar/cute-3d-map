@@ -1,8 +1,10 @@
 import json
 import logging
+import math
 import re
 import zlib
 from collections import defaultdict
+from math import atan2, cos, degrees, radians
 from pathlib import Path
 
 import click
@@ -11,7 +13,7 @@ import quackosm as qosm
 import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 from traffic import (
     CAR_CONFIG,
@@ -114,6 +116,13 @@ def to_building(feature_id, tags, s, distributions=None) -> dict | None:
         "name": tags.get("name"),
         "street": tags.get("addr:street"),
         "housenumber": tags.get("addr:housenumber"),
+        # a church is an ordinary building=* polygon, so the value that says so
+        # (church, chapel, cathedral, ...) has to be reported; religion only
+        # matters for a place of worship that is not tagged by building value
+        "building": tags.get("building"),
+        "religion": (
+            tags.get("religion") if tags.get("amenity") == "place_of_worship" else None
+        ),
         # color, roof_shape and roof_color: the OSM tag when present, otherwise
         # a sample from the dataset's own distribution (see tilegen/impute.py).
         # `imputed` names the fields that were sampled rather than tagged.
@@ -221,6 +230,74 @@ def to_crossing(feature_id, tags, s) -> dict | None:
     return to_stop_point(feature_id, tags, s, "crossing")
 
 
+# compass letters to degrees clockwise from north, the way the frontend rotates
+# a bench (0 = facing north, 90 = east). OSM also writes `direction` as plain
+# degrees, so both are accepted.
+COMPASS = {
+    "N": 0.0,
+    "NE": 45.0,
+    "E": 90.0,
+    "SE": 135.0,
+    "S": 180.0,
+    "SW": 225.0,
+    "W": 270.0,
+    "NW": 315.0,
+}
+
+
+def bench_direction(tags) -> float | None:
+    """The way a bench faces, in degrees clockwise from north, or None when the
+    tag says nothing usable. "parallel"/"perpendicular" describe the bench
+    relative to a nearby way that is not part of the data, so they are ignored,
+    as is anything else that is not a compass letter or a number."""
+    value = str(tags.get("direction", "")).strip().upper()
+    if value in COMPASS:
+        return COMPASS[value]
+    try:
+        return float(value) % 360
+    except ValueError:
+        return None
+
+
+def line_bearing(line) -> float | None:
+    """The compass bearing of a line (degrees clockwise from north), for a
+    bench mapped as a way: the bench runs along the line, so the line's own
+    direction is the best facing the data offers. None for a degenerate line.
+    Longitude is squeezed by cos(latitude) so the bearing is a real compass
+    one, not a raw lon/lat angle."""
+    start, end = line.coords[0], line.coords[-1]
+    east = (end[0] - start[0]) * cos(radians((start[1] + end[1]) / 2))
+    north = end[1] - start[1]
+    if abs(east) < 1e-12 and abs(north) < 1e-12:
+        return None
+    return degrees(atan2(east, north)) % 360
+
+
+def to_bench(feature_id, tags, s) -> dict | None:
+    """A bench as a point render feature. A bench mapped as a way collapses to
+    the midpoint of the line, with the facing taken along it; benches come in
+    thousands, so the properties stay minimal (the frontend derives everything
+    else)."""
+    if s.geom_type == "Point":
+        direction = bench_direction(tags)
+    elif s.geom_type == "LineString":
+        direction = bench_direction(tags)
+        if direction is None:
+            direction = line_bearing(s)
+        s = s.interpolate(0.5, normalized=True)
+    else:
+        # one stray Polygon bench (and anything odder) must not abort the tile
+        logger.warning(f"non-point/line bench?? {feature_id} ({s.geom_type})")
+        return None
+    properties = {"cmtype": "bench", "direction": direction}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 # water areas: bodies of water mapped as polygons. `water` alone catches the
 # water=* areas that carry no natural=water.
 WATER_NATURAL = frozenset({"water", "bay", "strait", "wetland"})
@@ -247,6 +324,63 @@ def water_kind(tags) -> str | None:
 
 def is_water(tags) -> bool:
     return water_kind(tags) is not None or tags.get("waterway") in WATERWAY_KINDS
+
+
+# green areas: parks, woods, lawns and pitches. The frontend draws them with a
+# shader that has two styles, so each feature is classified into the style it
+# wants. "grass" is a mown lawn / pitch / garden, "dense" a park, wood or scrub.
+# Farmland is deliberately absent: there are thousands of farmland polygons and
+# they would green the whole province.
+GREEN_GRASS_LANDUSE = frozenset(
+    {"grass", "village_green", "meadow", "recreation_ground"}
+)
+GREEN_GRASS_NATURAL = frozenset({"grassland", "grass"})
+GREEN_GRASS_LEISURE = frozenset({"garden", "pitch"})
+GREEN_DENSE_LEISURE = frozenset({"park", "common", "nature_reserve"})
+GREEN_DENSE_NATURAL = frozenset({"wood", "scrub", "heath"})
+GREEN_DENSE_LANDUSE = frozenset({"forest", "orchard"})
+
+# a green area below this many square meters (after clipping to the tile) is
+# dropped: a tile boundary clips a park into slivers, and thousands of specks
+# cost geometry for no visible green.
+MIN_GREEN_AREA = 40.0
+
+
+def green_kind(tags) -> str | None:
+    """The shader style ("grass" or "dense") a green area wants, or None when
+    the feature is not green at all."""
+    if tags.get("landuse") in GREEN_GRASS_LANDUSE:
+        return "grass"
+    if tags.get("natural") in GREEN_GRASS_NATURAL:
+        return "grass"
+    if tags.get("leisure") in GREEN_GRASS_LEISURE:
+        return "grass"
+    if tags.get("leisure") in GREEN_DENSE_LEISURE:
+        return "dense"
+    if tags.get("natural") in GREEN_DENSE_NATURAL:
+        return "dense"
+    if tags.get("landuse") in GREEN_DENSE_LANDUSE:
+        return "dense"
+    return None
+
+
+def is_green(tags) -> bool:
+    return green_kind(tags) is not None
+
+
+# meters per degree of latitude; the longitude shrinks by cos(latitude)
+_METERS_PER_DEGREE = 6378137.0 * math.radians(1.0)
+
+
+def area_square_meters(geometry) -> float:
+    """A lon/lat polygon's area in square meters, approximated locally. Fine for
+    a sliver threshold, and it needs no projection."""
+    latitude = geometry.centroid.y
+    return (
+        shapely.area(geometry)
+        * _METERS_PER_DEGREE**2
+        * math.cos(math.radians(latitude))
+    )
 
 
 def _flatten(geometry, want: str):
@@ -306,6 +440,272 @@ def to_water(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
+# a bridge is a way carrying `bridge` (any value other than "no"): the common
+# `bridge=yes`, plus the viaducts/aqueducts/covered/boardwalk. `man_made=bridge`
+# is the deck drawn as its own polygon, and `building=bridge` is a bridge
+# mis-mapped as a building (the diary flags it: it used to get a full roof and
+# facade); both become a deck here instead.
+def is_bridge(tags) -> bool:
+    if tags.get("man_made") == "bridge" or tags.get("building") == "bridge":
+        return True
+    # a carried way: the deck only makes sense for a road or rail class
+    return tags.get("bridge") not in (None, "no") and transport_class(tags) is not None
+
+
+# a tunnel is a way carrying `tunnel` (any value other than "no"). A
+# building_passage is an arcade under a house and a culvert is a drain: neither
+# is a road tunnel the user would recognize, so they stay out.
+TUNNEL_SKIP = frozenset({"no", "culvert", "building_passage"})
+
+
+def is_tunnel(tags) -> bool:
+    return tags.get("tunnel") is not None and tags.get("tunnel") not in TUNNEL_SKIP
+
+
+# the only tunnels worth a portal: roads and railways. Most `tunnel=yes` ways in
+# the extract are footway/steps underpasses (thousands of them), which are not
+# the road tunnel the user pictures and would bury the scene in tiny frames.
+PORTAL_CLASSES = frozenset(
+    {
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+        "residential",
+        "unclassified",
+        "living_street",
+        "service",
+        "rail",
+        "light_rail",
+        "narrow_gauge",
+        "tram",
+    }
+)
+
+
+# the road/rail class a bridge carries; the frontend turns it into a deck width
+def transport_class(tags) -> str | None:
+    return tags.get("highway") or tags.get("railway")
+
+
+def to_bridge(feature_id, tags, s, tile_box) -> dict | None:
+    """A bridge as a render feature: a way's line (the deck the frontend raises
+    into a slab), or a `man_made=bridge` / `building=bridge` polygon (the deck
+    footprint, drawn as a slab).
+
+    Like water, the geometry is clipped to the tile: a bridge crosses several
+    tiles and storing it whole in each would draw it over and over. Tunnels are
+    handled separately (they only show as portals)."""
+    if s.geom_type in ("Polygon", "MultiPolygon"):
+        clipped = _flatten(s.intersection(tile_box), "Polygon")
+    else:
+        clipped = _flatten(s.intersection(tile_box), "LineString")
+    if clipped is None:
+        return None
+    properties = {
+        "cmtype": "bridge",
+        # the OSM `layer` when set (a deck above a road is 1); the frontend uses
+        # it as the deck height proxy
+        "layer": vertical_level(tags),
+        "class": transport_class(tags),
+        # the deck footprint is a bridge in its own right; give it a value so
+        # the frontend can tell it apart from a carried way if it ever wants to
+        "bridge": tags.get("bridge") or "deck",
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
+def portal_angle(lon0: float, lat0: float, lon1: float, lat1: float) -> float:
+    """The tunnel's direction at a portal, as the atan2 in model space. Lon/lat
+    are not isotropic (a degree of longitude is `cos(lat)` of a degree of
+    latitude in meters), so the scale is folded in here rather than making the
+    frontend redo it."""
+    dx = (lon1 - lon0) * math.cos(math.radians(lat0))
+    dy = lat1 - lat0
+    return math.atan2(dy, dx)
+
+
+def tunnel_portals(s, tile_box) -> list[tuple[Point, float]]:
+    """The true ends of a tunnel way that lie inside the tile, with the tunnel's
+    direction there: where the tunnel meets the surface, i.e. a portal. Emitting
+    the clipped line instead would put a portal on every tile boundary, which is
+    not a portal at all."""
+    ends: list[tuple[Point, float]] = []
+    for part in shapely.get_parts(s):
+        if part.geom_type != "LineString":
+            continue
+        coords = list(part.coords)
+        if len(coords) < 2:
+            continue
+        for point, neighbour in ((coords[0], coords[1]), (coords[-1], coords[-2])):
+            if tile_box.contains(Point(point)):
+                ends.append(
+                    (
+                        Point(point),
+                        portal_angle(point[0], point[1], neighbour[0], neighbour[1]),
+                    )
+                )
+    return ends
+
+
+def to_tunnel(feature_id, tags, s, tile_box) -> list[dict]:
+    """A tunnel's portal(s): a Point per end of the way that falls in the tile,
+    carrying the tunnel's direction. The underground part is deliberately not
+    drawn — a tunnel is invisible, and the honest, visible thing is the opening
+    where it meets the surface. A way whose ends are all outside the tile (the
+    tunnel merely passes under it) contributes nothing."""
+    transport = transport_class(tags)
+    if transport not in PORTAL_CLASSES:
+        return []
+    portal = {
+        "cmtype": "tunnel",
+        "layer": vertical_level(tags),
+        "class": transport,
+        "name": tags.get("name"),
+    }
+    properties = {k: v for k, v in portal.items() if v is not None}
+    return [
+        {
+            "type": "feature",
+            "id": feature_id,
+            "geometry": json.loads(shapely.to_geojson(point)),
+            "properties": {**properties, "angle": round(angle, 4)},
+        }
+        for point, angle in tunnel_portals(s, tile_box)
+    ]
+
+
+def to_green(feature_id, tags, s, tile_box) -> dict | None:
+    """A green area as a render feature, clipped to the tile like water (a park
+    spans many tiles). The `green` sub-kind selects the frontend shader style."""
+    kind = green_kind(tags)
+    if kind is None or s.geom_type not in ("Polygon", "MultiPolygon"):
+        return None
+    clipped = _flatten(s.intersection(tile_box), "Polygon")
+    if clipped is None or area_square_meters(clipped) < MIN_GREEN_AREA:
+        return None
+    properties = {
+        "cmtype": "green",
+        "green": kind,
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
+# barriers drawn as a line the frontend can build a fence band along. `fence` is
+# the core; a guard rail or a railing is the same shape with a metal color, so
+# they come along for free (the frontend colors by the `barrier` sub-kind).
+FENCE_BARRIERS = frozenset({"fence", "guard_rail", "railing"})
+# a clip can leave a stub of fence a few centimeters long at a tile edge; it
+# still costs a vertex band and a draw, and reads as nothing. The geometry here
+# is in degrees (the tile box is lon/lat), so this is ~1 m at Milan's latitude.
+MIN_FENCE_LENGTH = 1e-5
+
+
+def fence_lines(geometry, tile_box, min_length: float = MIN_FENCE_LENGTH):
+    """The barrier's line clipped to the tile, as a LineString / MultiLineString,
+    or None when nothing long enough is left. Pure, so it is unit-tested."""
+    clipped = _flatten(geometry.intersection(tile_box), "LineString")
+    if clipped is None:
+        return None
+    parts = [part for part in shapely.get_parts(clipped) if part.length >= min_length]
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return shapely.MultiLineString(parts)
+
+
+def to_fence(feature_id, tags, s, tile_box) -> dict | None:
+    """A barrier as a line the frontend turns into a fence band: a
+    `barrier=fence` way (or guard rail / railing), or the outline of one drawn
+    as a closed area.
+
+    Like water, the line is clipped to the tile: a fence runs along a plot
+    boundary across several tiles, and storing it whole in each would draw it
+    over and over (and the frontend band wants only what is in the tile)."""
+    barrier = tags.get("barrier")
+    if barrier not in FENCE_BARRIERS:
+        return None
+    # a barrier closed into an area (a fenced enclosure) is a footprint: its
+    # outline is the fence, and it clips and draws like any other line
+    geometry = s.boundary if s.geom_type in ("Polygon", "MultiPolygon") else s
+    if geometry.geom_type not in ("LineString", "MultiLineString"):
+        return None
+    clipped = fence_lines(geometry, tile_box)
+    if clipped is None:
+        return None
+    properties = {
+        "cmtype": "fence",
+        "barrier": barrier,
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
+# airport surfaces the frontend draws as flat tarmac. The lines (runways,
+# taxiways) are buffered to a ribbon by their width; the areas (aprons,
+# helipad polygons) are drawn as polygons.
+AEROWAY_LINE_KINDS = frozenset({"runway", "taxiway"})
+AEROWAY_AREA_KINDS = frozenset({"apron", "helipad"})
+# fallback widths in meters when OSM has no `width` tag: a runway is wide
+# enough for an airliner, a taxiway a third of that
+DEFAULT_AEROWAY_WIDTH = {"runway": 45.0, "taxiway": 15.0}
+
+
+def to_aeroway(feature_id, tags, s) -> dict | None:
+    """An airport surface as a render feature: a runway/taxiway line (the
+    frontend buffers it with the width below) or an apron/helipad area.
+
+    Unlike water, the geometry is stored whole in every tile it touches, not
+    clipped: a runway is a single narrow line, and a piece of it would read as
+    an orphan stripe at the tile edge (also the surface has to line up with the
+    plane path, which the frontend derives from the same line). The frontend
+    dedupes runways by id before using them."""
+    kind = tags.get("aeroway")
+    if kind in AEROWAY_LINE_KINDS:
+        if s.geom_type not in ("LineString", "MultiLineString"):
+            logger.warning(f"non-line {kind}?? {feature_id} ({s.geom_type})")
+            return None
+        width = parse_length(tags.get("width")) or DEFAULT_AEROWAY_WIDTH[kind]
+    elif kind in AEROWAY_AREA_KINDS:
+        if s.geom_type not in ("Polygon", "MultiPolygon"):
+            # a helipad is often a bare node; nothing to draw for it
+            return None
+        width = None
+    else:
+        return None
+    properties = {"cmtype": "aeroway", "aeroway": kind, "width": width}
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def tile_to_geojson(
     data,
     tile_x: int,
@@ -335,7 +735,14 @@ def tile_to_geojson(
                 "properties": tags,
             }
         )
-        if "building" in tags:
+        if is_bridge(tags):
+            # before `building`: building=bridge is a bridge, not a house
+            ret.append(to_bridge(feature_id, tags, s, tile_box))
+        elif is_tunnel(tags) and transport_class(tags) in PORTAL_CLASSES:
+            # before `water`: a culverted river keeps its water rendering (the
+            # guard falls through), only a road/rail tunnel becomes a portal
+            ret.extend(to_tunnel(feature_id, tags, s, tile_box))
+        elif "building" in tags:
             ret.append(to_building(feature_id, tags, s, distributions))
         elif tags.get("natural") == "tree":
             ret.append(to_tree(feature_id, tags, s))
@@ -345,8 +752,16 @@ def tile_to_geojson(
             ret.append(to_traffic_signal(feature_id, tags, s))
         elif tags.get("highway") == "crossing":
             ret.append(to_crossing(feature_id, tags, s))
+        elif tags.get("amenity") == "bench":
+            ret.append(to_bench(feature_id, tags, s))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
+        elif is_green(tags):
+            ret.append(to_green(feature_id, tags, s, tile_box))
+        elif tags.get("aeroway") in (AEROWAY_LINE_KINDS | AEROWAY_AREA_KINDS):
+            ret.append(to_aeroway(feature_id, tags, s))
+        elif tags.get("barrier") in FENCE_BARRIERS:
+            ret.append(to_fence(feature_id, tags, s, tile_box))
 
     return [r for r in ret if r is not None], ret_raw
 
@@ -523,8 +938,9 @@ def _vertical_counts(input_parquet: Path, predicate: str) -> list[tuple]:
 def level_report(input_parquet: Path) -> None:
     """Report the OSM vertical positions that matter for rendering: water below
     ground (underwater, drawn faint in the frontend) and roads above or below it
-    (bridges and tunnels, recorded for a future bridge pass; the road network is
-    not emitted). The position is `layer` when set, else `level`."""
+    (bridges and tunnels; the road network itself is not emitted, the bridge and
+    tunnel pass in `to_bridge`/`to_tunnel` reads them). The position is `layer`
+    when set, else `level`."""
     water = _vertical_counts(input_parquet, WATER_SQL)
     underwater = sum(count for value, count in water if (parse_level(value) or 0) < 0)
     logger.info(

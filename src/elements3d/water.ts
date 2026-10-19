@@ -214,6 +214,9 @@ export const waterMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uHighlight: { value: HIGHLIGHT },
+    // 0 by day, 1 at night; dims the (unlit) water so a lake does not glow
+    // bright blue next to the dark buildings
+    uNight: { value: 0 },
   },
   vertexShader: /* glsl */ `
     attribute vec3 color;
@@ -231,6 +234,7 @@ export const waterMaterial = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */ `
     uniform float uTime;
     uniform vec3 uHighlight;
+    uniform float uNight;
     varying vec3 vColor;
     varying float vFade;
     varying vec2 vPos;
@@ -266,6 +270,8 @@ export const waterMaterial = new THREE.ShaderMaterial({
 
       vec3 color = mix(vColor * 0.82, vColor, ripple);
       color += uHighlight * glint * 0.5;
+      // at night keep the water dark, with just a hint of reflected moonlight
+      color = mix(color, color * 0.28 + uHighlight * glint * 0.15, uNight);
       gl_FragColor = vec4(color, vFade);
     }
   `,

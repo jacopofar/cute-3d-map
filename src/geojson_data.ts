@@ -2,9 +2,20 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
+import { church, isChurch } from "./elements3d/church";
+import { green, greenMaterial } from "./elements3d/green";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
+import { bench } from "./elements3d/bench";
+import { aeroway, aerowayMaterial } from "./elements3d/aeroway";
+import { fence, fenceMaterial } from "./elements3d/fence";
+import {
+  bridge,
+  tunnel,
+  bridgeMaterial,
+  tunnelMaterial,
+} from "./elements3d/bridge";
 
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
@@ -69,7 +80,18 @@ export function geoJSONtoGeometries(
   scaleFactor: number,
   imputedColors = true,
 ): {
-  kind: "building" | "roof" | "tree" | "water";
+  kind:
+    | "building"
+    | "roof"
+    | "church"
+    | "tree"
+    | "water"
+    | "green"
+    | "aeroway"
+    | "fence"
+    | "bridge"
+    | "tunnel"
+    | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
   if (!f.properties) {
@@ -82,13 +104,21 @@ export function geoJSONtoGeometries(
     // the roof comes back as its own kind, so it can be switched off on its own
     const parts = building(originMeters, scaleFactor, f, imputedColors);
     const groups: {
-      kind: "building" | "roof";
+      kind: "building" | "roof" | "church";
       geometries: THREE.BufferGeometry[];
     }[] = [{ kind: "building", geometries: parts.map((part) => part.walls) }];
     const roofs = parts
       .map((part) => part.roof)
       .filter((roof): roof is THREE.BufferGeometry => roof !== null);
     if (roofs.length > 0) groups.push({ kind: "roof", geometries: roofs });
+    // a church's cross is its own kind too: the walls keep their (stony) look
+    // and the checkbox hides just the ornament
+    if (isChurch(f.properties)) {
+      const crosses = church(originMeters, scaleFactor, buildingInfo(f));
+      if (crosses.length > 0) {
+        groups.push({ kind: "church", geometries: crosses });
+      }
+    }
     return groups;
   }
   if (f.properties.cmtype === "tree") {
@@ -102,6 +132,30 @@ export function geoJSONtoGeometries(
   if (f.properties.cmtype === "water") {
     return [{ kind: "water", geometries: water(originMeters, scaleFactor, f) }];
   }
+  if (f.properties.cmtype === "bench") {
+    return [{ kind: "bench", geometries: bench(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "green") {
+    return [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "aeroway") {
+    return [
+      { kind: "aeroway", geometries: aeroway(originMeters, scaleFactor, f) },
+    ];
+  }
+  if (f.properties.cmtype === "fence") {
+    return [{ kind: "fence", geometries: fence(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "bridge") {
+    return [
+      { kind: "bridge", geometries: bridge(originMeters, scaleFactor, f) },
+    ];
+  }
+  if (f.properties.cmtype === "tunnel") {
+    return [
+      { kind: "tunnel", geometries: tunnel(originMeters, scaleFactor, f) },
+    ];
+  }
 
   console.error("Cannot handle feature:", f);
   return [];
@@ -113,6 +167,16 @@ export function geoJSONtoGeometries(
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 // trees are lit too, so they shade with the sun instead of being flat
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+// benches are lit the same way, so their wood and metal shade
+const benchMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+// the church ornament (a cross) is lit as well, and small enough that the
+// toon material's banding would only make it flicker. A faint emissive gold
+// keeps the cross legible when its faces are turned away from the sun, which
+// is half of the bearings it is seen from.
+const churchMaterial = new THREE.MeshLambertMaterial({
+  vertexColors: true,
+  emissive: 0x4a3a12,
+});
 
 // one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
 // `period`; the piece is drawn while the phase is in [t0, t1). `times[i]` is
@@ -157,6 +221,10 @@ export interface BuildingInfo {
   roofColor?: string;
   // the fields tilegen sampled rather than read from a tag
   imputed: string[];
+  // the OSM building value and, for a place of worship, its religion: what
+  // isChurch() classifies on
+  building?: string;
+  religion?: string;
 }
 
 // a water feature for click-picking + info. Areas carry their (clipped) outer
@@ -169,6 +237,20 @@ export interface WaterInfo {
   lines: [number, number][][];
 }
 
+// a runway centreline, carried out of a tile for the airplane layer (the plane
+// paths are derived from the same line the surface is drawn from)
+export interface RunwayLine {
+  id: string;
+  coords: [number, number][];
+  width: number;
+}
+
+// an apron outline for the airplane layer, which parks static airliners on it
+export interface ApronRing {
+  id: string;
+  ring: [number, number][];
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -176,6 +258,10 @@ export interface TileObjects {
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
+  // runway centrelines; a runway spanning tiles repeats, deduped by id in main
+  runways: RunwayLine[];
+  // apron outlines, for the parked airliners; deduped by id in main
+  aprons: ApronRing[];
 }
 
 export async function objectsAt(
@@ -194,7 +280,15 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
+    return {
+      meshes: [],
+      buildings: [],
+      water: [],
+      traffic: [],
+      crossings: [],
+      runways: [],
+      aprons: [],
+    };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
   // /tiles/... path with index.html and a 200, so a permalink pointing outside
@@ -202,7 +296,15 @@ export async function objectsAt(
   // every move. Not JSON means "nothing here" as far as the map is concerned.
   if (!(response.headers.get("content-type") ?? "").includes("json")) {
     console.warn(`tile ${x}/${y} is not JSON, treating it as empty`);
-    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
+    return {
+      meshes: [],
+      buildings: [],
+      water: [],
+      traffic: [],
+      crossings: [],
+      runways: [],
+      aprons: [],
+    };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -217,6 +319,8 @@ export async function objectsAt(
   const buildings: BuildingInfo[] = [];
   const water: WaterInfo[] = [];
   const crossings: [number, number][] = [];
+  const runways: RunwayLine[] = [];
+  const aprons: ApronRing[] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
     if (cmtype === "traffic_signal" || cmtype === "crossing") {
@@ -236,6 +340,12 @@ export async function objectsAt(
       buildings.push(buildingInfo(f));
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
+    } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
+      const runway = runwayInfo(f);
+      if (runway) runways.push(runway);
+    } else if (cmtype === "aeroway" && f.properties?.aeroway === "apron") {
+      const apron = apronInfo(f);
+      if (apron) aprons.push(apron);
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
@@ -251,9 +361,23 @@ export async function objectsAt(
       const material =
         kind === "building"
           ? buildingMaterial
-          : kind === "water"
-            ? waterMaterial
-            : treeMaterial;
+          : kind === "church"
+            ? churchMaterial
+            : kind === "water"
+              ? waterMaterial
+              : kind === "green"
+                ? greenMaterial
+                : kind === "aeroway"
+                  ? aerowayMaterial
+                  : kind === "fence"
+                    ? fenceMaterial
+                    : kind === "bridge"
+                      ? bridgeMaterial
+                      : kind === "tunnel"
+                        ? tunnelMaterial
+                        : kind === "bench"
+                          ? benchMaterial
+                          : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);
@@ -265,7 +389,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, water, traffic, crossings };
+  return { meshes, buildings, water, traffic, crossings, runways, aprons };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -290,6 +414,8 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     roofShape: props.roof_shape as string | undefined,
     roofColor: props.roof_color as string | undefined,
     imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
+    building: props.building as string | undefined,
+    religion: props.religion as string | undefined,
   };
 }
 
@@ -320,6 +446,46 @@ export function waterInfo(f: Geojson.Feature): WaterInfo {
     rings,
     lines,
   };
+}
+
+// a runway centreline for the airplane layer. `id` is optional in the data;
+// tiles written by the current generator always carry one, so a missing id just
+// drops the runway rather than risking two runways merging under one key.
+export function runwayInfo(f: Geojson.Feature): RunwayLine | null {
+  const geom = f.geometry;
+  const coords: [number, number][] = [];
+  if (geom.type === "LineString") {
+    coords.push(...(geom.coordinates as [number, number][]));
+  } else if (geom.type === "MultiLineString") {
+    for (const line of geom.coordinates) {
+      coords.push(...(line as [number, number][]));
+    }
+  } else {
+    return null;
+  }
+  if (coords.length < 2 || typeof f.id !== "string") return null;
+  const props = f.properties ?? {};
+  return {
+    id: f.id,
+    coords,
+    width: Number(props.width) > 0 ? Number(props.width) : 45,
+  };
+}
+
+// an apron outline for the parked airliners. Only the outer ring is used (the
+// planes sit on the stand area, not in a courtyard); a missing id drops the
+// apron, as with runways.
+export function apronInfo(f: Geojson.Feature): ApronRing | null {
+  const geom = f.geometry;
+  let ring: [number, number][] | undefined;
+  if (geom.type === "Polygon") {
+    ring = geom.coordinates[0] as [number, number][];
+  } else if (geom.type === "MultiPolygon") {
+    const first = geom.coordinates[0];
+    if (first) ring = first[0] as [number, number][];
+  }
+  if (!ring || ring.length < 4 || typeof f.id !== "string") return null;
+  return { id: f.id, ring };
 }
 
 // the traffic block as written by tilegen (colors are "rrggbb" strings there,

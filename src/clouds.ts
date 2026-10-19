@@ -76,6 +76,11 @@ interface Cloud {
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const DEG2RAD = Math.PI / 180;
 
+// cloud tints for the day/night model; the material color is lerped between
+// them so a night sky reads as dark grey-blue rather than white
+const DAY_CLOUD = new THREE.Color(0xffffff);
+const NIGHT_CLOUD = new THREE.Color(0x36415e);
+
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
@@ -193,6 +198,13 @@ export class CloudLayer {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+  }
+
+  // Tint the clouds for the night: dim and cool, so they do not glow white over
+  // a dark city. `night` is the 0..1 factor from the day/night model.
+  setNight(night: number): void {
+    this.material.color.copy(DAY_CLOUD).lerp(NIGHT_CLOUD, night);
+    this.material.emissiveIntensity = 0.22 * (1 - 0.8 * night);
   }
 
   // originMeters/scaleFactor are the same projection origin the tiles and the

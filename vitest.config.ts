@@ -10,9 +10,11 @@ export default defineConfig({
       // only the pure modules are unit-tested; the rest of src/ is covered by
       // the Playwright smoke tests and is measured nowhere
       include: [
+        "src/daynight.ts",
         "src/traffic_math.ts",
         "src/elements3d/facade_layout.ts",
         "src/elements3d/roof_layout.ts",
+        "src/elements3d/bridge_layout.ts",
         "src/elements3d/random.ts",
       ],
       reporter: ["text"],

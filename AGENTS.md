@@ -31,6 +31,8 @@ decorative volumetric cloud layer.
   with coverage.
 - `npm run test:e2e` — Playwright smoke tests (boots the app, loads tiles).
 - `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
+- `npm run bench:gpu` — the same app in headed Chrome on the real GPU (needs a
+  display), panning/tilting/zooming; writes `perf-results/latest-gpu.json`.
 - `npm run prettify` — Prettier over `src/**.ts`. It also reformats unrelated
   lines, so prefer formatting only the files you touched.
 
@@ -61,6 +63,13 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   per-vertex `aFade`. tilegen clips water to the tile (a lake spans many tiles),
   unlike buildings; water is its own per-tile mesh (kind `water`), so the
   checkbox is a visibility switch.
+- `src/elements3d/bridge.ts` — bridges and tunnels. A bridge way becomes a
+  raised slab (deck + parapets, both ends ramped to the ground) and a
+  `man_made=bridge` footprint a flat deck slab; a tunnel becomes a dark portal
+  frame at each true way end. tilegen clips a bridge to the tile (like water) and
+  emits tunnel ends as portal Points; the underground part is not drawn. Each is
+  its own per-tile mesh (kinds `bridge` and `tunnel`), so the single "bridges &
+  tunnels" checkbox is a visibility switch.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
   drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
@@ -68,6 +77,15 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   or more than `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks
   up on them. `src/elements3d/random.ts` holds the seeded PRNG and hash shared by
   the facade and roof code.
+- `src/elements3d/church.ts` — the church look. `isChurch` classifies a
+  building from the tile's `building`/`religion` tags (tilegen only reports
+  them: a church is an ordinary `building=*` polygon). A church whose color OSM
+  left out takes a seeded stone/ochre wall and a slate roof, its roof is forced
+  gabled and `CHURCH_PITCH` (1.3x) steeper, and `church()` builds a gold cross
+  on the ridge from the same `roofPlan` the roof uses, so it neither floats nor
+  sinks; a footprint too complex to roof keeps its flat cap and the cross stands
+  just above it. The cross is its own per-tile kind (`church`), so its checkbox
+  hides just the ornament.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; the only fleet renderer.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
@@ -97,6 +115,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `traffic_signal`, `crossing` (the road/rail network is
   not emitted; routes come from `traffic`).
+- **church** — a building whose tile tags make `isChurch` true (`building` is
+  church/chapel/cathedral/..., or a place of worship with a Christian religion).
+  It is also the name of the per-tile kind holding just its cross, so the
+  church-crosses checkbox leaves the walls to the building layer.
 - **fleet** — a `TrafficRenderer`; everything the traffic block holds.
 - **loop** — a closed walk of the road (or rail) graph; the unit of precomputed
   traffic.
@@ -134,11 +156,20 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
-- **layer** — the OSM vertical position of water or a road, carried as a tile's
-  `layer` property: `layer` when set (Seveso is `layer=-2`, a bridge `layer=1`),
-  else `level` as a fallback; negative is below ground. Water below 0 is drawn
-  faint (`UNDERWATER_OPACITY`); tilegen only reports road positions, recorded for
-  a future bridge pass (roads are not emitted).
+- **layer** — the OSM vertical position of water, a bridge or a tunnel, carried
+  as a tile's `layer` property: `layer` when set (Seveso is `layer=-2`, a bridge
+  `layer=1`), else `level` as a fallback; negative is below ground. Water below 0
+  is drawn faint (`UNDERWATER_OPACITY`); a bridge's layer is its deck-height
+  proxy; tilegen reports the road positions it finds.
+- **bridge** — a `bridge=*` way (on a highway or railway) or a `man_made=bridge` /
+  `building=bridge` footprint, emitted as `cmtype` `bridge` and clipped to the
+  tile. The frontend raises a way into a slab and a footprint into a flat deck.
+- **tunnel / portal** — a `tunnel=yes` road or rail way; a tunnel is underground
+  and invisible, so only its **portal** (a dark frame at each true way end) is
+  drawn. tilegen emits the ends as `cmtype` `tunnel` Points (never the clipped
+  line, which would put a portal on every tile boundary); footway/step
+  underpasses, culverts and building passages get none, and a buried waterway
+  stays water.
 - **imputed tag** — a building's `color` / `roof_shape` / `roof_color` when OSM
   leaves them out: `tilegen/impute.py` draws one from the observed distribution
   of that tag in the same extract, seeded from the building id. The frontend
@@ -164,8 +195,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
   are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
-  `#imputed-colors-toggle`. Windows, balconies, roofs and water are their own
-  meshes, so those are plain visibility switches; imputed colors are baked into
-  the geometry, so changing that one reloads the loaded tiles.
+  `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
+  `#fences-toggle`, `#bridges-toggle`, `#imputed-colors-toggle`. Windows,
+  balconies, roofs, water, benches, church crosses, parks, airplanes, fences and
+  bridges & tunnels are their own meshes, so those are plain visibility
+  switches; imputed colors are baked into the geometry, so changing that one
+  reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

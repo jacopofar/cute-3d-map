@@ -92,6 +92,36 @@ def test_to_building_levels_fallback():
     assert f["properties"]["height"] == 12.0
 
 
+def test_to_building_reports_the_building_value_and_religion():
+    # the frontend needs to know a polygon is a church: `building` always, and
+    # `religion` for a place of worship
+    church = main.to_building(
+        11,
+        {
+            "building": "church",
+            "amenity": "place_of_worship",
+            "religion": "christian",
+        },
+        geom(POLYGON),
+    )
+    assert church is not None
+    assert church["properties"]["building"] == "church"
+    assert church["properties"]["religion"] == "christian"
+
+    # a plain apartment block carries the value but no religion
+    flats = main.to_building(12, {"building": "apartments"}, geom(POLYGON))
+    assert flats is not None
+    assert flats["properties"]["building"] == "apartments"
+    assert "religion" not in flats["properties"]
+
+    # religion outside a place of worship is not what the frontend keys on
+    hotel = main.to_building(
+        13, {"building": "hotel", "religion": "christian"}, geom(POLYGON)
+    )
+    assert hotel is not None
+    assert "religion" not in hotel["properties"]
+
+
 def test_to_building_skips_non_polygon():
     assert main.to_building(3, {"building": "yes"}, geom("POINT (0 0)")) is None
 
@@ -148,6 +178,75 @@ def test_to_stop_points_are_point_only():
         main.to_crossing(10, {"highway": "crossing"}, geom("LINESTRING (0 0, 1 1)"))
         is None
     )
+
+
+def test_bench_direction_maps_compass_and_degrees():
+    for value, expected in (("N", 0.0), ("E", 90.0), ("S", 180.0), ("W", 270.0)):
+        assert main.bench_direction({"direction": value}) == expected
+        # OSM is inconsistent about the case
+        assert main.bench_direction({"direction": value.lower()}) == expected
+    assert main.bench_direction({"direction": "135"}) == 135.0
+    assert main.bench_direction({"direction": "450"}) == 90.0  # normalized
+    # these relate to a nearby way, which the tiles do not carry
+    assert main.bench_direction({"direction": "parallel"}) is None
+    assert main.bench_direction({"direction": "perpendicular"}) is None
+    assert main.bench_direction({}) is None
+
+
+def test_line_bearing_is_a_compass_bearing():
+    # a due-east line is 90 degrees, a due-north one 0
+    east = main.line_bearing(geom("LINESTRING (9.18 45.5, 9.181 45.5)"))
+    north = main.line_bearing(geom("LINESTRING (9.18 45.5, 9.18 45.501)"))
+    assert east is not None and round(east) == 90
+    assert north is not None and round(north) == 0
+    # a zero-length line has no direction
+    assert main.line_bearing(geom("LINESTRING (9.18 45.5, 9.18 45.5)")) is None
+
+
+def test_to_bench_point_keeps_the_direction():
+    f = main.to_bench(
+        11, {"amenity": "bench", "direction": "N"}, geom("POINT (9.18 45.5)")
+    )
+    assert f is not None
+    assert f["properties"] == {"cmtype": "bench", "direction": 0.0}
+    # no direction tag -> no direction key, so the frontend picks its own
+    plain = main.to_bench(12, {"amenity": "bench"}, geom("POINT (9.18 45.5)"))
+    assert plain is not None
+    assert plain["properties"] == {"cmtype": "bench"}
+
+
+def test_to_bench_line_collapses_to_the_midpoint():
+    line = geom("LINESTRING (9.18 45.5, 9.19 45.5)")
+    f = main.to_bench(13, {"amenity": "bench"}, line)
+    assert f is not None
+    # the facing follows the line when the tag does not give one
+    assert round(f["properties"]["direction"]) == 90
+    lon, lat = f["geometry"]["coordinates"]
+    assert f["geometry"]["type"] == "Point"
+    assert round(lon, 4) == 9.185 and round(lat, 4) == 45.5
+    # a tag wins over the line
+    tagged = main.to_bench(14, {"amenity": "bench", "direction": "W"}, line)
+    assert tagged is not None
+    assert tagged["properties"]["direction"] == 270.0
+
+
+def test_to_bench_ignores_odd_geometry():
+    # the extract has one Polygon bench that must not abort the tile
+    assert (
+        main.to_bench(15, {"amenity": "bench"}, geom("POLYGON ((0 0, 1 0, 1 1, 0 0))"))
+        is None
+    )
+
+
+def test_tile_to_geojson_includes_benches():
+    bench = shapely.to_wkb(geom("POINT (9.19 45.497)"))
+    polygon = shapely.to_wkb(geom("POLYGON ((0 0, 1 0, 1 1, 0 0))"))
+    data = [
+        (1, {"amenity": "bench"}, bench),
+        (2, {"amenity": "bench"}, polygon),
+    ]
+    render, _raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["bench"]
 
 
 def test_tile_lonlat_bounds_contains_center():
@@ -294,6 +393,66 @@ def test_to_water_ignores_a_non_channel_waterway():
     assert main.to_water(4, {"waterway": "weir"}, line, box) is None
 
 
+def test_to_fence_clips_a_line_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a fence running across the tile and out both sides
+    line = shapely.LineString(
+        [(min_lon - 0.001, max_lat - 0.001), (max_lon + 0.001, max_lat - 0.001)]
+    )
+    f = main.to_fence(1, {"barrier": "fence"}, line, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "fence", "barrier": "fence"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "LineString"
+    assert round(clipped.bounds[0], 9) == round(min_lon, 9)
+    # a fence outside the tile is dropped
+    away = shapely.LineString(
+        [(max_lon + 0.01, max_lat + 0.01), (max_lon + 0.02, max_lat + 0.01)]
+    )
+    assert main.to_fence(2, {"barrier": "fence"}, away, box) is None
+
+
+def test_to_fence_takes_a_fenced_area_outline():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a barrier closed into an area: the fence is its outline
+    area = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    f = main.to_fence(3, {"barrier": "fence"}, area, box)
+    assert f is not None
+    assert shapely.from_geojson(json.dumps(f["geometry"])).equals(box.boundary)
+    # a guard rail rides along with the same shape, for the frontend to color
+    rail = main.to_fence(4, {"barrier": "guard_rail"}, area, box)
+    assert rail is not None
+    assert rail["properties"]["barrier"] == "guard_rail"
+
+
+def test_to_fence_drops_slivers_and_ignores_other_barriers():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a line just poking into the tile leaves only a stub, which is dropped
+    stub = shapely.LineString(
+        [(min_lon - 0.0005, min_lat + 0.0005), (min_lon + 0.0000001, min_lat + 0.0005)]
+    )
+    assert main.to_fence(5, {"barrier": "fence"}, stub, box) is None
+    # a wall or a gate is not a fence
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    assert main.to_fence(6, {"barrier": "wall"}, line, box) is None
+    assert main.to_fence(7, {"barrier": "gate"}, line, box) is None
+
+
+def test_to_fence_keeps_the_name():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    named = main.to_fence(8, {"barrier": "fence", "name": "Recinto"}, line, box)
+    assert named is not None
+    assert named["properties"]["name"] == "Recinto"
+    plain = main.to_fence(9, {"barrier": "fence"}, line, box)
+    assert plain is not None
+    assert "name" not in plain["properties"]
+
+
 def test_tile_to_geojson_includes_water():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     cx = (min_lon + max_lon) / 2
@@ -311,6 +470,300 @@ def test_tile_to_geojson_includes_water():
     assert [f["properties"]["cmtype"] for f in render] == ["water"]
     assert render[0]["properties"]["water"] == "lake"
     assert len(raw) == 1
+
+
+def test_green_kind_classifies_the_two_styles():
+    # mown lawn / pitch / garden
+    assert main.green_kind({"landuse": "grass"}) == "grass"
+    assert main.green_kind({"landuse": "village_green"}) == "grass"
+    assert main.green_kind({"landuse": "meadow"}) == "grass"
+    assert main.green_kind({"natural": "grassland"}) == "grass"
+    assert main.green_kind({"leisure": "pitch"}) == "grass"
+    assert main.green_kind({"leisure": "garden"}) == "grass"
+    # park / wood / scrub
+    assert main.green_kind({"leisure": "park"}) == "dense"
+    assert main.green_kind({"leisure": "nature_reserve"}) == "dense"
+    assert main.green_kind({"natural": "wood"}) == "dense"
+    assert main.green_kind({"natural": "scrub"}) == "dense"
+    assert main.green_kind({"natural": "heath"}) == "dense"
+    assert main.green_kind({"landuse": "forest"}) == "dense"
+    assert main.green_kind({"landuse": "orchard"}) == "dense"
+    # farmland is deliberately not green (it would cover the whole province)
+    assert main.green_kind({"landuse": "farmland"}) is None
+    assert main.green_kind({"natural": "farmland"}) is None
+    assert main.green_kind({"building": "yes"}) is None
+
+
+def test_to_green_clips_a_park_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a park much larger than the tile, centred on it
+    park = shapely.box(min_lon - 1, min_lat - 1, max_lon + 1, max_lat + 1)
+    f = main.to_green(1, {"leisure": "park", "name": "Parco"}, park, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "green", "green": "dense", "name": "Parco"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.equals(box)
+
+
+def test_to_green_drops_a_sliver_below_the_area_threshold():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # ~2 m x 2 m: a few square meters, below MIN_GREEN_AREA
+    step = 2.0 / 111320.0
+    sliver = shapely.box(
+        min_lon + 0.001, min_lat + 0.001, min_lon + 0.001 + step, min_lat + 0.001 + step
+    )
+    assert main.to_green(2, {"landuse": "grass"}, sliver, box) is None
+    # a proper lawn is kept, and reports the grass style
+    lawn = shapely.box(min_lon + 1e-4, min_lat + 1e-4, min_lon + 4e-4, min_lat + 4e-4)
+    kept = main.to_green(3, {"landuse": "grass"}, lawn, box)
+    assert kept is not None
+    assert kept["properties"]["green"] == "grass"
+
+
+def test_to_green_ignores_non_area_geometries():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    assert main.to_green(4, {"leisure": "park"}, line, box) is None
+    # a feature that is not green at all is ignored
+    assert main.to_green(5, {"building": "yes"}, box, box) is None
+
+
+def test_tile_to_geojson_adds_green_after_water():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    polygon = shapely.to_wkb(
+        geom(
+            "POLYGON (("
+            f"{cx} {cy}, {cx + 2e-4} {cy}, {cx + 2e-4} {cy + 2e-4}, "
+            f"{cx} {cy + 2e-4}, {cx} {cy}))"
+        )
+    )
+    data = [
+        # a wetland that also carries landuse=grass stays water: the water
+        # branch runs first, so no green is emitted for it
+        (1, {"natural": "wetland", "landuse": "grass"}, polygon),
+        (2, {"leisure": "park"}, polygon),
+    ]
+    render, _raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["water", "green"]
+    assert render[1]["properties"]["green"] == "dense"
+
+
+def test_to_aeroway_line_keeps_the_whole_geometry_and_a_default_width():
+    line = geom("LINESTRING (9.27 45.44, 9.28 45.45)")
+    f = main.to_aeroway(1, {"aeroway": "runway"}, line)
+    assert f is not None
+    assert f["properties"] == {
+        "cmtype": "aeroway",
+        "aeroway": "runway",
+        "width": 45.0,
+    }
+    # the whole line is stored (not clipped) and the feature keeps its id, so
+    # the frontend can dedupe a runway that spans tiles
+    assert f["id"] == 1
+    assert shapely.from_geojson(json.dumps(f["geometry"])).equals(line)
+
+
+def test_to_aeroway_uses_the_width_tag():
+    line = geom("LINESTRING (0 0, 1 1)")
+    f = main.to_aeroway(2, {"aeroway": "taxiway", "width": "7.5"}, line)
+    assert f is not None
+    assert f["properties"]["width"] == 7.5
+
+
+def test_to_aeroway_areas_and_helipad():
+    area = geom(POLYGON)
+    apron = main.to_aeroway(3, {"aeroway": "apron"}, area)
+    assert apron is not None
+    # an area carries no width: its extent is the polygon
+    assert apron["properties"] == {"cmtype": "aeroway", "aeroway": "apron"}
+    # a helipad mapped as a node has nothing to draw
+    assert main.to_aeroway(4, {"aeroway": "helipad"}, geom("POINT (9.2 45.5)")) is None
+
+
+def test_to_aeroway_ignores_other_aeroway_kinds():
+    assert main.to_aeroway(5, {"aeroway": "hangar"}, geom(POLYGON)) is None
+    # a runway that came through as an area is dropped rather than ribboned
+    assert main.to_aeroway(6, {"aeroway": "runway"}, geom(POLYGON)) is None
+
+
+def test_tile_to_geojson_includes_aeroway():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    runway = shapely.to_wkb(geom(f"LINESTRING ({cx} {cy}, {cx + 1e-4} {cy + 1e-4})"))
+    render, raw = main.tile_to_geojson(
+        [(1, {"aeroway": "runway"}, runway)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["aeroway"]
+    assert render[0]["properties"]["aeroway"] == "runway"
+    assert len(raw) == 1
+
+
+def test_tile_to_geojson_includes_fence():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    line = shapely.to_wkb(
+        geom(
+            f"LINESTRING ({min_lon + 1e-4} {min_lat + 1e-4}, "
+            f"{max_lon - 1e-4} {max_lat - 1e-4})"
+        )
+    )
+    render, raw = main.tile_to_geojson(
+        [(1, {"barrier": "fence"}, line)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["fence"]
+    assert render[0]["properties"]["barrier"] == "fence"
+    assert len(raw) == 1
+
+
+def test_is_bridge_and_tunnel_tags():
+    assert main.is_bridge({"bridge": "yes", "highway": "residential"})
+    assert main.is_bridge({"bridge": "viaduct", "railway": "rail"})
+    assert main.is_bridge({"man_made": "bridge"})
+    assert main.is_bridge({"building": "bridge"})
+    assert not main.is_bridge({"bridge": "no", "highway": "residential"})
+    assert not main.is_bridge({"building": "yes"})
+    # a bridge tag on a way with no road/rail class is not a carried deck
+    assert not main.is_bridge({"bridge": "yes"})
+    assert main.is_tunnel({"tunnel": "yes"})
+    assert not main.is_tunnel({"tunnel": "no"})
+    # a drain and an arcade are not the road tunnels the user means
+    assert not main.is_tunnel({"tunnel": "culvert"})
+    assert not main.is_tunnel({"tunnel": "building_passage"})
+    assert not main.is_tunnel({})
+
+
+def test_transport_class_prefers_highway_then_railway():
+    assert main.transport_class({"highway": "primary"}) == "primary"
+    assert main.transport_class({"railway": "rail"}) == "rail"
+    assert main.transport_class({}) is None
+
+
+def test_to_bridge_clips_a_line_and_carries_the_class():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(min_lon - 0.001, cy), (max_lon + 0.001, cy)])
+    f = main.to_bridge(
+        1, {"bridge": "yes", "highway": "primary", "layer": "1"}, line, box
+    )
+    assert f is not None
+    assert f["properties"]["cmtype"] == "bridge"
+    assert f["properties"]["class"] == "primary"
+    assert f["properties"]["bridge"] == "yes"
+    assert f["properties"]["layer"] == 1
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "LineString"
+    assert round(clipped.bounds[0], 9) == round(min_lon, 9)
+
+
+def test_to_bridge_accepts_a_deck_polygon_and_defaults_its_value():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    deck = shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4)
+    f = main.to_bridge(2, {"man_made": "bridge"}, deck, box)
+    assert f is not None
+    assert f["properties"]["cmtype"] == "bridge"
+    # a footprint with no `bridge` value still names itself
+    assert f["properties"]["bridge"] == "deck"
+    # and no class: the footprint is not a carried way
+    assert "class" not in f["properties"]
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "Polygon"
+
+
+def test_to_tunnel_emits_a_portal_only_at_an_inside_end():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cy = (min_lat + max_lat) / 2
+    cx = (min_lon + max_lon) / 2
+    # one end inside the tile, the other outside: exactly one portal
+    line = shapely.LineString([(cx, cy), (max_lon + 0.005, cy)])
+    portals = main.tunnel_portals(line, box)
+    assert len(portals) == 1
+    point, angle = portals[0]
+    assert point.equals(shapely.Point(cx, cy))
+    assert round(angle, 6) == 0.0  # the neighbour is due east
+    # both ends inside -> two portals
+    inside = shapely.LineString([(cx, cy), (cx + 1e-4, cy)])
+    assert len(main.tunnel_portals(inside, box)) == 2
+    # the tunnel merely passes under the tile -> nothing
+    under = shapely.LineString([(min_lon - 0.005, cy), (max_lon + 0.005, cy)])
+    assert main.tunnel_portals(under, box) == []
+
+
+def test_to_tunnel_features_carry_layer_and_angle():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(cx, cy), (cx + 1e-4, cy + 1e-4)])
+    features = main.to_tunnel(
+        3, {"tunnel": "yes", "railway": "rail", "layer": "-1"}, line, box
+    )
+    assert len(features) == 2
+    assert all(f["properties"]["cmtype"] == "tunnel" for f in features)
+    assert all(f["properties"]["class"] == "rail" for f in features)
+    assert all(f["properties"]["layer"] == -1 for f in features)
+    assert all("angle" in f["properties"] for f in features)
+
+
+def test_tile_to_geojson_routes_building_bridge_to_a_deck():
+    # building=bridge used to get a full house treatment; now it is a bridge
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    deck = shapely.to_wkb(shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4))
+    render, _raw = main.tile_to_geojson(
+        [(1, {"building": "bridge"}, deck)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["bridge"]
+
+
+def test_tile_to_geojson_keeps_a_normal_building():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    building = shapely.to_wkb(shapely.box(cx - 1e-4, cy - 1e-4, cx + 1e-4, cy + 1e-4))
+    render, _raw = main.tile_to_geojson(
+        [(1, {"building": "yes"}, building)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["building"]
+
+
+def test_to_tunnel_skips_pedestrian_underpasses():
+    # a footway underpass is technically a tunnel but not the one the user means
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    line = shapely.LineString([(cx, cy), (cx + 1e-4, cy)])
+    assert main.to_tunnel(4, {"tunnel": "yes", "highway": "footway"}, line, box) == []
+    assert main.to_tunnel(5, {"tunnel": "yes", "highway": "steps"}, line, box) == []
+
+
+def test_tile_to_geojson_keeps_a_culverted_river_as_water():
+    # a buried waterway carries tunnel=yes but is not a road tunnel: it must
+    # still be drawn as water, not dropped or turned into a portal
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cy = (min_lat + max_lat) / 2
+    river = shapely.to_wkb(
+        geom(f"LINESTRING ({min_lon - 0.001} {cy}, {max_lon + 0.001} {cy})")
+    )
+    render, _raw = main.tile_to_geojson(
+        [(1, {"waterway": "river", "tunnel": "yes", "layer": "-2"}, river)],
+        17220,
+        11723,
+        15,
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["water"]
+    assert render[0]["properties"]["water"] == "river"
 
 
 def test_crossing_points_from_rows_keeps_points_only():

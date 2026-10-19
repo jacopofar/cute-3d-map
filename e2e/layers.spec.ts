@@ -121,10 +121,172 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
   expect(windowsHidden).toBeGreaterThan(0);
   await page.click("#windows-toggle input");
 
+  // fences ride on the same zoom gate, so the jump above is what shows them
+  await expect
+    .poll(async () => (await countMeshes(page, "fence")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+  expect((await countMeshes(page, "fence")).visible).toBeGreaterThan(0);
+  await page.click("#fences-toggle input");
+  expect((await countMeshes(page, "fence")).visible).toBe(0);
+  await page.click("#fences-toggle input");
+  expect((await countMeshes(page, "fence")).visible).toBeGreaterThan(0);
+
   // and the chevron folds the list away again
   await page.click("#layer-menu-collapse");
   await expect(page.locator("#layer-menu-panel")).toBeHidden();
   await expect(page.locator("#layer-menu-button")).toBeVisible();
 
   expect(errors).toEqual([]);
+});
+
+// read the day/night state the app exposes, plus the window shader's night
+// uniform (via the shared material on a windows mesh)
+const readDayNight = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    let uNight = null;
+    map.customLayer.scene.traverse((object: any) => {
+      if (object.userData?.group !== "windows") return;
+      const value = object.material?.uniforms?.uNight?.value;
+      if (typeof value === "number") uNight = value;
+    });
+    return { ...map.lightingState(), uNight };
+  });
+
+test("the night toggle darkens the scene and lights the windows", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("https://api.maptiler.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(EMPTY_STYLE),
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+
+  // open the layers menu (the checkboxes are behind the gear)
+  await page.click("#layer-menu-button");
+  await expect(page.locator("#night-toggle")).toBeVisible();
+
+  // The app opens on the current sun over Milan, so the starting hour is not a
+  // constant; pin it to solar noon for the day assertions.
+  const opening = await readDayNight(page);
+  expect(opening.hour).toBeGreaterThanOrEqual(0);
+  expect(opening.hour).toBeLessThan(24);
+  await page.fill("#time-slider", "12");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(0);
+
+  // solar noon: no night, a bright key light, the checkbox off
+  const day = await readDayNight(page);
+  expect(day.hour).toBe(12);
+  expect(day.night).toBe(0);
+  expect(day.sunIntensity).toBeGreaterThan(2);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(false);
+
+  // the night checkbox is the shortcut: it jumps to 01:00
+  await page.click("#night-toggle input");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(1);
+  const night = await readDayNight(page);
+  expect(night.hour).toBe(1);
+  expect(night.sunIntensity).toBeLessThan(0.5);
+
+  // the window meshes use the shader material, so the uniform reaches them:
+  // zoom in so the facade detail exists, then confirm uNight is night
+  await page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    map.map.jumpTo({ zoom: 18 });
+  });
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          let total = 0;
+          map.customLayer.scene.traverse((object: any) => {
+            if (object.userData?.group === "windows") total += 1;
+          });
+          return total;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
+  expect((await readDayNight(page)).uNight).toBe(1);
+
+  // the slider drives the same model and syncs the checkbox back
+  await page.fill("#time-slider", "12");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(0);
+  expect((await readDayNight(page)).uNight).toBe(0);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(false);
+  await page.fill("#time-slider", "22");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(1);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(true);
+
+  expect(errors).toEqual([]);
+});
+
+// a bridge way and a `man_made=bridge` deck over the Naviglio Grande; the tile
+// set must have been regenerated with the bridge/tunnel pass for this to find
+// any (see tilegen/main.py)
+test("the bridges & tunnels toggle hides the deck and portal meshes", async ({
+  page,
+}) => {
+  await page.goto("/#map=19/45.4503/9.16786");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+  await expect
+    .poll(async () => (await countMeshes(page, "bridge")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+
+  await page.click("#layer-menu-button");
+  expect((await countMeshes(page, "bridge")).visible).toBeGreaterThan(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "bridge")).visible).toBe(0);
+  expect((await countMeshes(page, "tunnel")).visible).toBe(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "bridge")).visible).toBeGreaterThan(0);
+});
+
+// the rail throat where the tracks dive under the city: the tunnel ways' ends
+// become dark portal frames
+test("a tunnel end draws a portal that the toggle can hide", async ({
+  page,
+}) => {
+  await page.goto("/#map=19/45.48855/9.16085");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+  await expect
+    .poll(async () => (await countMeshes(page, "tunnel")).total, {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0);
+
+  await page.click("#layer-menu-button");
+  expect((await countMeshes(page, "tunnel")).visible).toBeGreaterThan(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "tunnel")).visible).toBe(0);
+  await page.click("#bridges-toggle input");
+  expect((await countMeshes(page, "tunnel")).visible).toBeGreaterThan(0);
 });

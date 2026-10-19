@@ -85,6 +85,16 @@ body {
   user-select: none;
 }
 
+/* the time slider is wider than the checkboxes; let it use the panel width */
+#layer-menu-panel .slider-row {
+  cursor: default;
+}
+
+#layer-menu-panel .slider-row input[type="range"] {
+  flex: 1;
+  min-width: 110px;
+}
+
 .help-button {
   width: 16px;
   height: 16px;

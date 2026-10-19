@@ -168,10 +168,13 @@ export function ridgeExtent(
   return [min + inset, max - inset];
 }
 
-// the whole roof plan for one footprint, or null when it stays flat
+// the whole roof plan for one footprint, or null when it stays flat. `pitch`
+// scales the rise, so a caller can ask for a steeper roof (a church) while
+// still building the plan the ridge height is read from.
 export function roofPlan(
   ring: [number, number][],
   kind: RoofKind,
+  pitch = 1,
 ): PreparedRoof | null {
   if (kind === "flat") return null;
   const frame = roofFrame(ring);
@@ -181,5 +184,11 @@ export function roofPlan(
     frame.alongMax,
     frame.width,
   );
-  return { kind, frame, ridgeMin, ridgeMax, rise: roofRise(frame.width) };
+  return {
+    kind,
+    frame,
+    ridgeMin,
+    ridgeMax,
+    rise: roofRise(frame.width) * pitch,
+  };
 }

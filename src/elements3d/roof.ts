@@ -83,6 +83,8 @@ export function roofGeometry(
   scaleFactor: number,
   shape: string | undefined,
   roofColor: string | undefined,
+  // a steeper-than-default roof, for a caller that wants one (a church)
+  pitch = 1,
 ): THREE.BufferGeometry | null {
   // a courtyard (any inner ring) would be covered by a roof built over the outer
   // ring alone, so those stay flat
@@ -92,7 +94,7 @@ export function roofGeometry(
   );
   if (!outline || outline.length < 3) return null;
   const points = outline;
-  const roof = roofPlan(points, roofKind(shape));
+  const roof = roofPlan(points, roofKind(shape), pitch);
   if (!roof) return null;
 
   const positions: number[] = [];

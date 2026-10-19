@@ -46,7 +46,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water).
+   water, church).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -80,11 +80,30 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes**, **water** and **imputed colors** on and off, with a question
-mark beside the last one explaining what imputation means. All but imputed
-colors are mesh visibility switches (water's is all-or-nothing: unchecked, no
-water is drawn); imputed colors are baked into the geometry and so reload the
+**roof shapes**, **water**, **church crosses** and **imputed colors** on and off,
+with a question mark beside the last one explaining what imputation means. All but
+imputed colors are mesh visibility switches (water's is all-or-nothing: unchecked,
+no water is drawn); imputed colors are baked into the geometry and so reload the
 loaded tiles.
+
+### Churches
+
+A church is an ordinary `building=*` polygon in OSM, so tilegen reports the
+`building` value (and `religion` for an `amenity=place_of_worship`), and the
+frontend does the classifying (`isChurch` in `src/elements3d/church.ts`):
+`church`, `cathedral`, `chapel`, `basilica`, `abbey`, `monastery`, or a place of
+worship with a `christian`/`christian:*` religion.
+
+A church gets a different look from the apartment blocks around it: when OSM has
+no `building:colour` for it, its walls take a seeded warm stone/ochre tone (a real
+tagged color still wins), when OSM has no `roof:colour` the roof is slate, and the
+roof is forced gabled and pitched 1.3× steeper than the default — a footprint too
+complex for a pitched roof (a courtyard, a concave outline) stays flat, as it does
+for any building. A **gold cross** (3 m, up to 6 m on a cathedral-sized footprint)
+stands on the ridge, or just above the cap of a flat roof; its arms follow the
+ridge, so it reads as a cross from the side of the church. The cross is its own
+per-tile mesh (kind `church`), so the **church crosses** checkbox hides the
+ornament and leaves the church walls as buildings.
 
 ### Water
 
@@ -112,8 +131,31 @@ marks this with a negative **`layer`** (the tunnel/bridge ordering — Seveso is
 `aFade` attribute, so a tile's merged water mesh can mix surface and underwater
 features. tilegen emits the effective vertical position as the feature's `layer`
 and reports the positions it finds: water below 0 (the ones that fade) and roads
-above 0 (bridges, recorded for a future pass; the road network itself is not
+above 0 (bridges; see *Bridges and tunnels* below; the road network itself is not
 emitted).
+
+### Bridges and tunnels
+
+The road and rail network is not emitted (the vehicle routes are precomputed
+separately), so a bridge would otherwise be invisible: the road it carries does
+not exist as geometry. tilegen therefore emits the bridge ways themselves
+(`bridge` set and not `no`, on a highway or railway) and the `man_made=bridge` /
+`building=bridge` deck footprints as `cmtype: "bridge"`, clipped to the tile like
+water. The frontend raises them into a slab (`src/elements3d/bridge.ts`): a deck
+at `h = max(4, 4.5 * layer)` m with a parapet on each edge and both ends ramped
+back to the ground over ~15 m, so the deck meets the basemap road instead of
+ending in mid-air. The deck width comes from the `highway`/`railway` class.
+
+A tunnel is underground and invisible, so the only honest, visible thing is its
+**portal**: tilegen emits a Point (`cmtype: "tunnel"`) at each true end of a
+tunnel way that falls in the tile, and the frontend draws a dark frame (two
+pillars and a lintel) around the opening there. The ends are the true ones, not
+the tile-clipped ones, so no portal appears on an arbitrary tile boundary. Only
+roads and railways get one — the extract's thousands of `tunnel=yes` footway and
+step underpasses, and culverts/building passages, are left out — and a buried
+waterway is still drawn as water. **The underground part is deliberately not
+drawn.** Both kinds are per-tile meshes, so the **bridges & tunnels** checkbox is
+a plain visibility switch.
 
 ### Precomputed traffic
 
@@ -263,6 +305,16 @@ total long-task time. The WebGL renderer string is recorded too: headless CI has
 no GPU and runs on SwiftShader, where the app is rasterizer bound and absolute
 fps is far lower than on a device — so read the numbers as relative, and compare
 like with like.
+
+For a realistic number, `npm run bench:gpu` runs `perf/interactive.spec.ts`
+through `playwright.gpu.config.ts`: the installed Google Chrome, headed with GPU
+rasterization, on a 1280x800 viewport. After a warm-up long enough to load tiles
+and build the facade detail, it measures three phases — pan (large enough to
+cross the tile grid), tilt, and zoom (across the facade-detail threshold) — and
+writes `perf-results/latest-gpu.json`. It needs a display and a GPU; without one
+Chrome falls back to software and the `renderer` field in the result says so.
+The pan/zoom numbers include the app's debounced tile/detail pass, so they
+reflect the hitches a user feels, not just steady-state fill.
 
 Results are written to `perf-results/latest.json` (gitignored) as well as
 printed, so a run can be kept next to a commit. Two gotchas when comparing:
