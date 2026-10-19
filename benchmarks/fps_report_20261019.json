@@ -1,0 +1,824 @@
+{
+  "when": "2026-10-19T18:17:01.295Z",
+  "renderer": "ANGLE (Intel, Mesa Intel(R) Graphics (ARL), OpenGL ES 3.2)",
+  "view": {
+    "center": [
+      9.1919,
+      45.4641
+    ],
+    "zoom": 18.5,
+    "pitch": 30
+  },
+  "method": "render-call FPS, small pan+zoom inside the loaded centre, vsync off, A/B/A per feature",
+  "baseline": [
+    {
+      "frames": 390,
+      "fps": 75.1,
+      "p50": 11.8,
+      "fpsP50": 84.7,
+      "p90": 18.5,
+      "stats": {
+        "meshes": 446,
+        "drawCalls": 46,
+        "triangles": 2226452,
+        "parkedCars": 59282,
+        "facadeVertices": 5136342
+      }
+    },
+    {
+      "frames": 455,
+      "fps": 87.4,
+      "p50": 10.4,
+      "fpsP50": 96.2,
+      "p90": 14.2,
+      "stats": {
+        "meshes": 446,
+        "drawCalls": 46,
+        "triangles": 2226452,
+        "parkedCars": 59282,
+        "facadeVertices": 5136342
+      }
+    },
+    {
+      "frames": 409,
+      "fps": 78.9,
+      "p50": 11.2,
+      "fpsP50": 89.3,
+      "p90": 17.4,
+      "stats": {
+        "meshes": 446,
+        "drawCalls": 46,
+        "triangles": 2226452,
+        "parkedCars": 59282,
+        "facadeVertices": 5136342
+      }
+    }
+  ],
+  "results": [
+    {
+      "feature": "traffic",
+      "fpsOn": 81.8,
+      "fpsOff": 140.5,
+      "deltaFps": -58.7,
+      "fpsOnP50": 93.2,
+      "fpsOffP50": 2500,
+      "deltaFpsP50": -2406.8,
+      "onBefore": {
+        "frames": 408,
+        "fps": 78.8,
+        "p50": 11.1,
+        "fpsP50": 90.1,
+        "p90": 17.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 755,
+        "fps": 140.5,
+        "p50": 0.4,
+        "fpsP50": 2500,
+        "p90": 0.8,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 44,
+          "triangles": 2062244,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 440,
+        "fps": 84.8,
+        "p50": 10.4,
+        "fpsP50": 96.2,
+        "p90": 17.1,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "clouds",
+      "fpsOn": 88.4,
+      "fpsOff": 90,
+      "deltaFps": -1.6,
+      "fpsOnP50": 96.7,
+      "fpsOffP50": 97.1,
+      "deltaFpsP50": -0.4,
+      "onBefore": {
+        "frames": 466,
+        "fps": 89.9,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 13.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 468,
+        "fps": 90,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 13.2,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 450,
+        "fps": 86.8,
+        "p50": 10.4,
+        "fpsP50": 96.2,
+        "p90": 14.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "windows",
+      "fpsOn": 86.2,
+      "fpsOff": 85.1,
+      "deltaFps": 1.1,
+      "fpsOnP50": 94.4,
+      "fpsOffP50": 97.1,
+      "deltaFpsP50": -2.7,
+      "onBefore": {
+        "frames": 443,
+        "fps": 85.6,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 14.2,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 442,
+        "fps": 85.1,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 17.2,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 40,
+          "triangles": 1510468,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 450,
+        "fps": 86.7,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 14,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "balconies",
+      "fpsOn": 73.1,
+      "fpsOff": 84.5,
+      "deltaFps": -11.4,
+      "fpsOnP50": 81.3,
+      "fpsOffP50": 95.2,
+      "deltaFpsP50": -13.9,
+      "onBefore": {
+        "frames": 375,
+        "fps": 72.5,
+        "p50": 12.5,
+        "fpsP50": 80,
+        "p90": 19.9,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 439,
+        "fps": 84.5,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 15.8,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 40,
+          "triangles": 1869112,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 382,
+        "fps": 73.7,
+        "p50": 12.1,
+        "fpsP50": 82.6,
+        "p90": 19.5,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "roof shapes",
+      "fpsOn": 77.8,
+      "fpsOff": 81.8,
+      "deltaFps": -4,
+      "fpsOnP50": 87.5,
+      "fpsOffP50": 94.3,
+      "deltaFpsP50": -6.8,
+      "onBefore": {
+        "frames": 401,
+        "fps": 77.3,
+        "p50": 11.9,
+        "fpsP50": 84,
+        "p90": 17.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 425,
+        "fps": 81.8,
+        "p50": 10.6,
+        "fpsP50": 94.3,
+        "p90": 17.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 42,
+          "triangles": 2225228,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 405,
+        "fps": 78.3,
+        "p50": 11,
+        "fpsP50": 90.9,
+        "p90": 18.2,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "water",
+      "fpsOn": 81.7,
+      "fpsOff": 82,
+      "deltaFps": -0.3,
+      "fpsOnP50": 91.9,
+      "fpsOffP50": 93.5,
+      "deltaFpsP50": -1.6,
+      "onBefore": {
+        "frames": 405,
+        "fps": 78.2,
+        "p50": 11.3,
+        "fpsP50": 88.5,
+        "p90": 18.4,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 425,
+        "fps": 82,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 17.8,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2226418,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 442,
+        "fps": 85.1,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 16,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "benches",
+      "fpsOn": 85,
+      "fpsOff": 81,
+      "deltaFps": 4,
+      "fpsOnP50": 95.8,
+      "fpsOffP50": 93.5,
+      "deltaFpsP50": 2.3,
+      "onBefore": {
+        "frames": 459,
+        "fps": 88.4,
+        "p50": 10.2,
+        "fpsP50": 98,
+        "p90": 14,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 420,
+        "fps": 81,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 17.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 43,
+          "triangles": 2204564,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 423,
+        "fps": 81.6,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 17.6,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "church crosses",
+      "fpsOn": 82.2,
+      "fpsOff": 83.7,
+      "deltaFps": -1.5,
+      "fpsOnP50": 92.8,
+      "fpsOffP50": 96.2,
+      "deltaFpsP50": -3.4,
+      "onBefore": {
+        "frames": 408,
+        "fps": 78.7,
+        "p50": 11.3,
+        "fpsP50": 88.5,
+        "p90": 17.9,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 434,
+        "fps": 83.7,
+        "p50": 10.4,
+        "fpsP50": 96.2,
+        "p90": 16.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2226164,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 444,
+        "fps": 85.7,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 16.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "parks",
+      "fpsOn": 81.3,
+      "fpsOff": 84.6,
+      "deltaFps": -3.3,
+      "fpsOnP50": 91.7,
+      "fpsOffP50": 95.2,
+      "deltaFpsP50": -3.5,
+      "onBefore": {
+        "frames": 418,
+        "fps": 80.7,
+        "p50": 10.9,
+        "fpsP50": 91.7,
+        "p90": 17.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 439,
+        "fps": 84.6,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 16.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 42,
+          "triangles": 2225104,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 423,
+        "fps": 81.8,
+        "p50": 10.9,
+        "fpsP50": 91.7,
+        "p90": 17,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "airplanes",
+      "fpsOn": 83.8,
+      "fpsOff": 79.1,
+      "deltaFps": 4.7,
+      "fpsOnP50": 95.3,
+      "fpsOffP50": 90.1,
+      "deltaFpsP50": 5.2,
+      "onBefore": {
+        "frames": 441,
+        "fps": 84.7,
+        "p50": 10.4,
+        "fpsP50": 96.2,
+        "p90": 16.1,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 410,
+        "fps": 79.1,
+        "p50": 11.1,
+        "fpsP50": 90.1,
+        "p90": 18,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 429,
+        "fps": 82.9,
+        "p50": 10.6,
+        "fpsP50": 94.3,
+        "p90": 16.8,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "fences",
+      "fpsOn": 87.2,
+      "fpsOff": 84.2,
+      "deltaFps": 3,
+      "fpsOnP50": 96.2,
+      "fpsOffP50": 93.5,
+      "deltaFpsP50": 2.7,
+      "onBefore": {
+        "frames": 429,
+        "fps": 82.6,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 17.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 438,
+        "fps": 84.2,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 15.1,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 42,
+          "triangles": 2224524,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 476,
+        "fps": 91.8,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 12.5,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "bridges & tunnels",
+      "fpsOn": 86.7,
+      "fpsOff": 92,
+      "deltaFps": -5.3,
+      "fpsOnP50": 95.4,
+      "fpsOffP50": 100,
+      "deltaFpsP50": -4.6,
+      "onBefore": {
+        "frames": 477,
+        "fps": 91.7,
+        "p50": 10.1,
+        "fpsP50": 99,
+        "p90": 12.9,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 479,
+        "fps": 92,
+        "p50": 10,
+        "fpsP50": 100,
+        "p90": 12.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 44,
+          "triangles": 2226064,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 424,
+        "fps": 81.6,
+        "p50": 10.9,
+        "fpsP50": 91.7,
+        "p90": 17.4,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "parked cars",
+      "fpsOn": 81.7,
+      "fpsOff": 79.2,
+      "deltaFps": 2.5,
+      "fpsOnP50": 93.1,
+      "fpsOffP50": 89.3,
+      "deltaFpsP50": 3.8,
+      "onBefore": {
+        "frames": 428,
+        "fps": 82.7,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 17.2,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 412,
+        "fps": 79.2,
+        "p50": 11.2,
+        "fpsP50": 89.3,
+        "p90": 18.3,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 1515068,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 418,
+        "fps": 80.7,
+        "p50": 10.8,
+        "fpsP50": 92.6,
+        "p90": 17.6,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "imputed colors",
+      "fpsOn": 84.5,
+      "fpsOff": 78.4,
+      "deltaFps": 6.1,
+      "fpsOnP50": 95.3,
+      "fpsOffP50": 89.3,
+      "deltaFpsP50": 6,
+      "onBefore": {
+        "frames": 425,
+        "fps": 81.7,
+        "p50": 10.7,
+        "fpsP50": 93.5,
+        "p90": 17.1,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 46,
+          "triangles": 2226452,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 407,
+        "fps": 78.4,
+        "p50": 11.2,
+        "fpsP50": 89.3,
+        "p90": 19,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2215652,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 453,
+        "fps": 87.2,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 14.8,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2215652,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    },
+    {
+      "feature": "night",
+      "fpsOn": 89.4,
+      "fpsOff": 83.4,
+      "deltaFps": 6,
+      "fpsOnP50": 98.6,
+      "fpsOffP50": 95.2,
+      "deltaFpsP50": 3.4,
+      "onBefore": {
+        "frames": 476,
+        "fps": 92,
+        "p50": 10,
+        "fpsP50": 100,
+        "p90": 13,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2215652,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "off": {
+        "frames": 432,
+        "fps": 83.4,
+        "p50": 10.5,
+        "fpsP50": 95.2,
+        "p90": 17.1,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2215652,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      },
+      "onAfter": {
+        "frames": 449,
+        "fps": 86.7,
+        "p50": 10.3,
+        "fpsP50": 97.1,
+        "p90": 14.7,
+        "stats": {
+          "meshes": 446,
+          "drawCalls": 45,
+          "triangles": 2215652,
+          "parkedCars": 59282,
+          "facadeVertices": 5136342
+        }
+      }
+    }
+  ]
+}
