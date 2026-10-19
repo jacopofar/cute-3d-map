@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
+import { church, isChurch } from "./elements3d/church";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
@@ -70,7 +71,7 @@ export function geoJSONtoGeometries(
   scaleFactor: number,
   imputedColors = true,
 ): {
-  kind: "building" | "roof" | "tree" | "water" | "bench";
+  kind: "building" | "roof" | "church" | "tree" | "water" | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
   if (!f.properties) {
@@ -83,13 +84,21 @@ export function geoJSONtoGeometries(
     // the roof comes back as its own kind, so it can be switched off on its own
     const parts = building(originMeters, scaleFactor, f, imputedColors);
     const groups: {
-      kind: "building" | "roof";
+      kind: "building" | "roof" | "church";
       geometries: THREE.BufferGeometry[];
     }[] = [{ kind: "building", geometries: parts.map((part) => part.walls) }];
     const roofs = parts
       .map((part) => part.roof)
       .filter((roof): roof is THREE.BufferGeometry => roof !== null);
     if (roofs.length > 0) groups.push({ kind: "roof", geometries: roofs });
+    // a church's cross is its own kind too: the walls keep their (stony) look
+    // and the checkbox hides just the ornament
+    if (isChurch(f.properties)) {
+      const crosses = church(originMeters, scaleFactor, buildingInfo(f));
+      if (crosses.length > 0) {
+        groups.push({ kind: "church", geometries: crosses });
+      }
+    }
     return groups;
   }
   if (f.properties.cmtype === "tree") {
@@ -119,6 +128,14 @@ const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
 const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 // benches are lit the same way, so their wood and metal shade
 const benchMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+// the church ornament (a cross) is lit as well, and small enough that the
+// toon material's banding would only make it flicker. A faint emissive gold
+// keeps the cross legible when its faces are turned away from the sun, which
+// is half of the bearings it is seen from.
+const churchMaterial = new THREE.MeshLambertMaterial({
+  vertexColors: true,
+  emissive: 0x4a3a12,
+});
 
 // one precomputed vehicle route piece. `t0`/`t1` are seconds into the loop's
 // `period`; the piece is drawn while the phase is in [t0, t1). `times[i]` is
@@ -163,6 +180,10 @@ export interface BuildingInfo {
   roofColor?: string;
   // the fields tilegen sampled rather than read from a tag
   imputed: string[];
+  // the OSM building value and, for a place of worship, its religion: what
+  // isChurch() classifies on
+  building?: string;
+  religion?: string;
 }
 
 // a water feature for click-picking + info. Areas carry their (clipped) outer
@@ -257,11 +278,13 @@ export async function objectsAt(
       const material =
         kind === "building"
           ? buildingMaterial
-          : kind === "water"
-            ? waterMaterial
-            : kind === "bench"
-              ? benchMaterial
-              : treeMaterial;
+          : kind === "church"
+            ? churchMaterial
+            : kind === "water"
+              ? waterMaterial
+              : kind === "bench"
+                ? benchMaterial
+                : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);
@@ -298,6 +321,8 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     roofShape: props.roof_shape as string | undefined,
     roofColor: props.roof_color as string | undefined,
     imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
+    building: props.building as string | undefined,
+    religion: props.religion as string | undefined,
   };
 }
 

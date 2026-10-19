@@ -115,6 +115,13 @@ def to_building(feature_id, tags, s, distributions=None) -> dict | None:
         "name": tags.get("name"),
         "street": tags.get("addr:street"),
         "housenumber": tags.get("addr:housenumber"),
+        # a church is an ordinary building=* polygon, so the value that says so
+        # (church, chapel, cathedral, ...) has to be reported; religion only
+        # matters for a place of worship that is not tagged by building value
+        "building": tags.get("building"),
+        "religion": (
+            tags.get("religion") if tags.get("amenity") == "place_of_worship" else None
+        ),
         # color, roof_shape and roof_color: the OSM tag when present, otherwise
         # a sample from the dataset's own distribution (see tilegen/impute.py).
         # `imputed` names the fields that were sampled rather than tagged.

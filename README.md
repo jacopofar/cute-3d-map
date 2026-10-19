@@ -46,7 +46,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water).
+   water, church).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -80,11 +80,30 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes**, **water** and **imputed colors** on and off, with a question
-mark beside the last one explaining what imputation means. All but imputed
-colors are mesh visibility switches (water's is all-or-nothing: unchecked, no
-water is drawn); imputed colors are baked into the geometry and so reload the
+**roof shapes**, **water**, **church crosses** and **imputed colors** on and off,
+with a question mark beside the last one explaining what imputation means. All but
+imputed colors are mesh visibility switches (water's is all-or-nothing: unchecked,
+no water is drawn); imputed colors are baked into the geometry and so reload the
 loaded tiles.
+
+### Churches
+
+A church is an ordinary `building=*` polygon in OSM, so tilegen reports the
+`building` value (and `religion` for an `amenity=place_of_worship`), and the
+frontend does the classifying (`isChurch` in `src/elements3d/church.ts`):
+`church`, `cathedral`, `chapel`, `basilica`, `abbey`, `monastery`, or a place of
+worship with a `christian`/`christian:*` religion.
+
+A church gets a different look from the apartment blocks around it: when OSM has
+no `building:colour` for it, its walls take a seeded warm stone/ochre tone (a real
+tagged color still wins), when OSM has no `roof:colour` the roof is slate, and the
+roof is forced gabled and pitched 1.3× steeper than the default — a footprint too
+complex for a pitched roof (a courtyard, a concave outline) stays flat, as it does
+for any building. A **gold cross** (3 m, up to 6 m on a cathedral-sized footprint)
+stands on the ridge, or just above the cap of a flat roof; its arms follow the
+ridge, so it reads as a cross from the side of the church. The cross is its own
+per-tile mesh (kind `church`), so the **church crosses** checkbox hides the
+ornament and leaves the church walls as buildings.
 
 ### Water
 

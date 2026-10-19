@@ -180,6 +180,9 @@ class CoolMap {
   private waterEnabled = true;
   // benches are their own per-tile mesh too
   private benchesEnabled = true;
+  // the church cross is a per-tile mesh as well: the toggle hides the ornament,
+  // the church walls stay buildings (its stony look is baked into them)
+  private churchesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -506,6 +509,10 @@ class CoolMap {
     wireToggle("#benches-toggle", (on) => {
       this.benchesEnabled = on;
       this.applyBenchVisibility();
+    });
+    wireToggle("#churches-toggle", (on) => {
+      this.churchesEnabled = on;
+      this.applyChurchVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -1052,11 +1059,24 @@ class CoolMap {
     }
   }
 
+  // ... and so is the church ornament: only the crosses go away, the walls are
+  // plain buildings
+  private applyChurchVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "church") {
+          mesh.visible = this.churchesEnabled;
+        }
+      }
+    }
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
     this.applyBenchVisibility();
+    this.applyChurchVisibility();
   }
 
   private disposeDetail(key: string) {
