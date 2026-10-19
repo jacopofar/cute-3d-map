@@ -128,3 +128,93 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
 
   expect(errors).toEqual([]);
 });
+
+// read the day/night state the app exposes, plus the window shader's night
+// uniform (via the shared material on a windows mesh)
+const readDayNight = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    let uNight = null;
+    map.customLayer.scene.traverse((object: any) => {
+      if (object.userData?.group !== "windows") return;
+      const value = object.material?.uniforms?.uNight?.value;
+      if (typeof value === "number") uNight = value;
+    });
+    return { ...map.lightingState(), uNight };
+  });
+
+test("the night toggle darkens the scene and lights the windows", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("https://api.maptiler.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(EMPTY_STYLE),
+    }),
+  );
+  await page.goto("/");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await page.waitForFunction(() => "__coolMap" in window, null, {
+    timeout: 20_000,
+  });
+
+  // open the layers menu (the checkboxes are behind the gear)
+  await page.click("#layer-menu-button");
+  await expect(page.locator("#night-toggle")).toBeVisible();
+
+  // day by default: 13:00, no night, a bright key light
+  const day = await readDayNight(page);
+  expect(day.hour).toBe(13);
+  expect(day.night).toBe(0);
+  expect(day.sunIntensity).toBeGreaterThan(2);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(false);
+
+  // the night checkbox is the shortcut: it jumps to 01:00
+  await page.click("#night-toggle input");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(1);
+  const night = await readDayNight(page);
+  expect(night.hour).toBe(1);
+  expect(night.sunIntensity).toBeLessThan(0.5);
+
+  // the window meshes use the shader material, so the uniform reaches them:
+  // zoom in so the facade detail exists, then confirm uNight is night
+  await page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    map.map.jumpTo({ zoom: 18 });
+  });
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          let total = 0;
+          map.customLayer.scene.traverse((object: any) => {
+            if (object.userData?.group === "windows") total += 1;
+          });
+          return total;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(0);
+  expect((await readDayNight(page)).uNight).toBe(1);
+
+  // the slider drives the same model and syncs the checkbox back
+  await page.fill("#time-slider", "12");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(0);
+  expect((await readDayNight(page)).uNight).toBe(0);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(false);
+  await page.fill("#time-slider", "22");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(1);
+  expect(await page.locator("#night-toggle input").isChecked()).toBe(true);
+
+  expect(errors).toEqual([]);
+});
