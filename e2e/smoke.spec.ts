@@ -47,3 +47,26 @@ test("boots in precomputed traffic mode (default)", async ({ page }) => {
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("the locate button centers the map on the browser position", async ({
+  page,
+  context,
+}) => {
+  // a location far from the default Milan view, so the move is unambiguous
+  await context.grantPermissions(["geolocation"]);
+  await context.setGeolocation({ latitude: 48.8566, longitude: 2.3522 });
+  await page.goto("/");
+  await expect(page.locator(".maplibregl-ctrl-geolocate")).toBeVisible();
+  await page.click(".maplibregl-ctrl-geolocate");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const center = map.map.getCenter();
+          return Math.hypot(center.lat - 48.8566, center.lng - 2.3522);
+        }),
+      { timeout: 15_000 },
+    )
+    .toBeLessThan(0.01);
+});

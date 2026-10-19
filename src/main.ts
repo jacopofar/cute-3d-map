@@ -1,4 +1,5 @@
 import {
+  GeolocateControl,
   Map as MapLibreMap,
   MercatorCoordinate,
   Popup,
@@ -39,6 +40,7 @@ import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
 import {
   DAY_HOUR,
   NIGHT_HOUR,
+  currentMilanSolarHour,
   lerpColor,
   lightingAt,
   type Lighting,
@@ -245,9 +247,11 @@ class CoolMap {
   private fillLight?: THREE.DirectionalLight;
   private hemisphereLight?: THREE.HemisphereLight;
   private groundMesh?: THREE.Mesh;
-  // hours 0..24; the slider and the night checkbox both set this
-  private timeOfDay = DAY_HOUR;
-  private lighting: Lighting = lightingAt(DAY_HOUR);
+  // hours 0..24, local mean solar time at Milan; seeded from the real sun and
+  // driven by the slider/night checkbox afterwards. The slider steps 0.25 h, so
+  // round the seed to match rather than give the thumb a fractional value.
+  private timeOfDay = Math.round(currentMilanSolarHour() * 4) / 4;
+  private lighting: Lighting = lightingAt(this.timeOfDay);
   // which basemap is mounted, so a night/day flip only swaps the style once
   private darkBasemap = false;
   // user toggle (the page checkbox); combined with the zoom gate
@@ -275,6 +279,10 @@ class CoolMap {
     scale: number;
   };
   constructor(tileCenter: [number, number], zoomLevel: number = 16) {
+    // Open on the basemap the current sun calls for, so the day style does not
+    // flash before the first applyLighting() swaps it.
+    const nightBasemap = this.lighting.night > BASEMAP_NIGHT_AT;
+    this.darkBasemap = nightBasemap;
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
@@ -284,7 +292,7 @@ class CoolMap {
       // position can be linked; the prefix makes maplibre use that shape, and
       // it reads a fragment pasted on load and updates it as the map moves
       hash: "map",
-      style: basemapStyleUrl(BASEMAP_DAY),
+      style: basemapStyleUrl(nightBasemap ? BASEMAP_NIGHT : BASEMAP_DAY),
     });
     // the projection origin follows whatever the map actually opened on (a
     // #map= fragment may have moved it), so no tiles are fetched for the
@@ -299,6 +307,16 @@ class CoolMap {
         maxWidth: 80,
         unit: "metric",
       }),
+    );
+    // MapLibre's own "use my location" button: it asks the browser for the
+    // position and flies the map there. Not tracking, just a one-shot centering.
+    this.map.addControl(
+      new GeolocateControl({
+        positionOptions: { enableHighAccuracy: true },
+        trackUserLocation: false,
+        showAccuracyCircle: true,
+      }),
+      "top-right",
     );
     // parameters to ensure the model is georeferenced correctly on the map
     const modelOrigin = tileCenter;

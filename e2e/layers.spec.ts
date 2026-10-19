@@ -177,9 +177,19 @@ test("the night toggle darkens the scene and lights the windows", async ({
   await page.click("#layer-menu-button");
   await expect(page.locator("#night-toggle")).toBeVisible();
 
-  // day by default: 13:00, no night, a bright key light
+  // The app opens on the current sun over Milan, so the starting hour is not a
+  // constant; pin it to solar noon for the day assertions.
+  const opening = await readDayNight(page);
+  expect(opening.hour).toBeGreaterThanOrEqual(0);
+  expect(opening.hour).toBeLessThan(24);
+  await page.fill("#time-slider", "12");
+  await expect
+    .poll(async () => (await readDayNight(page)).night, { timeout: 10_000 })
+    .toBe(0);
+
+  // solar noon: no night, a bright key light, the checkbox off
   const day = await readDayNight(page);
-  expect(day.hour).toBe(13);
+  expect(day.hour).toBe(12);
   expect(day.night).toBe(0);
   expect(day.sunIntensity).toBeGreaterThan(2);
   expect(await page.locator("#night-toggle input").isChecked()).toBe(false);
