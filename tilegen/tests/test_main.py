@@ -150,6 +150,75 @@ def test_to_stop_points_are_point_only():
     )
 
 
+def test_bench_direction_maps_compass_and_degrees():
+    for value, expected in (("N", 0.0), ("E", 90.0), ("S", 180.0), ("W", 270.0)):
+        assert main.bench_direction({"direction": value}) == expected
+        # OSM is inconsistent about the case
+        assert main.bench_direction({"direction": value.lower()}) == expected
+    assert main.bench_direction({"direction": "135"}) == 135.0
+    assert main.bench_direction({"direction": "450"}) == 90.0  # normalized
+    # these relate to a nearby way, which the tiles do not carry
+    assert main.bench_direction({"direction": "parallel"}) is None
+    assert main.bench_direction({"direction": "perpendicular"}) is None
+    assert main.bench_direction({}) is None
+
+
+def test_line_bearing_is_a_compass_bearing():
+    # a due-east line is 90 degrees, a due-north one 0
+    east = main.line_bearing(geom("LINESTRING (9.18 45.5, 9.181 45.5)"))
+    north = main.line_bearing(geom("LINESTRING (9.18 45.5, 9.18 45.501)"))
+    assert east is not None and round(east) == 90
+    assert north is not None and round(north) == 0
+    # a zero-length line has no direction
+    assert main.line_bearing(geom("LINESTRING (9.18 45.5, 9.18 45.5)")) is None
+
+
+def test_to_bench_point_keeps_the_direction():
+    f = main.to_bench(
+        11, {"amenity": "bench", "direction": "N"}, geom("POINT (9.18 45.5)")
+    )
+    assert f is not None
+    assert f["properties"] == {"cmtype": "bench", "direction": 0.0}
+    # no direction tag -> no direction key, so the frontend picks its own
+    plain = main.to_bench(12, {"amenity": "bench"}, geom("POINT (9.18 45.5)"))
+    assert plain is not None
+    assert plain["properties"] == {"cmtype": "bench"}
+
+
+def test_to_bench_line_collapses_to_the_midpoint():
+    line = geom("LINESTRING (9.18 45.5, 9.19 45.5)")
+    f = main.to_bench(13, {"amenity": "bench"}, line)
+    assert f is not None
+    # the facing follows the line when the tag does not give one
+    assert round(f["properties"]["direction"]) == 90
+    lon, lat = f["geometry"]["coordinates"]
+    assert f["geometry"]["type"] == "Point"
+    assert round(lon, 4) == 9.185 and round(lat, 4) == 45.5
+    # a tag wins over the line
+    tagged = main.to_bench(14, {"amenity": "bench", "direction": "W"}, line)
+    assert tagged is not None
+    assert tagged["properties"]["direction"] == 270.0
+
+
+def test_to_bench_ignores_odd_geometry():
+    # the extract has one Polygon bench that must not abort the tile
+    assert (
+        main.to_bench(15, {"amenity": "bench"}, geom("POLYGON ((0 0, 1 0, 1 1, 0 0))"))
+        is None
+    )
+
+
+def test_tile_to_geojson_includes_benches():
+    bench = shapely.to_wkb(geom("POINT (9.19 45.497)"))
+    polygon = shapely.to_wkb(geom("POLYGON ((0 0, 1 0, 1 1, 0 0))"))
+    data = [
+        (1, {"amenity": "bench"}, bench),
+        (2, {"amenity": "bench"}, polygon),
+    ]
+    render, _raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["bench"]
+
+
 def test_tile_lonlat_bounds_contains_center():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     assert min_lon < 9.186 < max_lon
