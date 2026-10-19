@@ -50,7 +50,9 @@ export class ParkedCarLayer {
 
   constructor(scene: THREE.Scene, capacity = 120_000) {
     this.capacity = Math.max(1, capacity);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    // Lambert, not the moving fleet's unlit basic material: parked cars follow
+    // the sun and go dark at night, while the moving cars stay bright.
+    const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
     this.mesh = new THREE.InstancedMesh(
       vehicleGeometry(CAR_TRAFFIC),
       material,
@@ -86,11 +88,7 @@ export class ParkedCarLayer {
     const count = Math.min(spots.length, this.capacity);
     for (let i = 0; i < count; i++) {
       const spot = spots[i];
-      const m = toModelCoords(
-        [spot.lon, spot.lat],
-        originMeters,
-        scaleFactor,
-      );
+      const m = toModelCoords([spot.lon, spot.lat], originMeters, scaleFactor);
       this.dummy.position.set(m[0], m[1], CAR_TRAFFIC.height / 2);
       this.dummy.rotation.set(0, 0, spot.heading);
       this.dummy.updateMatrix();

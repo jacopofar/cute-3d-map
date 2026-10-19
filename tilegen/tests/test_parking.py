@@ -100,3 +100,51 @@ def test_parking_spots_is_stable_across_rebuilds():
         highway="tertiary",
     )
     assert parking.parking_spots([way]) == parking.parking_spots([way])
+
+
+def _flatten(by_tile):
+    return [spot for tile in by_tile.values() for spot in tile]
+
+
+def _min_distance(spots):
+    best = math.inf
+    for i in range(len(spots)):
+        for j in range(i + 1, len(spots)):
+            dx = (
+                (spots[i][0] - spots[j][0])
+                * parking.METERS_PER_DEG_LON
+                * math.cos(math.radians(spots[i][1]))
+            )
+            dy = (spots[i][1] - spots[j][1]) * parking.METERS_PER_DEG_LAT
+            best = min(best, math.hypot(dx, dy))
+    return best
+
+
+def test_overlapping_ways_are_deduped_and_the_bigger_road_wins():
+    coords = [(9.0, 45.0), (9.0, 45.002)]
+    # the service way runs ~0.4 m beside the secondary: their bays collide
+    beside = [(9.000005, 45.0), (9.000005, 45.002)]
+    secondary = parking.ParkingWay(id="way/2", coords=coords, highway="secondary")
+    service = parking.ParkingWay(id="way/1", coords=beside, highway="service")
+    only_secondary = _flatten(parking.parking_spots([secondary]))
+    both = _flatten(parking.parking_spots([secondary, service]))
+    # the secondary is processed first, so every one of its bays survives ...
+    assert set(map(tuple, only_secondary)) <= set(map(tuple, both))
+    # ... some of the service way's colliding bays are dropped, but not all
+    only_service = _flatten(parking.parking_spots([service]))
+    assert len(both) < len(only_secondary) + len(only_service)
+    assert len(both) > len(only_secondary)
+    # nothing that survives sits on top of another car
+    assert _min_distance(both) >= parking.MIN_SPOT_SPACING - 1e-6
+
+
+def test_dedupe_threshold_is_below_the_closest_bay_pitch():
+    # adjacent perpendicular bays must survive; only cross-way overlaps go
+    assert parking.MIN_SPOT_SPACING < parking.bay_pitch(parking.PERPENDICULAR)
+
+
+def test_dedupe_drops_two_cars_closer_than_the_spacing():
+    a = (9.0, 45.0, 0.0)
+    # 1.5 m north of the first
+    b = (9.0, 45.0 + 1.5 / parking.METERS_PER_DEG_LAT, 0.0)
+    assert len(parking._dedupe([a, b])) == 1
