@@ -6,18 +6,32 @@ import { applyVertexColor } from "./vertex_color";
 
 /*
  * Airport tarmac: runways and taxiways as flat ribbons, aprons and helipad
- * polygons as flat areas, all a hair above the ground (SURFACE_Z). This is what
- * makes the plane paths legible over the basemap: a runway is drawn dark and a
- * little wider than the OSM width, so it still reads where MapTiler already
- * paints its own runway underneath.
+ * polygons as flat areas, all a hair above the ground. This is what makes the
+ * plane paths legible over the basemap: a runway is drawn dark and a little
+ * wider than the OSM width, so it still reads where MapTiler already paints its
+ * own runway underneath.
  *
  * Like water, tilegen stores each aeroway feature whole, so a runway spanning
  * two loaded tiles is built twice; the surfaces are identical and coplanar, so
  * the overlap is invisible and there is nothing to dedupe here.
  */
 
-// a hair above the ground plane (-0.05) and the water (0), below the buildings
-const SURFACE_Z = 0.02;
+// The movement-area surfaces all lie flat, but a taxiway meets a runway and an
+// apron meets a taxiway: at the same z those coplanar overlaps z-fight, and the
+// kinds have different colors, so it reads as flicker. Give each kind a fixed
+// step (2 cm, as water and green use, is enough for this depth range). Runway is
+// lowest, so a taxiway entrance and an apron edge draw over it.
+const SURFACE_Z: Record<string, number> = {
+  runway: 0.02,
+  taxiway: 0.04,
+  apron: 0.06,
+  helipad: 0.08,
+};
+const DEFAULT_SURFACE_Z = 0.03;
+
+export function surfaceZ(kind: string): number {
+  return SURFACE_Z[kind] ?? DEFAULT_SURFACE_Z;
+}
 
 // full ribbon width in meters per aeroway class when OSM has no `width` tag
 export const AEROWAY_WIDTH: Record<string, number> = {
@@ -60,6 +74,7 @@ function areaGeometry(
   rings: Geojson.Position[][],
   originMeters: [number, number],
   scaleFactor: number,
+  z: number,
 ): THREE.BufferGeometry | null {
   const toVec = (c: Geojson.Position) =>
     new THREE.Vector2(
@@ -72,7 +87,7 @@ function areaGeometry(
   const shape = new THREE.ShapeGeometry(outline);
   const geometry = shape.index ? shape.toNonIndexed() : shape;
   geometry.deleteAttribute("uv");
-  geometry.translate(0, 0, SURFACE_Z);
+  geometry.translate(0, 0, z);
   return geometry.getAttribute("position").count >= 3 ? geometry : null;
 }
 
@@ -84,6 +99,7 @@ function ribbonGeometry(
   halfWidth: number,
   originMeters: [number, number],
   scaleFactor: number,
+  z: number,
 ): THREE.BufferGeometry | null {
   const points = coords.map((c) =>
     toModelCoords([c[0], c[1]], originMeters, scaleFactor),
@@ -107,7 +123,7 @@ function ribbonGeometry(
   }
   const positions: number[] = [];
   const push = (p: [number, number], o: [number, number], side: number) =>
-    positions.push(p[0] + o[0] * side, p[1] + o[1] * side, SURFACE_Z);
+    positions.push(p[0] + o[0] * side, p[1] + o[1] * side, z);
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
     const b = points[i + 1];
@@ -142,6 +158,7 @@ export function aeroway(
   const color = aerowayColor(kind);
   const width =
     Number(props.width) > 0 ? Number(props.width) : aerowayWidth(kind);
+  const z = surfaceZ(kind);
   const geometries: THREE.BufferGeometry[] = [];
 
   const finish = (geometry: THREE.BufferGeometry | null) => {
@@ -153,18 +170,18 @@ export function aeroway(
 
   const g = f.geometry;
   if (g.type === "Polygon")
-    finish(areaGeometry(g.coordinates, originMeters, scaleFactor));
+    finish(areaGeometry(g.coordinates, originMeters, scaleFactor, z));
   else if (g.type === "MultiPolygon")
     g.coordinates.forEach((polygon) =>
-      finish(areaGeometry(polygon, originMeters, scaleFactor)),
+      finish(areaGeometry(polygon, originMeters, scaleFactor, z)),
     );
   else if (g.type === "LineString")
     finish(
-      ribbonGeometry(g.coordinates, width * 0.5, originMeters, scaleFactor),
+      ribbonGeometry(g.coordinates, width * 0.5, originMeters, scaleFactor, z),
     );
   else if (g.type === "MultiLineString")
     g.coordinates.forEach((line) =>
-      finish(ribbonGeometry(line, width * 0.5, originMeters, scaleFactor)),
+      finish(ribbonGeometry(line, width * 0.5, originMeters, scaleFactor, z)),
     );
 
   return geometries;

@@ -16,6 +16,9 @@ import { applyVertexColor } from "./vertex_color";
 // still reads as water) and above the ground plane (z = -0.05), so it z-fights
 // with neither. 2 cm is enough to beat depth precision at these tile sizes.
 export const GREEN_Z = -0.02;
+// dense vegetation sits a hair lower than the mown style, so a wood clipped
+// inside a park (both drawn on the tile) does not z-fight with the lawn
+export const GREEN_DENSE_Z = -0.04;
 
 // shader style per sub-kind: "grass" is a mown lawn/pitch/garden, "dense" a
 // park/wood/scrub. Unknown kinds fall back to the lawn style.
@@ -49,6 +52,7 @@ function areaGeometry(
   rings: Geojson.Position[][],
   originMeters: [number, number],
   scaleFactor: number,
+  z: number,
 ): THREE.BufferGeometry | null {
   const toVec = (c: Geojson.Position) =>
     new THREE.Vector2(
@@ -66,7 +70,7 @@ function areaGeometry(
   geometry.deleteAttribute("normal");
   geometry.deleteAttribute("uv");
   const position = geometry.getAttribute("position");
-  for (let i = 0; i < position.count; i++) position.setZ(i, GREEN_Z);
+  for (let i = 0; i < position.count; i++) position.setZ(i, z);
   return position.count >= 3 ? geometry : null;
 }
 
@@ -90,10 +94,11 @@ export function green(
   const kind = greenKindOf(f);
   const color = greenColor(kind);
   const style = greenStyle(kind);
+  const z = style === 1 ? GREEN_DENSE_Z : GREEN_Z;
   const geometries: THREE.BufferGeometry[] = [];
 
   const addArea = (rings: Geojson.Position[][]) => {
-    const geometry = areaGeometry(rings, originMeters, scaleFactor);
+    const geometry = areaGeometry(rings, originMeters, scaleFactor, z);
     if (geometry) {
       applyVertexColor(geometry, color);
       applyStyle(geometry, style);

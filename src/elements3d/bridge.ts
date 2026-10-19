@@ -48,7 +48,17 @@ function stringProperty(f: Geojson.Feature, key: string): string | undefined {
 }
 
 function bridgeHeight(f: Geojson.Feature): number {
-  return bridgeDeckHeight(numberProperty(f, "layer"));
+  const base = bridgeDeckHeight(numberProperty(f, "layer"));
+  // Two decks at the same layer can overlap (the carriageways of a motorway, a
+  // slip road joining it). Their flat tops would then be coplanar and z-fight;
+  // a deterministic few-centimetre offset per feature separates them without
+  // reading as a height difference.
+  const id = typeof f.id === "string" ? f.id : "";
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return base + (hash % 5) * 0.01;
 }
 
 function applyGeometry(
