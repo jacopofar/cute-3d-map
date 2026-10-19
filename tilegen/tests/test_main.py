@@ -393,6 +393,66 @@ def test_to_water_ignores_a_non_channel_waterway():
     assert main.to_water(4, {"waterway": "weir"}, line, box) is None
 
 
+def test_to_fence_clips_a_line_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a fence running across the tile and out both sides
+    line = shapely.LineString(
+        [(min_lon - 0.001, max_lat - 0.001), (max_lon + 0.001, max_lat - 0.001)]
+    )
+    f = main.to_fence(1, {"barrier": "fence"}, line, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "fence", "barrier": "fence"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.geom_type == "LineString"
+    assert round(clipped.bounds[0], 9) == round(min_lon, 9)
+    # a fence outside the tile is dropped
+    away = shapely.LineString(
+        [(max_lon + 0.01, max_lat + 0.01), (max_lon + 0.02, max_lat + 0.01)]
+    )
+    assert main.to_fence(2, {"barrier": "fence"}, away, box) is None
+
+
+def test_to_fence_takes_a_fenced_area_outline():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a barrier closed into an area: the fence is its outline
+    area = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    f = main.to_fence(3, {"barrier": "fence"}, area, box)
+    assert f is not None
+    assert shapely.from_geojson(json.dumps(f["geometry"])).equals(box.boundary)
+    # a guard rail rides along with the same shape, for the frontend to color
+    rail = main.to_fence(4, {"barrier": "guard_rail"}, area, box)
+    assert rail is not None
+    assert rail["properties"]["barrier"] == "guard_rail"
+
+
+def test_to_fence_drops_slivers_and_ignores_other_barriers():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a line just poking into the tile leaves only a stub, which is dropped
+    stub = shapely.LineString(
+        [(min_lon - 0.0005, min_lat + 0.0005), (min_lon + 0.0000001, min_lat + 0.0005)]
+    )
+    assert main.to_fence(5, {"barrier": "fence"}, stub, box) is None
+    # a wall or a gate is not a fence
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    assert main.to_fence(6, {"barrier": "wall"}, line, box) is None
+    assert main.to_fence(7, {"barrier": "gate"}, line, box) is None
+
+
+def test_to_fence_keeps_the_name():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    named = main.to_fence(8, {"barrier": "fence", "name": "Recinto"}, line, box)
+    assert named is not None
+    assert named["properties"]["name"] == "Recinto"
+    plain = main.to_fence(9, {"barrier": "fence"}, line, box)
+    assert plain is not None
+    assert "name" not in plain["properties"]
+
+
 def test_tile_to_geojson_includes_water():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     cx = (min_lon + max_lon) / 2
@@ -541,6 +601,22 @@ def test_tile_to_geojson_includes_aeroway():
     )
     assert [f["properties"]["cmtype"] for f in render] == ["aeroway"]
     assert render[0]["properties"]["aeroway"] == "runway"
+    assert len(raw) == 1
+
+
+def test_tile_to_geojson_includes_fence():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    line = shapely.to_wkb(
+        geom(
+            f"LINESTRING ({min_lon + 1e-4} {min_lat + 1e-4}, "
+            f"{max_lon - 1e-4} {max_lat - 1e-4})"
+        )
+    )
+    render, raw = main.tile_to_geojson(
+        [(1, {"barrier": "fence"}, line)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["fence"]
+    assert render[0]["properties"]["barrier"] == "fence"
     assert len(raw) == 1
 
 
