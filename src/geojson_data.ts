@@ -251,6 +251,14 @@ export interface ApronRing {
   ring: [number, number][];
 }
 
+// a static parked car: tilegen places the bays along the roads and emits the
+// occupied ones with a model-space heading
+export interface ParkedCar {
+  lon: number;
+  lat: number;
+  heading: number;
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -262,6 +270,8 @@ export interface TileObjects {
   runways: RunwayLine[];
   // apron outlines, for the parked airliners; deduped by id in main
   aprons: ApronRing[];
+  // parked cars, already assigned to this tile by tilegen
+  parking: ParkedCar[];
 }
 
 export async function objectsAt(
@@ -288,6 +298,7 @@ export async function objectsAt(
       crossings: [],
       runways: [],
       aprons: [],
+      parking: [],
     };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
@@ -304,6 +315,7 @@ export async function objectsAt(
       crossings: [],
       runways: [],
       aprons: [],
+      parking: [],
     };
   }
   if (!response.ok) {
@@ -313,6 +325,9 @@ export async function objectsAt(
 
   const traffic = trafficIn(
     myGeoJSON as unknown as { traffic?: RawTrafficLoop[] },
+  );
+  const parking = parkingIn(
+    myGeoJSON as unknown as { parking?: [number, number, number][] },
   );
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
@@ -389,7 +404,16 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, water, traffic, crossings, runways, aprons };
+  return {
+    meshes,
+    buildings,
+    water,
+    traffic,
+    crossings,
+    runways,
+    aprons,
+    parking,
+  };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -497,6 +521,15 @@ interface RawTrafficLoop {
   period: number;
   runs: TrafficRun[];
   vehicles: { phase: number; color: string }[];
+}
+
+// the parking block written by tilegen: [lon, lat, heading] per occupied bay
+function parkingIn(document: {
+  parking?: [number, number, number][];
+}): ParkedCar[] {
+  const spots = document.parking;
+  if (!Array.isArray(spots)) return [];
+  return spots.map(([lon, lat, heading]) => ({ lon, lat, heading }));
 }
 
 function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {

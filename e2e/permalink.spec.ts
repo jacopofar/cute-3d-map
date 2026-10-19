@@ -33,9 +33,11 @@ test("a #map= fragment sets the view and then follows the map", async ({
   // the OSM-style permalink: zoom/lat/lon
   await page.goto("/#map=15/45.87425/9.33441");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
 
   const view = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap.map;

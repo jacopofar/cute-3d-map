@@ -36,7 +36,9 @@ The project has two halves:
      (see below) and they show up in the debug GeoJSON.
 
    A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
-   the precomputed vehicle routes that fall inside the tile. See below.
+   the precomputed vehicle routes that fall inside the tile. See below. A
+   `parking` array holds the static parked cars assigned to the tile, each
+   `[lon, lat, heading]` (heading in model-space radians); see "Parked cars".
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. The map keeps its view in the URL
@@ -80,11 +82,11 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes**, **water**, **church crosses** and **imputed colors** on and off,
-with a question mark beside the last one explaining what imputation means. All but
-imputed colors are mesh visibility switches (water's is all-or-nothing: unchecked,
-no water is drawn); imputed colors are baked into the geometry and so reload the
-loaded tiles.
+**roof shapes**, **water**, **church crosses**, **parked cars** and **imputed
+colors** on and off, with a question mark beside the last one explaining what
+imputation means. All but imputed colors are mesh visibility switches (water's is
+all-or-nothing: unchecked, no water is drawn); imputed colors are baked into the
+geometry and so reload the loaded tiles.
 
 ### Churches
 
@@ -193,6 +195,22 @@ is a stateless renderer that samples it. There is no runtime simulation.
   zero, so the lap (path and timing) is unchanged: nothing waits, nothing is
   simulated.
 - Vehicles are gated on the zoom (and the traffic checkbox) as before.
+
+### Parked cars
+
+The kerbs are filled too, statically. `tilegen/parking.py` walks both sides of
+every parking-eligible road (no motorways/trunks, no `*_link` connectors, no
+roundabouts, nothing under 30 m), lays out bays at a pitch set by a seeded
+style — parallel, perpendicular or fishbone — and occupies 95% of them. The mix
+depends on the road class: narrow streets are mostly parallel, wider roads turn
+to bays.
+
+Each occupied bay belongs to exactly one tile (no clipping), stored in that
+tile's `parking` block, and the frontend draws them with the moving cars' body
+as one static `InstancedMesh`. Like the window detail it only exists above zoom
+17 and only for the 3x3 tiles around the centre: the fully loaded 7x7 window
+would be ~370k cars, almost all off-screen. The **parked cars** checkbox is a
+plain visibility switch.
 
 ### Loop report
 

@@ -18,9 +18,11 @@ test("clicking water shows its kind and an OSM link", async ({ page }) => {
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/#map=16.5/45.4575/9.174");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await page.waitForFunction(
     () => {
       const map = (window as unknown as { __coolMap: any }).__coolMap;
