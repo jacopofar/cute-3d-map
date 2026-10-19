@@ -412,6 +412,87 @@ def test_tile_to_geojson_includes_water():
     assert len(raw) == 1
 
 
+def test_green_kind_classifies_the_two_styles():
+    # mown lawn / pitch / garden
+    assert main.green_kind({"landuse": "grass"}) == "grass"
+    assert main.green_kind({"landuse": "village_green"}) == "grass"
+    assert main.green_kind({"landuse": "meadow"}) == "grass"
+    assert main.green_kind({"natural": "grassland"}) == "grass"
+    assert main.green_kind({"leisure": "pitch"}) == "grass"
+    assert main.green_kind({"leisure": "garden"}) == "grass"
+    # park / wood / scrub
+    assert main.green_kind({"leisure": "park"}) == "dense"
+    assert main.green_kind({"leisure": "nature_reserve"}) == "dense"
+    assert main.green_kind({"natural": "wood"}) == "dense"
+    assert main.green_kind({"natural": "scrub"}) == "dense"
+    assert main.green_kind({"natural": "heath"}) == "dense"
+    assert main.green_kind({"landuse": "forest"}) == "dense"
+    assert main.green_kind({"landuse": "orchard"}) == "dense"
+    # farmland is deliberately not green (it would cover the whole province)
+    assert main.green_kind({"landuse": "farmland"}) is None
+    assert main.green_kind({"natural": "farmland"}) is None
+    assert main.green_kind({"building": "yes"}) is None
+
+
+def test_to_green_clips_a_park_to_the_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a park much larger than the tile, centred on it
+    park = shapely.box(min_lon - 1, min_lat - 1, max_lon + 1, max_lat + 1)
+    f = main.to_green(1, {"leisure": "park", "name": "Parco"}, park, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "green", "green": "dense", "name": "Parco"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.equals(box)
+
+
+def test_to_green_drops_a_sliver_below_the_area_threshold():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # ~2 m x 2 m: a few square meters, below MIN_GREEN_AREA
+    step = 2.0 / 111320.0
+    sliver = shapely.box(
+        min_lon + 0.001, min_lat + 0.001, min_lon + 0.001 + step, min_lat + 0.001 + step
+    )
+    assert main.to_green(2, {"landuse": "grass"}, sliver, box) is None
+    # a proper lawn is kept, and reports the grass style
+    lawn = shapely.box(min_lon + 1e-4, min_lat + 1e-4, min_lon + 4e-4, min_lat + 4e-4)
+    kept = main.to_green(3, {"landuse": "grass"}, lawn, box)
+    assert kept is not None
+    assert kept["properties"]["green"] == "grass"
+
+
+def test_to_green_ignores_non_area_geometries():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString([(min_lon, min_lat), (max_lon, max_lat)])
+    assert main.to_green(4, {"leisure": "park"}, line, box) is None
+    # a feature that is not green at all is ignored
+    assert main.to_green(5, {"building": "yes"}, box, box) is None
+
+
+def test_tile_to_geojson_adds_green_after_water():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    polygon = shapely.to_wkb(
+        geom(
+            "POLYGON (("
+            f"{cx} {cy}, {cx + 2e-4} {cy}, {cx + 2e-4} {cy + 2e-4}, "
+            f"{cx} {cy + 2e-4}, {cx} {cy}))"
+        )
+    )
+    data = [
+        # a wetland that also carries landuse=grass stays water: the water
+        # branch runs first, so no green is emitted for it
+        (1, {"natural": "wetland", "landuse": "grass"}, polygon),
+        (2, {"leisure": "park"}, polygon),
+    ]
+    render, _raw = main.tile_to_geojson(data, 17220, 11723, 15)
+    assert [f["properties"]["cmtype"] for f in render] == ["water", "green"]
+    assert render[1]["properties"]["green"] == "dense"
+
+
 def test_crossing_points_from_rows_keeps_points_only():
     point = shapely.to_wkb(geom("POINT (9.18 45.5)"))
     line = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))

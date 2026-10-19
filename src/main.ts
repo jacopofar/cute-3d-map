@@ -23,6 +23,7 @@ import type { BuildingInfo, TrafficLoop, WaterInfo } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { CloudLayer } from "./clouds.ts";
 import { facadeMaterial, tileFacadeDetail } from "./elements3d/facade.ts";
+import { greenMaterial } from "./elements3d/green.ts";
 import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
 
 // Import our custom CSS
@@ -183,6 +184,8 @@ class CoolMap {
   // the church cross is a per-tile mesh as well: the toggle hides the ornament,
   // the church walls stay buildings (its stony look is baked into them)
   private churchesEnabled = true;
+  // parks and grass are their own per-tile mesh too: a plain visibility switch
+  private parksEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -409,6 +412,7 @@ class CoolMap {
         // drive the water ripples from wall-clock time (the render loop runs
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
+        greenMaterial.uniforms.uTime.value = performance.now() / 1000;
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -513,6 +517,10 @@ class CoolMap {
     wireToggle("#churches-toggle", (on) => {
       this.churchesEnabled = on;
       this.applyChurchVisibility();
+    });
+    wireToggle("#parks-toggle", (on) => {
+      this.parksEnabled = on;
+      this.applyGreenVisibility();
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -1071,12 +1079,24 @@ class CoolMap {
     }
   }
 
+  // ... and so is the green layer
+  private applyGreenVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "green") {
+          mesh.visible = this.parksEnabled;
+        }
+      }
+    }
+  }
+
   // the per-tile layers whose checkbox is just a visibility switch
   private applyTileVisibility() {
     this.applyRoofVisibility();
     this.applyWaterVisibility();
     this.applyBenchVisibility();
     this.applyChurchVisibility();
+    this.applyGreenVisibility();
   }
 
   private disposeDetail(key: string) {

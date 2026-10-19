@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { church, isChurch } from "./elements3d/church";
+import { green, greenMaterial } from "./elements3d/green";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
@@ -71,7 +72,14 @@ export function geoJSONtoGeometries(
   scaleFactor: number,
   imputedColors = true,
 ): {
-  kind: "building" | "roof" | "church" | "tree" | "water" | "bench";
+  kind:
+    | "building"
+    | "roof"
+    | "church"
+    | "tree"
+    | "water"
+    | "green"
+    | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
   if (!f.properties) {
@@ -114,6 +122,9 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "bench") {
     return [{ kind: "bench", geometries: bench(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "green") {
+    return [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
   }
 
   console.error("Cannot handle feature:", f);
@@ -282,9 +293,11 @@ export async function objectsAt(
             ? churchMaterial
             : kind === "water"
               ? waterMaterial
-              : kind === "bench"
-                ? benchMaterial
-                : treeMaterial;
+              : kind === "green"
+                ? greenMaterial
+                : kind === "bench"
+                  ? benchMaterial
+                  : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);
