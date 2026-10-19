@@ -8,6 +8,7 @@ import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
 import { bench } from "./elements3d/bench";
+import { aeroway, aerowayMaterial } from "./elements3d/aeroway";
 
 // square building with an hole, to test this kind of shape and highlight skew
 // import myGeoJSON from './bicocca_hole.json';
@@ -79,6 +80,7 @@ export function geoJSONtoGeometries(
     | "tree"
     | "water"
     | "green"
+    | "aeroway"
     | "bench";
   geometries: THREE.BufferGeometry[];
 }[] {
@@ -125,6 +127,11 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "green") {
     return [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "aeroway") {
+    return [
+      { kind: "aeroway", geometries: aeroway(originMeters, scaleFactor, f) },
+    ];
   }
 
   console.error("Cannot handle feature:", f);
@@ -207,6 +214,14 @@ export interface WaterInfo {
   lines: [number, number][][];
 }
 
+// a runway centreline, carried out of a tile for the airplane layer (the plane
+// paths are derived from the same line the surface is drawn from)
+export interface RunwayLine {
+  id: string;
+  coords: [number, number][];
+  width: number;
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -214,6 +229,8 @@ export interface TileObjects {
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
+  // runway centrelines; a runway spanning tiles repeats, deduped by id in main
+  runways: RunwayLine[];
 }
 
 export async function objectsAt(
@@ -232,7 +249,14 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
+    return {
+      meshes: [],
+      buildings: [],
+      water: [],
+      traffic: [],
+      crossings: [],
+      runways: [],
+    };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
   // /tiles/... path with index.html and a 200, so a permalink pointing outside
@@ -240,7 +264,14 @@ export async function objectsAt(
   // every move. Not JSON means "nothing here" as far as the map is concerned.
   if (!(response.headers.get("content-type") ?? "").includes("json")) {
     console.warn(`tile ${x}/${y} is not JSON, treating it as empty`);
-    return { meshes: [], buildings: [], water: [], traffic: [], crossings: [] };
+    return {
+      meshes: [],
+      buildings: [],
+      water: [],
+      traffic: [],
+      crossings: [],
+      runways: [],
+    };
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);
@@ -255,6 +286,7 @@ export async function objectsAt(
   const buildings: BuildingInfo[] = [];
   const water: WaterInfo[] = [];
   const crossings: [number, number][] = [];
+  const runways: RunwayLine[] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
     if (cmtype === "traffic_signal" || cmtype === "crossing") {
@@ -274,6 +306,9 @@ export async function objectsAt(
       buildings.push(buildingInfo(f));
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
+    } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
+      const runway = runwayInfo(f);
+      if (runway) runways.push(runway);
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
@@ -295,9 +330,11 @@ export async function objectsAt(
               ? waterMaterial
               : kind === "green"
                 ? greenMaterial
-                : kind === "bench"
-                  ? benchMaterial
-                  : treeMaterial;
+                : kind === "aeroway"
+                  ? aerowayMaterial
+                  : kind === "bench"
+                    ? benchMaterial
+                    : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       meshes.push(mesh);
@@ -309,7 +346,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, water, traffic, crossings };
+  return { meshes, buildings, water, traffic, crossings, runways };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -365,6 +402,30 @@ export function waterInfo(f: Geojson.Feature): WaterInfo {
     kind: typeof props.water === "string" ? props.water : "",
     rings,
     lines,
+  };
+}
+
+// a runway centreline for the airplane layer. `id` is optional in the data;
+// tiles written by the current generator always carry one, so a missing id just
+// drops the runway rather than risking two runways merging under one key.
+export function runwayInfo(f: Geojson.Feature): RunwayLine | null {
+  const geom = f.geometry;
+  const coords: [number, number][] = [];
+  if (geom.type === "LineString") {
+    coords.push(...(geom.coordinates as [number, number][]));
+  } else if (geom.type === "MultiLineString") {
+    for (const line of geom.coordinates) {
+      coords.push(...(line as [number, number][]));
+    }
+  } else {
+    return null;
+  }
+  if (coords.length < 2 || typeof f.id !== "string") return null;
+  const props = f.properties ?? {};
+  return {
+    id: f.id,
+    coords,
+    width: Number(props.width) > 0 ? Number(props.width) : 45,
   };
 }
 

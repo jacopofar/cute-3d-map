@@ -493,6 +493,57 @@ def test_tile_to_geojson_adds_green_after_water():
     assert render[1]["properties"]["green"] == "dense"
 
 
+def test_to_aeroway_line_keeps_the_whole_geometry_and_a_default_width():
+    line = geom("LINESTRING (9.27 45.44, 9.28 45.45)")
+    f = main.to_aeroway(1, {"aeroway": "runway"}, line)
+    assert f is not None
+    assert f["properties"] == {
+        "cmtype": "aeroway",
+        "aeroway": "runway",
+        "width": 45.0,
+    }
+    # the whole line is stored (not clipped) and the feature keeps its id, so
+    # the frontend can dedupe a runway that spans tiles
+    assert f["id"] == 1
+    assert shapely.from_geojson(json.dumps(f["geometry"])).equals(line)
+
+
+def test_to_aeroway_uses_the_width_tag():
+    line = geom("LINESTRING (0 0, 1 1)")
+    f = main.to_aeroway(2, {"aeroway": "taxiway", "width": "7.5"}, line)
+    assert f is not None
+    assert f["properties"]["width"] == 7.5
+
+
+def test_to_aeroway_areas_and_helipad():
+    area = geom(POLYGON)
+    apron = main.to_aeroway(3, {"aeroway": "apron"}, area)
+    assert apron is not None
+    # an area carries no width: its extent is the polygon
+    assert apron["properties"] == {"cmtype": "aeroway", "aeroway": "apron"}
+    # a helipad mapped as a node has nothing to draw
+    assert main.to_aeroway(4, {"aeroway": "helipad"}, geom("POINT (9.2 45.5)")) is None
+
+
+def test_to_aeroway_ignores_other_aeroway_kinds():
+    assert main.to_aeroway(5, {"aeroway": "hangar"}, geom(POLYGON)) is None
+    # a runway that came through as an area is dropped rather than ribboned
+    assert main.to_aeroway(6, {"aeroway": "runway"}, geom(POLYGON)) is None
+
+
+def test_tile_to_geojson_includes_aeroway():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    cx = (min_lon + max_lon) / 2
+    cy = (min_lat + max_lat) / 2
+    runway = shapely.to_wkb(geom(f"LINESTRING ({cx} {cy}, {cx + 1e-4} {cy + 1e-4})"))
+    render, raw = main.tile_to_geojson(
+        [(1, {"aeroway": "runway"}, runway)], 17220, 11723, 15
+    )
+    assert [f["properties"]["cmtype"] for f in render] == ["aeroway"]
+    assert render[0]["properties"]["aeroway"] == "runway"
+    assert len(raw) == 1
+
+
 def test_crossing_points_from_rows_keeps_points_only():
     point = shapely.to_wkb(geom("POINT (9.18 45.5)"))
     line = shapely.to_wkb(geom("LINESTRING (0 0, 1 1)"))
