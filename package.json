@@ -10,7 +10,8 @@
     "prettify": "npx prettier src/**.ts --write",
     "test:unit": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "bench": "playwright test --config playwright.bench.config.ts"
+    "bench": "playwright test --config playwright.bench.config.ts",
+    "bench:gpu": "playwright test --config playwright.gpu.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
