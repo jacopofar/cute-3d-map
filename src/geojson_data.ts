@@ -245,6 +245,12 @@ export interface RunwayLine {
   width: number;
 }
 
+// an apron outline for the airplane layer, which parks static airliners on it
+export interface ApronRing {
+  id: string;
+  ring: [number, number][];
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -254,6 +260,8 @@ export interface TileObjects {
   crossings: [number, number][];
   // runway centrelines; a runway spanning tiles repeats, deduped by id in main
   runways: RunwayLine[];
+  // apron outlines, for the parked airliners; deduped by id in main
+  aprons: ApronRing[];
 }
 
 export async function objectsAt(
@@ -279,6 +287,7 @@ export async function objectsAt(
       traffic: [],
       crossings: [],
       runways: [],
+      aprons: [],
     };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
@@ -294,6 +303,7 @@ export async function objectsAt(
       traffic: [],
       crossings: [],
       runways: [],
+      aprons: [],
     };
   }
   if (!response.ok) {
@@ -310,6 +320,7 @@ export async function objectsAt(
   const water: WaterInfo[] = [];
   const crossings: [number, number][] = [];
   const runways: RunwayLine[] = [];
+  const aprons: ApronRing[] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
     if (cmtype === "traffic_signal" || cmtype === "crossing") {
@@ -332,6 +343,9 @@ export async function objectsAt(
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
+    } else if (cmtype === "aeroway" && f.properties?.aeroway === "apron") {
+      const apron = apronInfo(f);
+      if (apron) aprons.push(apron);
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
@@ -375,7 +389,7 @@ export async function objectsAt(
       );
     }
   }
-  return { meshes, buildings, water, traffic, crossings, runways };
+  return { meshes, buildings, water, traffic, crossings, runways, aprons };
 }
 
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
@@ -456,6 +470,22 @@ export function runwayInfo(f: Geojson.Feature): RunwayLine | null {
     coords,
     width: Number(props.width) > 0 ? Number(props.width) : 45,
   };
+}
+
+// an apron outline for the parked airliners. Only the outer ring is used (the
+// planes sit on the stand area, not in a courtyard); a missing id drops the
+// apron, as with runways.
+export function apronInfo(f: Geojson.Feature): ApronRing | null {
+  const geom = f.geometry;
+  let ring: [number, number][] | undefined;
+  if (geom.type === "Polygon") {
+    ring = geom.coordinates[0] as [number, number][];
+  } else if (geom.type === "MultiPolygon") {
+    const first = geom.coordinates[0];
+    if (first) ring = first[0] as [number, number][];
+  }
+  if (!ring || ring.length < 4 || typeof f.id !== "string") return null;
+  return { id: f.id, ring };
 }
 
 // the traffic block as written by tilegen (colors are "rrggbb" strings there,

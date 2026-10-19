@@ -91,4 +91,81 @@ describe("PlaneLayer", () => {
     // do not agree)
     expect(mesh.geometry.getAttribute("position").count).toBeGreaterThan(200);
   });
+
+  it("a takeoff climbs out without reversing or shrinking in mid-air", () => {
+    const scene = new THREE.Scene();
+    const layer = new PlaneLayer(scene);
+    // a straight north-south runway, so the model y is the along-runway axis
+    layer.setRunways([
+      {
+        id: "way/2",
+        coords: [
+          [9.27, 45.44],
+          [9.27, 45.45],
+        ],
+        width: 45,
+      },
+    ]);
+    const mesh = airplaneMesh(scene);
+    const matrix = new THREE.Matrix4();
+    const columns: { y: number; z: number; scale: number }[] = [];
+    const spans: { y: number; z: number; scale: number }[][] = [];
+    for (let t = 0; t < 400; t += 0.1) {
+      layer.update(ORIGIN_METERS, SCALE, { zoom: 17, now: t * 1000 });
+      mesh.getMatrixAt(0, matrix);
+      const e = matrix.elements;
+      const scale = Math.hypot(e[0], e[1], e[2]);
+      if (scale <= 0) {
+        if (columns.length > 0) spans.push(columns.splice(0));
+        continue;
+      }
+      columns.push({ y: e[13], z: e[14], scale });
+    }
+    if (columns.length > 0) spans.push(columns);
+
+    expect(spans.length).toBeGreaterThan(0);
+    let climbedHigh = false;
+    for (const span of spans) {
+      // a flight never turns back on itself: the old bug bounced it off the
+      // end of the runway by extrapolating the wrong way
+      const direction = Math.sign(span[span.length - 1].y - span[0].y);
+      for (let i = 1; i < span.length; i++) {
+        if (direction >= 0) {
+          expect(span[i].y).toBeGreaterThanOrEqual(span[i - 1].y - 1e-6);
+        } else {
+          expect(span[i].y).toBeLessThanOrEqual(span[i - 1].y + 1e-6);
+        }
+      }
+      // and it is never shrunk to hide it: it climbs and the schedule drops it
+      for (const sample of span) {
+        if (sample.z > 5) expect(sample.scale).toBeCloseTo(1, 6);
+        if (sample.z > 300) climbedHigh = true;
+      }
+    }
+    expect(climbedHigh).toBe(true);
+  });
+
+  it("parks static airliners on an apron", () => {
+    const scene = new THREE.Scene();
+    const layer = new PlaneLayer(scene);
+    const mesh = airplaneMesh(scene);
+    layer.setAprons([
+      [
+        [9.27, 45.44],
+        [9.3, 45.44],
+        [9.3, 45.445],
+        [9.27, 45.445],
+        [9.27, 45.44],
+      ],
+    ]);
+    layer.update(ORIGIN_METERS, SCALE, { zoom: 17, now: 0 });
+    expect(mesh.count).toBeGreaterThanOrEqual(1);
+    const first = new THREE.Matrix4();
+    mesh.getMatrixAt(0, first);
+    // the parked planes do not move with the clock
+    layer.update(ORIGIN_METERS, SCALE, { zoom: 17, now: 5000 });
+    const later = new THREE.Matrix4();
+    mesh.getMatrixAt(0, later);
+    expect(first.equals(later)).toBe(true);
+  });
 });

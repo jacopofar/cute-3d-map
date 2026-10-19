@@ -20,6 +20,7 @@ import {
   toModelCoords,
 } from "./geojson_data.ts";
 import type {
+  ApronRing,
   BuildingInfo,
   RunwayLine,
   TrafficLoop,
@@ -199,6 +200,7 @@ class CoolMap {
   private loadedWater: { [key: string]: WaterInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
+  private loadedAprons: { [key: string]: ApronRing[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
   // facade detail (windows/doors and balconies) meshes per tile, built only
@@ -694,6 +696,7 @@ class CoolMap {
     this.loadedWater = {};
     this.loadedCrossings = {};
     this.loadedRunways = {};
+    this.loadedAprons = {};
     this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
@@ -1015,6 +1018,7 @@ class CoolMap {
         delete this.loadedWater[k];
         delete this.loadedCrossings[k];
         delete this.loadedRunways[k];
+        delete this.loadedAprons[k];
         this.disposeDetail(k);
         deleteUsKeys.push(k);
       }
@@ -1053,7 +1057,7 @@ class CoolMap {
     }
     this.pendingTiles.add(tileKey);
     try {
-      const { meshes, buildings, water, traffic, crossings, runways } =
+      const { meshes, buildings, water, traffic, crossings, runways, aprons } =
         await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
@@ -1077,6 +1081,7 @@ class CoolMap {
       this.loadedWater[tileKey] = water;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedRunways[tileKey] = runways;
+      this.loadedAprons[tileKey] = aprons;
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
@@ -1392,18 +1397,25 @@ class CoolMap {
     );
   }
 
-  // hand the plane layer the loaded runways. A runway stored whole repeats
-  // across the tiles it spans, so dedupe by id here (the first copy wins; they
-  // are the same line).
+  // hand the plane layer the loaded runways (as flight paths) and aprons (as
+  // parking). A runway or apron stored whole repeats across the tiles it spans,
+  // so dedupe by id here (the first copy wins; they are the same geometry).
   private syncAirplanes() {
     if (!this.airplanes) return;
-    const byId = new Map<string, RunwayLine>();
+    const runwaysById = new Map<string, RunwayLine>();
     for (const runways of Object.values(this.loadedRunways)) {
       for (const runway of runways) {
-        if (!byId.has(runway.id)) byId.set(runway.id, runway);
+        if (!runwaysById.has(runway.id)) runwaysById.set(runway.id, runway);
       }
     }
-    this.airplanes.setRunways([...byId.values()]);
+    const apronsById = new Map<string, ApronRing>();
+    for (const aprons of Object.values(this.loadedAprons)) {
+      for (const apron of aprons) {
+        if (!apronsById.has(apron.id)) apronsById.set(apron.id, apron);
+      }
+    }
+    this.airplanes.setRunways([...runwaysById.values()]);
+    this.airplanes.setAprons([...apronsById.values()].map((a) => a.ring));
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the

@@ -35,17 +35,32 @@ const PLANE_LENGTH = 30;
 // roughly a quarter to a third of the time — "now and then", not a shuttle.
 const EVENT_CHANCE = 72; // percent of periods with a flight
 const TAKEOFF_SHARE = 62; // of the flights, percent that are departures
-const TAKEOFF_SECONDS = 30; // line up, roll, lift off
-const LANDING_SECONDS = 32; // approach, touch down, roll out
+// A takeoff: line up, roll, then climb out and vanish. The climb is long and
+// accelerating on purpose: the plane gains altitude fast enough to leave the
+// eye before the schedule hides it, so the pop is a speck disappearing rather
+// than the mesh shrinking in mid-air.
+const TAKEOFF_SECONDS = 34; // 2 + 16 + 16
+const LANDING_SECONDS = 29; // 14 + 12 + 3
 // the sub-phases inside those, in seconds
 const TAKEOFF_LINEUP = 2;
 const TAKEOFF_ROLL = 16;
 const LANDING_APPROACH = 14;
-const LANDING_ROLL = 13;
-// how far past the runway end a departing/arriving plane travels before it is
-// hidden, as a fraction of the runway length
-const OVERRUN_FRACTION = 0.6;
-const CLIMB_METERS = 150;
+const LANDING_ROLL = 12;
+// how far past the runway end a departing/arriving plane travels, as a fraction
+// of the runway length (the climb keeps accelerating through it)
+const OVERRUN_FRACTION = 0.8;
+// the altitude a departing plane reaches when the schedule hides it; the climb
+// is accelerating (altitude ∝ f^1.8), so it lifts off gently and is climbing
+// hard at the end
+const CLIMB_METERS = 650;
+const TAKEOFF_PITCH = (12 * Math.PI) / 180;
+// the altitude on final a landing plane starts its approach from
+const APPROACH_METERS = 220;
+// parked airliners: how far apart along an apron edge, how far inside the edge,
+// and at most how many on one apron
+const PARKING_SPACING = 120;
+const PARKING_INSET = 24;
+const MAX_PARKED_PER_APRON = 3;
 
 interface PreparedRunway {
   id: string;
@@ -56,6 +71,13 @@ interface PreparedRunway {
   total: number;
   period: number; // seconds between two flights
   offset: number; // seconds, so two runways do not fire in lockstep
+}
+
+// a stationary airliner parked on an apron, placed from the apron's outline
+interface ParkedPlane {
+  lon: number;
+  lat: number;
+  heading: number; // radians, model space
 }
 
 interface Flight {
@@ -124,13 +146,15 @@ function pointAt(
   const { points, cum, total } = rw;
   const target = u * total;
   if (target <= 0) {
+    // extrapolate backwards past the stored start: `local` is negative, and the
+    // plane arrives at `a` from `b`, so it keeps going in the a - b direction
     const a = points[0];
     const b = points[1];
     const len = segLength(a, b) || 1;
     const local = target / len;
     return {
-      lon: a[0] + (a[0] - b[0]) * local,
-      lat: a[1] + (a[1] - b[1]) * local,
+      lon: a[0] + (b[0] - a[0]) * local,
+      lat: a[1] + (b[1] - a[1]) * local,
       heading: segHeading(a, b),
     };
   }
@@ -177,16 +201,18 @@ function flightState(
       // lined up at the threshold, engines spooling
       u = 0;
     } else if (local < TAKEOFF_LINEUP + TAKEOFF_ROLL) {
-      // the takeoff roll: accelerate, so the ground speed ramps up
+      // the takeoff roll: accelerate along the runway, rotating near the end
       const f = (local - TAKEOFF_LINEUP) / TAKEOFF_ROLL;
       u = f ** 1.7;
+      pitch = TAKEOFF_PITCH * smoothstep((f - 0.85) / 0.15);
     } else {
-      // rotation and climb out past the far threshold, receding and shrinking
+      // climb out past the far threshold, accelerating both along the ground
+      // and upward; the schedule hides the plane at the end of this, by which
+      // point it is a speck high above the runway
       const f = (local - TAKEOFF_LINEUP - TAKEOFF_ROLL) / climb;
-      u = 1 + f * OVERRUN_FRACTION;
-      altitude = CLIMB_METERS * f;
-      pitch = 9 * DEG2RAD;
-      scale = 1 - smoothstep((f - 0.55) / 0.45);
+      u = 1 + OVERRUN_FRACTION * f ** 1.5;
+      altitude = CLIMB_METERS * f ** 1.8;
+      pitch = TAKEOFF_PITCH;
     }
   } else {
     const exit = LANDING_SECONDS - LANDING_APPROACH - LANDING_ROLL;
@@ -194,14 +220,14 @@ function flightState(
       // on final: descend toward the touchdown zone, nose a touch up
       const f = local / LANDING_APPROACH;
       u = 1 + OVERRUN_FRACTION - f * (0.1 + OVERRUN_FRACTION);
-      altitude = 130 * (1 - f);
+      altitude = APPROACH_METERS * (1 - f);
       pitch = 3 * DEG2RAD;
     } else if (local < LANDING_APPROACH + LANDING_ROLL) {
       // touch down and roll out, decelerating toward the taxiway
       const f = (local - LANDING_APPROACH) / LANDING_ROLL;
       u = 0.9 - f * 0.75;
     } else {
-      // leave the runway and fade out (there is no taxiway path to follow)
+      // leave the runway and fade (there is no taxiway path to follow)
       const f = (local - LANDING_APPROACH - LANDING_ROLL) / exit;
       u = 0.15 - f * 0.12;
       scale = 1 - f;
@@ -332,9 +358,10 @@ export class PlaneLayer {
   private readonly pitchQ = new THREE.Quaternion();
   private readonly capacity: number;
   private runways: PreparedRunway[] = [];
+  private parked: ParkedPlane[] = [];
   private enabled = true;
 
-  constructor(scene: THREE.Scene, capacity = 32) {
+  constructor(scene: THREE.Scene, capacity = 64) {
     this.capacity = capacity;
     const material = new THREE.MeshLambertMaterial({ vertexColors: true });
     this.mesh = new THREE.InstancedMesh(
@@ -392,6 +419,68 @@ export class PlaneLayer {
     this.runways = prepared;
   }
 
+  // The apron outlines the loaded tiles carry, deduped by id in main.ts. A
+  // parked airliner is placed along the apron's longest edge, nose-in toward
+  // that edge, so a row of them reads as aircraft at the stands.
+  setAprons(rings: [number, number][][]): void {
+    const parked: ParkedPlane[] = [];
+    for (const ring of rings) {
+      if (ring.length < 4) continue;
+      // the longest edge, which a terminal apron lines with
+      let best = 0;
+      let edge = 0;
+      for (let i = 0; i < ring.length - 1; i++) {
+        const length = segLength(ring[i], ring[i + 1]);
+        if (length > best) {
+          best = length;
+          edge = i;
+        }
+      }
+      if (best < 60) continue;
+      const a = ring[edge];
+      const b = ring[edge + 1];
+      const heading = segHeading(a, b);
+      const cosLat = Math.cos((((a[1] + b[1]) / 2) * Math.PI) / 180);
+      // the edge normal in meters (east, north), flipped to point at the
+      // apron's inside (its vertex average)
+      let nEast = -Math.sin(heading);
+      let nNorth = Math.cos(heading);
+      let cEast = 0;
+      let cNorth = 0;
+      const midLon = (a[0] + b[0]) / 2;
+      const midLat = (a[1] + b[1]) / 2;
+      for (const point of ring) {
+        cEast += (point[0] - midLon) * METERS_PER_DEG_LON * cosLat;
+        cNorth += (point[1] - midLat) * METERS_PER_DEG_LAT;
+      }
+      if (nEast * cEast + nNorth * cNorth < 0) {
+        nEast = -nEast;
+        nNorth = -nNorth;
+      }
+      // nose-in means the plane points back out of the apron, at the edge
+      const parkedHeading = Math.atan2(-nNorth, -nEast);
+      const count = Math.min(
+        MAX_PARKED_PER_APRON,
+        Math.max(1, Math.round(best / PARKING_SPACING)),
+      );
+      for (let i = 0; i < count; i++) {
+        const t = count === 1 ? 0.5 : (i + 0.5) / count;
+        parked.push({
+          lon:
+            a[0] +
+            (b[0] - a[0]) * t +
+            (nEast * PARKING_INSET) / (METERS_PER_DEG_LON * cosLat),
+          lat:
+            a[1] +
+            (b[1] - a[1]) * t +
+            (nNorth * PARKING_INSET) / METERS_PER_DEG_LAT,
+          heading: parkedHeading,
+        });
+      }
+    }
+    this.parked = parked;
+  }
+
   // place a plane for every runway for the current wall-clock phase
   update(
     originMeters: [number, number],
@@ -420,6 +509,22 @@ export class PlaneLayer {
       this.pitchQ.setFromAxisAngle(Y_AXIS, -flight.pitch);
       this.dummy.quaternion.copy(this.yaw).multiply(this.pitchQ);
       this.dummy.scale.setScalar(flight.scale);
+      this.dummy.updateMatrix();
+      this.mesh.setMatrixAt(slot, this.dummy.matrix);
+      slot++;
+    }
+    // the parked airliners are static: no schedule, no altitude, always up
+    for (const plane of this.parked) {
+      if (slot >= this.capacity) break;
+      const m = toModelCoords(
+        [plane.lon, plane.lat],
+        originMeters,
+        scaleFactor,
+      );
+      this.dummy.position.set(m[0], m[1], 0);
+      this.yaw.setFromAxisAngle(Z_AXIS, plane.heading);
+      this.dummy.quaternion.copy(this.yaw);
+      this.dummy.scale.setScalar(1);
       this.dummy.updateMatrix();
       this.mesh.setMatrixAt(slot, this.dummy.matrix);
       slot++;
