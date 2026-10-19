@@ -94,7 +94,8 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   projection origin change. It follows the facade gate: above `FACADE_MIN_ZOOM`
   and only for the 3x3 tiles around the centre, so it holds ~60k instances rather
   than the ~370k of the whole loaded window. `#parked-cars-toggle` is a plain
-  visibility switch.
+  visibility switch. Uses a lit material (unlike the moving fleet's unlit basic
+  one), so parked cars darken at night.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
@@ -112,7 +113,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
 - `tilegen/parking.py` — places static parked cars: both sides of every
   parking-eligible highway, bays at a pitch set by a seeded style (`parallel`,
   `perpendicular`, `fishbone`), 95% occupied. Skips motorways/trunks/links,
-  roundabouts and ways under `MIN_WAY_LENGTH`; spots are grouped per tile. Pure
+  roundabouts and ways under `MIN_WAY_LENGTH`; spots are grouped per tile.
+  Overlapping ways (a service way along a road, dual carriageways) are deduped
+  at `MIN_SPOT_SPACING`, the higher road class winning. Pure
   (plain `ParkingWay` inputs; `main.load_parking_ways` reads the parquet), so it
   is unit-tested like `traffic.py`.
 

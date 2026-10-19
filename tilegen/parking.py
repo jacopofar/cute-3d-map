@@ -8,7 +8,9 @@ them with the moving cars' body, statically.
 
 Short ways (the connectors that stitch the network together) and roundabouts are
 skipped: they are not streets anyone parks along, and filling them would only add
-cars in intersections and on traffic islands.
+cars in intersections and on traffic islands. Different ways that share a kerb
+(a service way beside a road, the two carriageways of a dual carriageway) are
+deduped, keeping the bigger road's car, so two styles never occupy one spot.
 
 The ways are read from the parquet in `main.load_parking_ways`; this module is
 pure (plain `ParkingWay` inputs) so it is unit-tested like `traffic.py`.
@@ -64,6 +66,25 @@ FISHBONE = "fishbone"
 
 # percent of bays that hold a car; the rest are empty slots
 OCCUPANCY = 95
+
+# Two different ways can share a kerb (a service way beside a secondary road, or
+# the two carriageways of a dual carriageway): their bays would overlap and
+# z-fight. Keep one car when two bays land this close (the higher road class
+# wins). Adjacent perpendicular bays are ~2.03 m apart, so this threshold does
+# not eat legitimate neighbours.
+MIN_SPOT_SPACING = 2.0
+
+# which way wins when two ways overlap: the bigger road keeps its parking
+HIGHWAY_RANK = {
+    "primary": 0,
+    "secondary": 1,
+    "tertiary": 2,
+    "road": 3,
+    "unclassified": 4,
+    "residential": 5,
+    "living_street": 6,
+    "service": 7,
+}
 
 METERS_PER_DEG_LAT = 110540.0
 METERS_PER_DEG_LON = 111320.0
@@ -211,14 +232,62 @@ def _car_at(
     )
 
 
+def _dedupe(
+    spots: list[tuple[float, float, float]],
+) -> list[tuple[float, float, float]]:
+    """Drop cars that sit on top of an already-kept car.
+
+    Overlapping OSM ways (a service way along a secondary road, the two
+    carriageways of a dual carriageway) produce bays at nearly the same place,
+    often with different styles; two intersecting car boxes read as overlapping
+    cars and z-fight. The input order is by road class, so the bigger road's car
+    is the one kept. A spatial hash at the spacing size makes this linear.
+    """
+    if not spots:
+        return []
+    cell = MIN_SPOT_SPACING
+    grid: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
+    kept: list[tuple[float, float, float]] = []
+    # one reference latitude for every point, so distances are consistent; using
+    # each point's own cos would overstate the separation between neighbours
+    reference_lat = sum(lat for _, lat, _ in spots) / len(spots)
+    cos_ref = math.cos(math.radians(reference_lat))
+    for lon, lat, heading in spots:
+        x = lon * METERS_PER_DEG_LON * cos_ref
+        y = lat * METERS_PER_DEG_LAT
+        cx = math.floor(x / cell)
+        cy = math.floor(y / cell)
+        clash = False
+        for ix in (cx - 1, cx, cx + 1):
+            for iy in (cy - 1, cy, cy + 1):
+                for ox, oy in grid[(ix, iy)]:
+                    if math.hypot(x - ox, y - oy) < MIN_SPOT_SPACING:
+                        clash = True
+                        break
+                if clash:
+                    break
+            if clash:
+                break
+        if clash:
+            continue
+        grid[(cx, cy)].append((x, y))
+        kept.append((lon, lat, heading))
+    return kept
+
+
 def parking_spots(
     ways: list[ParkingWay], zoom: int = TILE_ZOOM
 ) -> dict[tuple[int, int], list[list[float]]]:
     """All parked cars, grouped by the tile they fall in. Each spot is
     [lon, lat, heading]; a car belongs to exactly one tile, so tiles need no
-    clipping or dedupe."""
-    by_tile: dict[tuple[int, int], list[list[float]]] = defaultdict(list)
-    for way in ways:
+    clipping. Overlapping ways are deduped first, with the bigger road winning."""
+    raw: list[tuple[float, float, float]] = []
+    # deterministic order, and the bigger road keeps its parking on an overlap
+    ordered = sorted(
+        ways,
+        key=lambda way: (HIGHWAY_RANK.get(way.highway, len(HIGHWAY_RANK)), way.id),
+    )
+    for way in ordered:
         if way.roundabout or way.highway not in PARKING_HIGHWAYS:
             continue
         if way_length(way.coords) < MIN_WAY_LENGTH:
@@ -231,11 +300,12 @@ def parking_spots(
                 # 95% of the bays hold a car; 5% are empty, seeded per bay
                 if _mix(seed ^ (side & 0xFFFFFFFF), index) % 100 >= OCCUPANCY:
                     continue
-                car_lon, car_lat, car_heading = _car_at(
-                    lon, lat, heading, side, style, way.highway
-                )
-                tile = coord_to_tile(car_lon, car_lat, zoom)
-                by_tile[tile].append(
-                    [round(car_lon, 7), round(car_lat, 7), round(car_heading, 4)]
-                )
+                raw.append(_car_at(lon, lat, heading, side, style, way.highway))
+
+    by_tile: dict[tuple[int, int], list[list[float]]] = defaultdict(list)
+    for car_lon, car_lat, car_heading in _dedupe(raw):
+        tile = coord_to_tile(car_lon, car_lat, zoom)
+        by_tile[tile].append(
+            [round(car_lon, 7), round(car_lat, 7), round(car_heading, 4)]
+        )
     return dict(by_tile)

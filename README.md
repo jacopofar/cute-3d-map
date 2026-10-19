@@ -207,10 +207,13 @@ to bays.
 
 Each occupied bay belongs to exactly one tile (no clipping), stored in that
 tile's `parking` block, and the frontend draws them with the moving cars' body
-as one static `InstancedMesh`. Like the window detail it only exists above zoom
-17 and only for the 3x3 tiles around the centre: the fully loaded 7x7 window
-would be ~370k cars, almost all off-screen. The **parked cars** checkbox is a
-plain visibility switch.
+as one static `InstancedMesh`. Ways that share a kerb (a service way beside a
+road, the two carriageways of a dual carriageway) are deduped, with the bigger
+road winning, so two styles never stack on one spot. Parked cars are lit like
+the buildings, so they darken at night, unlike the unlit moving fleet. Like the
+window detail the layer only exists above zoom 17 and only for the 3x3 tiles
+around the centre: the fully loaded 7x7 window would be ~370k cars, almost all
+off-screen. The **parked cars** checkbox is a plain visibility switch.
 
 ### Loop report
 
