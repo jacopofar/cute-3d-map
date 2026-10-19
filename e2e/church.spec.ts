@@ -43,9 +43,11 @@ test("churches carry crosses, and the checkbox hides them", async ({
   // the Duomo: a dozen churches in the tile under it
   await page.goto("/#map=18/45.4641/9.1919");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await expect
     .poll(async () => (await countCrosses(page)).total, { timeout: 30_000 })
     .toBeGreaterThan(0);

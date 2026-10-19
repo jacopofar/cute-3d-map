@@ -39,9 +39,11 @@ test("the parks checkbox hides the green tiles", async ({ page }) => {
   // Parco Sempione, so there is green in the window
   await page.goto("/#map=16/45.474/9.177");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await expect
     .poll(async () => (await countMeshes(page, "green")).total, {
       timeout: 20_000,

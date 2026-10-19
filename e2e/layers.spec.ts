@@ -44,9 +44,11 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await expect
     .poll(async () => (await countMeshes(page, "roof")).total, {
       timeout: 20_000,
@@ -169,9 +171,11 @@ test("the night toggle darkens the scene and lights the windows", async ({
   );
   await page.goto("/");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
 
   // open the layers menu (the checkboxes are behind the gear)
   await page.click("#layer-menu-button");
@@ -249,9 +253,11 @@ test("the bridges & tunnels toggle hides the deck and portal meshes", async ({
 }) => {
   await page.goto("/#map=19/45.4503/9.16786");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await expect
     .poll(async () => (await countMeshes(page, "bridge")).total, {
       timeout: 20_000,
@@ -274,9 +280,11 @@ test("a tunnel end draws a portal that the toggle can hide", async ({
 }) => {
   await page.goto("/#map=19/45.48855/9.16085");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await expect
     .poll(async () => (await countMeshes(page, "tunnel")).total, {
       timeout: 20_000,

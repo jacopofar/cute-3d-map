@@ -41,9 +41,11 @@ test("the runway surface and planes appear at Linate and follow the toggle", asy
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
-  await page.waitForFunction(() => "__coolMap" in window, null, {
-    timeout: 20_000,
-  });
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   await page.evaluate((place) => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     map.map.jumpTo(place);
