@@ -8,6 +8,7 @@ import {
   DEFAULT_WATER_COLOR,
   UNDERWATER_OPACITY,
   WATERWAY_WIDTH,
+  cameraCenter,
   water,
   waterColor,
   waterFade,
@@ -93,12 +94,13 @@ describe("water", () => {
   it("buffers a line into a ribbon of the class width", () => {
     const [geometry] = water(ORIGIN_METERS, SCALE, lineFeature("canal"));
     const position = geometry.getAttribute("position");
-    // one segment -> two triangles -> six vertices
-    expect(position.count).toBe(6);
-    // the first two vertices are the two sides of the first cross-section
+    // one segment -> four triangles (two per half, because of the centre row)
+    expect(position.count).toBe(12);
+    // the first and the seventh vertices are the two banks of the first
+    // cross-section: same row as before, the centre row sits between them
     const width = Math.hypot(
-      position.getX(1) - position.getX(0),
-      position.getY(1) - position.getY(0),
+      position.getX(7) - position.getX(0),
+      position.getY(7) - position.getY(0),
     );
     expect(width).toBeCloseTo(WATERWAY_WIDTH.canal, 4);
     for (let i = 0; i < position.count; i++) {
@@ -106,12 +108,32 @@ describe("water", () => {
     }
   });
 
+  it("keeps the ribbon centre row between the banks", () => {
+    const [geometry] = water(ORIGIN_METERS, SCALE, lineFeature("canal"));
+    const position = geometry.getAttribute("position");
+    const bank = geometry.getAttribute("aFoam");
+    expect(bank.count).toBe(position.count);
+    // rows go bank, centre, bank: foam only on the outer ones
+    expect(bank.getX(0)).toBe(1);
+    expect(bank.getX(1)).toBe(0);
+    expect(bank.getX(7)).toBe(1);
+    // and the centre row is the midpoint of the two banks
+    expect(position.getX(1)).toBeCloseTo(
+      (position.getX(0) + position.getX(7)) / 2,
+      6,
+    );
+    expect(position.getY(1)).toBeCloseTo(
+      (position.getY(0) + position.getY(7)) / 2,
+      6,
+    );
+  });
+
   it("uses a different color and width per waterway class", () => {
     const [river] = water(ORIGIN_METERS, SCALE, lineFeature("river"));
     const position = river.getAttribute("position");
     const width = Math.hypot(
-      position.getX(1) - position.getX(0),
-      position.getY(1) - position.getY(0),
+      position.getX(7) - position.getX(0),
+      position.getY(7) - position.getY(0),
     );
     expect(width).toBeCloseTo(WATERWAY_WIDTH.river, 4);
     expect(width).toBeGreaterThan(WATERWAY_WIDTH.canal);
@@ -148,12 +170,50 @@ describe("water", () => {
     expect(merged!.getAttribute("aFade").count).toBe(
       merged!.getAttribute("position").count,
     );
+    expect(merged!.getAttribute("aFoam").count).toBe(
+      merged!.getAttribute("position").count,
+    );
+  });
+
+  it("keeps foam off a lake surface", () => {
+    // a lake is clipped at the tile edge, so foam along its ring would draw a
+    // seam on every boundary: areas carry the attribute but never foam
+    const [geometry] = water(ORIGIN_METERS, SCALE, areaFeature());
+    const foam = geometry.getAttribute("aFoam");
+    expect(foam.count).toBe(geometry.getAttribute("position").count);
+    for (let i = 0; i < foam.count; i++) expect(foam.getX(i)).toBe(0);
   });
 
   it("falls back to a default color for an unknown kind", () => {
     expect(waterColor("mystery").getHexString()).toBe(
       new THREE.Color(DEFAULT_WATER_COLOR).getHexString(),
     );
+  });
+});
+
+describe("cameraCenter", () => {
+  it("recovers the eye from a projection with the view baked in", () => {
+    // MapLibre's matrix is the whole view, so the eye is not the origin; a
+    // plain three camera is the easiest way to build a known ground truth
+    const camera = new THREE.PerspectiveCamera(60, 16 / 9, 1, 5000);
+    camera.position.set(12, -30, 45);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const projection = new THREE.Matrix4().multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse,
+    );
+    const center = cameraCenter(projection, new THREE.Vector3());
+    expect(center.x).toBeCloseTo(12, 5);
+    expect(center.y).toBeCloseTo(-30, 5);
+    expect(center.z).toBeCloseTo(45, 5);
+  });
+
+  it("writes into the vector it is given", () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.updateMatrixWorld();
+    const out = new THREE.Vector3();
+    expect(cameraCenter(camera.projectionMatrix, out)).toBe(out);
   });
 });
 

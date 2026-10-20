@@ -40,7 +40,11 @@ import {
   windowMaterial,
 } from "./elements3d/facade.ts";
 import { greenMaterial } from "./elements3d/green.ts";
-import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
+import {
+  cameraCenter,
+  waterMaterial,
+  waterwayWidth,
+} from "./elements3d/water.ts";
 import {
   DAY_HOUR,
   NIGHT_HOUR,
@@ -593,6 +597,13 @@ class CoolMap {
         // drive the water ripples from wall-clock time (the render loop runs
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
+        // MapLibre bakes the view into the projection, so recover the eye from
+        // it each frame: the glitter path needs a view direction that follows
+        // a pan or a tilt
+        cameraCenter(
+          this.camera.projectionMatrix,
+          waterMaterial.uniforms.uCameraPosition.value as THREE.Vector3,
+        );
         greenMaterial.uniforms.uTime.value = performance.now() / 1000;
         coolMap.nightLights?.update(performance.now() / 1000);
         if (this.renderer) {
@@ -1490,6 +1501,14 @@ class CoolMap {
     windowMaterial.uniforms.uAmbientIntensity.value =
       lighting.hemisphereIntensity;
     waterMaterial.uniforms.uNight.value = lighting.night;
+    // the glitter on the water is the same key light the windows get: its
+    // color warms at the horizon and its direction is the real sun, so the
+    // reflection sits under the sun instead of wherever the bands happen to be
+    waterMaterial.uniforms.uSunDirection.value
+      .set(...lighting.keyDirection)
+      .normalize();
+    waterMaterial.uniforms.uSunColor.value.setHex(lighting.keyColor);
+    waterMaterial.uniforms.uSunIntensity.value = lighting.keyIntensity;
     greenMaterial.uniforms.uNight.value = lighting.night;
     this.clouds?.setNight(lighting.night);
     // the fog and the MapLibre sky follow the same palette as the lights, so
