@@ -338,8 +338,12 @@ class CoolMap {
       }),
       "top-right",
     );
-    // parameters to ensure the model is georeferenced correctly on the map
-    const modelOrigin = tileCenter;
+    // parameters to ensure the model is georeferenced correctly on the map.
+    // Use the center the map actually opened on (a #map= fragment may have
+    // moved it): seeding this from the constructor argument shifted the whole
+    // scene by kilometers whenever the hash stayed within the 2-tile
+    // origin-reset margin, so the scene was never realigned.
+    const modelOrigin = this.tileCenter;
     const modelAltitude = 0;
     const modelRotate = [0, 0, 0];
 
