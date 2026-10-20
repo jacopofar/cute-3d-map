@@ -94,13 +94,18 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   ~30 Hz (spread over frames) and culls runs outside the map bounds, so the CPU
   only samples what is on screen; positions stay a pure function of time.
 - `src/parked_cars.ts` — static parked cars. The tile's `parking` block
-  (`[lon, lat, heading]` per occupied bay) becomes one InstancedMesh with the
-  moving cars' body (`CAR_TRAFFIC`), rebuilt only when the centre tiles or the
-  projection origin change. It follows the facade gate: above `FACADE_MIN_ZOOM`
-  and only for the 3x3 tiles around the centre, so it holds ~60k instances rather
-  than the ~370k of the whole loaded window. `#parked-cars-toggle` is a plain
-  visibility switch. Uses a lit material (unlike the moving fleet's unlit basic
-  one), so parked cars darken at night.
+  (`[lon, lat, heading]` per occupied bay) becomes one InstancedMesh per tile,
+  sized to that tile's spots and bounded so it culls when off screen. The layer
+  diffs the 3x3 center window (`diffParkedTiles`): a tile that enters is built, a
+  tile that leaves is disposed (instance buffers only; the geometry and material
+  stay shared), and a tile that stays with the same spot array is untouched. An
+  origin reset rebuilds every resident tile, since coordinates are relative to
+  the origin. It follows the facade gate: above `FACADE_MIN_ZOOM` and only for
+  the 3x3 tiles around the center, so it holds ~60k instances rather than the
+  ~370k of the whole loaded window; up to 9 draw calls instead of 1, but each
+  culls separately. `#parked-cars-toggle` is a plain visibility switch. Uses a
+  lit material (unlike the moving fleet's unlit basic one), so parked cars
+  darken at night.
 - `src/night_lights.ts` — the night light sources: street lamps (`lamps` tile
   block) and traffic-signal heads (`signals` from the signal Points). Warm lamp
   sprites plus a wider ground "pool", red/green signal sprites on the global 8 s

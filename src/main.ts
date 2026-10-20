@@ -30,7 +30,7 @@ import type {
   WaterInfo,
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
-import { ParkedCarLayer } from "./parked_cars.ts";
+import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
 import { NightLights } from "./night_lights.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
@@ -213,9 +213,7 @@ class CoolMap {
   private loadedLamps: { [key: string]: LampSpot[] } = {};
   // parked cars per loaded tile, for the static cars around the centre
   private loadedParking: { [key: string]: ParkedCar[] } = {};
-  // the tile set + origin the parked cars were built for, so the layer is only
-  // rebuilt when that changes
-  private parkedCarsKey = "";
+  // the layer keeps one mesh per tile and diffs them itself
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
   private nightLights?: NightLights;
@@ -816,7 +814,7 @@ class CoolMap {
     this.loadedRunways = {};
     this.loadedAprons = {};
     this.loadedParking = {};
-    this.parkedCarsKey = "";
+    this.parkedCars?.clear();
     this.nightLightsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
@@ -1664,7 +1662,9 @@ class CoolMap {
   // Parked cars follow the facade detail: only the tiles around the centre and
   // only above the windows zoom. The full loaded window is seven tiles across,
   // which would be hundreds of thousands of cars almost all off-screen; the
-  // 3x3 centre is what is actually in view at this zoom.
+  // 3x3 center is what is actually in view at this zoom. The layer keeps one
+  // mesh per tile and diffs the window, so a move builds only the tiles that
+  // entered it.
   private syncParkedCars() {
     if (!this.parkedCars) return;
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
@@ -1672,23 +1672,17 @@ class CoolMap {
       return;
     }
     const [cx, cy] = getTileIndex(this.map.getCenter());
-    const keys: string[] = [];
+    const tiles: ParkedTile[] = [];
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        if (this.loadedParking[key]) keys.push(key);
+        const spots = this.loadedParking[key];
+        if (spots) tiles.push({ key, spots });
       }
     }
-    // rebuild only when the centre tiles or the projection origin changed
-    const key = `${this.originGeneration}:${keys.join(",")}`;
-    if (key !== this.parkedCarsKey) {
-      this.parkedCarsKey = key;
-      const spots: ParkedCar[] = [];
-      for (const tileKey of keys) spots.push(...this.loadedParking[tileKey]);
-      const originMeters = epsg4326toEpsg3857(this.tileCenter);
-      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-      this.parkedCars.setSpots(spots, originMeters, scaleFactor);
-    }
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    this.parkedCars.setTiles(tiles, originMeters, scaleFactor);
     this.applyParkedCarVisibility();
   }
 
@@ -1753,6 +1747,7 @@ class CoolMap {
     facadeTiles: number;
     facadeVertices: number;
     parkedCars: number;
+    parkedCarTiles: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -1807,6 +1802,7 @@ class CoolMap {
       facadeTiles,
       facadeVertices,
       parkedCars: this.parkedCars?.count ?? 0,
+      parkedCarTiles: this.parkedCars?.tileCount ?? 0,
     };
   }
 

@@ -18,12 +18,15 @@ interface Probe {
 const parkedCars = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
-    const counts = { count: 0, visible: false };
+    // one InstancedMesh per tile, so sum them instead of reading the last one
+    const counts = { count: 0, visible: true, meshes: 0 };
     map.customLayer.scene.traverse((object: any) => {
       if (object.userData?.kind !== "parked_car") return;
-      counts.count = object.count;
-      counts.visible = object.visible;
+      counts.count += object.count;
+      counts.visible = counts.visible && object.visible;
+      counts.meshes += 1;
     });
+    if (counts.meshes === 0) counts.visible = false;
     return counts;
   });
 
