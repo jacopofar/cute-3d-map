@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { church, isChurch } from "./elements3d/church";
+import { glassMaterial, isGlass } from "./elements3d/glass";
 import { green, greenMaterial } from "./elements3d/green";
 import { tree } from "./elements3d/tree";
 import { tree_row } from "./elements3d/tree_row";
@@ -82,6 +83,7 @@ export function geoJSONtoGeometries(
 ): {
   kind:
     | "building"
+    | "glass"
     | "roof"
     | "church"
     | "tree"
@@ -103,10 +105,18 @@ export function geoJSONtoGeometries(
   if (f.properties.cmtype === "building") {
     // the roof comes back as its own kind, so it can be switched off on its own
     const parts = building(originMeters, scaleFactor, f, imputedColors);
+    // a curtain wall goes to its own kind so it can carry the glass material;
+    // its roof stays a roof (glass towers have roofs too), and the church cross
+    // below is unaffected
     const groups: {
-      kind: "building" | "roof" | "church";
+      kind: "building" | "glass" | "roof" | "church";
       geometries: THREE.BufferGeometry[];
-    }[] = [{ kind: "building", geometries: parts.map((part) => part.walls) }];
+    }[] = [
+      {
+        kind: isGlass(f.properties) ? "glass" : "building",
+        geometries: parts.map((part) => part.walls),
+      },
+    ];
     const roofs = parts
       .map((part) => part.roof)
       .filter((roof): roof is THREE.BufferGeometry => roof !== null);
@@ -225,6 +235,9 @@ export interface BuildingInfo {
   // isChurch() classifies on
   building?: string;
   religion?: string;
+  // a tagged curtain wall: no windows, balconies or door, and the walls get
+  // their own glass material (see elements3d/glass.ts)
+  glass?: boolean;
 }
 
 // a water feature for click-picking + info. Areas carry their (clipped) outer
@@ -394,7 +407,9 @@ export async function objectsAt(
       const material =
         kind === "building"
           ? buildingMaterial
-          : kind === "church"
+          : kind === "glass"
+            ? glassMaterial
+            : kind === "church"
             ? churchMaterial
             : kind === "water"
               ? waterMaterial
@@ -413,11 +428,23 @@ export async function objectsAt(
                           : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
+      // The custom layer writes MapLibre's projection straight into
+      // camera.projectionMatrix, so three's frustum planes are only approximately
+      // right; a merged glass tile (the towers) has a big enough bounding sphere
+      // to fall outside them and vanish. The tiles are already the spatial batch
+      // and only a handful are loaded around the view, so skip the test.
+      if (kind === "glass") mesh.frustumCulled = false;
       // flat ground layers and the fence shader do not cast sensible shadows
       // (the fence's gaps are a shader discard the depth pass cannot see)
       // keep the shadow casters to the big silhouettes: buildings, roofs and
       // trees carry the look, while every extra kind is another shadow draw
-      const casts = kind === "building" || kind === "roof" || kind === "tree";
+      // glass walls cast like any other wall: a tower without its shadow
+      // silhouette would float over the street
+      const casts =
+        kind === "building" ||
+        kind === "glass" ||
+        kind === "roof" ||
+        kind === "tree";
       mesh.castShadow = casts;
       // only the ground catcher receives: shadows on roofs and walls read as
       // artefacts at this stylised scale, while the ground shadows give the
@@ -470,6 +497,8 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
     building: props.building as string | undefined,
     religion: props.religion as string | undefined,
+    // the flag, or the raw tags on a tile generated before it existed
+    glass: isGlass(props),
   };
 }
 

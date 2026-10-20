@@ -3,6 +3,7 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
 import { parseColor } from "./color";
+import { DEFAULT_GLASS_COLOR, isGlass } from "./glass";
 import {
   CHURCH_PITCH,
   CHURCH_ROOF_SHAPE,
@@ -63,6 +64,11 @@ export type BuildingFeature = {
     // marker the church look is keyed on
     building?: string;
     religion?: string;
+    // tilegen's glass-facade flag (see elements3d/glass.ts); older tiles carry
+    // the material tags instead and are classified from those
+    glass?: boolean;
+    "building:material"?: string;
+    "building:facade:material"?: string;
   };
 };
 
@@ -113,11 +119,19 @@ export function building(
   // A real building:colour still wins over it.
   const churchWalls =
     church && (f.properties.color === undefined || isImputed(f, "color"));
+  // A curtain wall takes the glass tint over an imputed wall color: a tower
+  // sampled as pink plaster would fight its own reflective material. A real
+  // building:colour still wins, since some glass buildings do carry one.
+  const glassWalls =
+    isGlass(f.properties) &&
+    (f.properties.color === undefined || isImputed(f, "color"));
   const color = churchWalls
     ? new THREE.Color(churchWallColor(anchor))
-    : !imputedColors && isImputed(f, "color")
-      ? new THREE.Color(DEFAULT_BUILDING_COLOR)
-      : parseColor(f.properties.color, DEFAULT_BUILDING_COLOR);
+    : glassWalls
+      ? new THREE.Color(DEFAULT_GLASS_COLOR)
+      : !imputedColors && isImputed(f, "color")
+        ? new THREE.Color(DEFAULT_BUILDING_COLOR)
+        : parseColor(f.properties.color, DEFAULT_BUILDING_COLOR);
   // slate over a sampled roof color too, for the same reason: a church roof is
   // part of the look
   const churchRoof =

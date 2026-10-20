@@ -122,6 +122,43 @@ def test_to_building_reports_the_building_value_and_religion():
     assert "religion" not in hotel["properties"]
 
 
+def test_to_building_reports_a_glass_facade():
+    # both material tags count, case-insensitively, and a `;` list is searched
+    # word by word: OSM writes `plaster;glass` for a partly glazed wall
+    for tag, value in (
+        ("building:material", "glass"),
+        ("building:facade:material", "Glass"),
+        ("building:material", "plaster;glass"),
+        ("building:facade:material", "mirror"),
+    ):
+        f = main.to_building(14, {"building": "yes", tag: value}, geom(POLYGON))
+        assert f is not None
+        assert f["properties"]["glass"] is True, (tag, value)
+
+    # anything else is simply absent: properties are filtered for None
+    plain = main.to_building(
+        15, {"building": "yes", "building:material": "brick"}, geom(POLYGON)
+    )
+    assert plain is not None
+    assert "glass" not in plain["properties"]
+
+
+def test_is_glass():
+    assert main.is_glass({"building:material": "glass"})
+    assert main.is_glass({"building:facade:material": "mirror;glass"})
+    assert not main.is_glass({"building:material": "concrete"})
+    assert not main.is_glass({})
+    # imputed colors never imply glass: this is reported, never sampled
+    f = main.to_building(
+        16,
+        {"building": "yes"},
+        geom(POLYGON),
+        {"color": impute.Distribution.from_counts({"white": 1})},
+    )
+    assert f is not None
+    assert "glass" not in f["properties"]
+
+
 def test_to_building_skips_non_polygon():
     assert main.to_building(3, {"building": "yes"}, geom("POINT (0 0)")) is None
 

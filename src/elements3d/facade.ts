@@ -294,6 +294,9 @@ export function tileFacadeDetail(
   const rgb = new THREE.Color();
 
   for (const info of infos) {
+    // a curtain wall is glass end to end: windows, balconies and a door would
+    // all be painted on the panes, so it gets none of this detail
+    if (info.glass) continue;
     const first = info.rings[0]?.[0];
     const edges: Edge[] = [];
     for (const ring of info.rings) {
