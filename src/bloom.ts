@@ -24,8 +24,10 @@ import * as THREE from "three";
 // leave the frame budget alone on an integrated GPU.
 const BLOOM_SCALE = 0.25;
 // Spread the Gaussian over more than one quarter-res texel: a single pass with
-// unit offsets reads as a hard ring under a lamp rather than a soft bleed.
-const BLUR_RADIUS = 2.5;
+// unit offsets reads as a hard ring under a lamp rather than a soft bleed. Kept
+// tight (was 2.5) because a wide radius on a quarter-res buffer turns every
+// lamp into a large disc at 1280x800.
+const BLUR_RADIUS = 1.4;
 const BLUR_DIRECTION = new THREE.Vector2();
 
 export interface BloomTuning {
@@ -154,7 +156,7 @@ export class BloomPass {
   private blurMaterial: THREE.ShaderMaterial;
   private compositeMaterial: THREE.ShaderMaterial;
   readonly tuning: BloomTuning = {
-    strength: 1.3,
+    strength: 1.0,
     threshold: 0.4,
     knee: 0.3,
   };
