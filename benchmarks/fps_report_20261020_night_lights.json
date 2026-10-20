@@ -1,0 +1,263 @@
+{
+  "when": "2026-10-20",
+  "commit": "0205963",
+  "renderer": "ANGLE (Intel, Mesa Intel(R) Graphics (ARL), OpenGL ES 3.2)",
+  "viewport": "1280x800",
+  "view": {
+    "center": [
+      9.209,
+      45.478
+    ],
+    "zoom": 17.2,
+    "pitch": 30
+  },
+  "method": "npm run bench:gpu (perf/interactive.spec.ts), headed Chrome, GPU rasterization, night (bloom active), 7 s warm-up, 3.5 s settle, then 5 s pan / tilt / zoom; 3 runs before and 2 after the per-tile night lights",
+  "before": {
+    "runs": [
+      {
+        "when": "2026-10-20T18:19:14.149Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "triangles": 3183040,
+          "drawCalls": 75,
+          "parkedCars": 71370,
+          "parkedCarTriangles": null,
+          "nightLightTiles": null,
+          "nightLightMeshes": null
+        },
+        "phases": {
+          "pan": {
+            "frames": 250,
+            "fps": 50,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 166.6,
+            "worst": 311.1,
+            "longTasks": 12,
+            "longTaskMs": 1082,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 423,
+            "fps": 84.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 55.5,
+            "longTasks": 1,
+            "longTaskMs": 58,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 432,
+            "fps": 86.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:20:32.572Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "triangles": 3182936,
+          "drawCalls": 75,
+          "parkedCars": 71370,
+          "parkedCarTriangles": null,
+          "nightLightTiles": null,
+          "nightLightMeshes": null
+        },
+        "phases": {
+          "pan": {
+            "frames": 259,
+            "fps": 51.8,
+            "p50": 11.1,
+            "p90": 14.3,
+            "p99": 177.8,
+            "worst": 266.7,
+            "longTasks": 12,
+            "longTaskMs": 1049,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 414,
+            "fps": 82.6,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 433,
+            "fps": 86.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:22:20.196Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "triangles": 3182988,
+          "drawCalls": 75,
+          "parkedCars": 71370,
+          "parkedCarTriangles": 1379840,
+          "nightLightTiles": null,
+          "nightLightMeshes": null
+        },
+        "phases": {
+          "pan": {
+            "frames": 278,
+            "fps": 55.5,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 166.7,
+            "worst": 244.5,
+            "longTasks": 10,
+            "longTaskMs": 770,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 417,
+            "fps": 83.2,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 425,
+            "fps": 85,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      }
+    ]
+  },
+  "after": {
+    "runs": [
+      {
+        "when": "2026-10-20T18:36:41.292Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "triangles": 3183560,
+          "drawCalls": 115,
+          "parkedCars": 71370,
+          "parkedCarTriangles": 1379840,
+          "nightLightTiles": 9,
+          "nightLightMeshes": 45
+        },
+        "phases": {
+          "pan": {
+            "frames": 320,
+            "fps": 63.9,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 133.4,
+            "worst": 144.4,
+            "longTasks": 5,
+            "longTaskMs": 459,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 429,
+            "fps": 85.6,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.3,
+            "longTasks": 14,
+            "longTaskMs": 1802,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 443,
+            "fps": 88.6,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.2,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:37:50.873Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "triangles": 3183248,
+          "drawCalls": 115,
+          "parkedCars": 71370,
+          "parkedCarTriangles": 1379840,
+          "nightLightTiles": 9,
+          "nightLightMeshes": 45
+        },
+        "phases": {
+          "pan": {
+            "frames": 305,
+            "fps": 61,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 144.4,
+            "worst": 177.8,
+            "longTasks": 9,
+            "longTaskMs": 717,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 427,
+            "fps": 85.2,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.5,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 446,
+            "fps": 89.2,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 11.2,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      }
+    ]
+  }
+}
