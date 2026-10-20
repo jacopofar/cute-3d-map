@@ -18,7 +18,14 @@ import { lightGreen, SIGNAL_GREEN_S } from "./traffic_math";
 
 export const NIGHT_LIGHT_MIN_ZOOM = 15;
 
-const LAMP_COLORS = [0xffd9a4, 0xffe4bd, 0xffcf8f, 0xffe9c9];
+const LAMP_COLORS = [
+  0xffd9a4,
+  0xffe4bd,
+  0xffcf8f,
+  0xffe9c9,
+  0xff9a3c,
+  0xff7a1f,
+];
 const RED = new THREE.Color("#ff4438");
 const GREEN = new THREE.Color("#43ff86");
 
@@ -97,6 +104,31 @@ function points(
     sizeAttenuation: true,
     alphaTest: 0.01,
   });
+  // Fade the glow with camera distance: a street full of overlapping additive
+  // sprites otherwise reads as a bright continuous line when zoomed out. Near
+  // lamps stay full, far ones fall to 15% by uFar.
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uNear = { value: 200 };
+    shader.uniforms.uFar = { value: 1600 };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        "uniform float scale;",
+        "uniform float scale;\nuniform float uNear;\nuniform float uFar;\nvarying float vFade;",
+      )
+      .replace(
+        "#include <project_vertex>",
+        "#include <project_vertex>\nvFade = mix(1.0, 0.08, smoothstep(uNear, uFar, -mvPosition.z));",
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <color_pars_fragment>",
+        "#include <color_pars_fragment>\nvarying float vFade;",
+      )
+      .replace(
+        "#include <color_fragment>",
+        "#include <color_fragment>\ndiffuseColor.rgb *= vFade;",
+      );
+  };
   const result = new THREE.Points(geometry, material);
   // the set is rebuilt as tiles/centre change, so stale bounds would cull it
   result.frustumCulled = false;
@@ -265,9 +297,21 @@ export class NightLights {
   private applyVisibility(): void {
     const detailed = this.zoom >= NIGHT_LIGHT_MIN_ZOOM;
     const dark = this.night > 0.2;
-    if (this.lamps) this.lamps.visible = detailed && dark && this.lampsEnabled;
+    // zoomed out, the sprites overlap into a bright continuous line: shrink
+    // and dim them with the zoom, then the per-distance fade handles the far
+    // side of a close view
+    const zoomFactor = Math.max(0, Math.min(1, (this.zoom - 15) / 2.5));
+    if (this.lamps) {
+      this.lamps.visible = detailed && dark && this.lampsEnabled;
+      const material = this.lamps.material as THREE.PointsMaterial;
+      material.opacity = 0.2 + 0.8 * zoomFactor;
+      material.size = LAMP_GLOW_SIZE * (0.45 + 0.55 * zoomFactor);
+    }
     if (this.lampPools) {
       this.lampPools.visible = detailed && dark && this.lampsEnabled;
+      const material = this.lampPools.material as THREE.PointsMaterial;
+      material.opacity = 0.32 * (0.2 + 0.8 * zoomFactor);
+      material.size = LAMP_POOL_SIZE * (0.5 + 0.5 * zoomFactor);
     }
     if (this.lampPosts) this.lampPosts.visible = detailed && this.lampsEnabled;
     if (this.signals) this.signals.visible = detailed && dark;
