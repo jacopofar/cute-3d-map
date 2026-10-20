@@ -31,7 +31,7 @@ import type {
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
-import { NightLights } from "./night_lights.ts";
+import { NightLights, type NightLightTile } from "./night_lights.ts";
 import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
@@ -227,7 +227,6 @@ class CoolMap {
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
   private nightLights?: NightLights;
-  private nightLightsKey = "";
   private lamppostsEnabled = true;
   // bloom is a post pass over the 3D scene only, so this is a plain switch; it
   // is forced off on the software rasterizer in render()
@@ -882,7 +881,6 @@ class CoolMap {
     this.loadedAprons = {};
     this.loadedParking = {};
     this.parkedCars?.clear();
-    this.nightLightsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
@@ -1792,30 +1790,22 @@ class CoolMap {
   private syncNightLights() {
     if (!this.nightLights) return;
     const [cx, cy] = getTileIndex(this.map.getCenter());
-    const keys: string[] = [];
+    const tiles: NightLightTile[] = [];
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        if (this.loadedSignals[key] || this.loadedLamps[key]) keys.push(key);
-      }
-    }
-    const key = `${this.originGeneration}:${keys.join(",")}`;
-    if (key !== this.nightLightsKey) {
-      this.nightLightsKey = key;
-      const signals: { lon: number; lat: number }[] = [];
-      const lamps: { lon: number; lat: number }[] = [];
-      for (const tileKey of keys) {
-        for (const [lon, lat] of this.loadedSignals[tileKey] ?? []) {
-          signals.push({ lon, lat });
-        }
-        for (const lamp of this.loadedLamps[tileKey] ?? []) {
-          lamps.push(lamp);
+        const lamps = this.loadedLamps[key] ?? [];
+        const signals = this.loadedSignals[key] ?? [];
+        if (lamps.length > 0 || signals.length > 0) {
+          // the raw per-tile arrays are the identity the layer diffs on, so do
+          // not copy them here
+          tiles.push({ key, lamps, signals });
         }
       }
-      const originMeters = epsg4326toEpsg3857(this.tileCenter);
-      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-      this.nightLights.setSpots(lamps, signals, originMeters, scaleFactor);
     }
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    this.nightLights.setTiles(tiles, originMeters, scaleFactor);
     this.applyNightLightsVisibility();
   }
 
@@ -1845,6 +1835,8 @@ class CoolMap {
     parkedCarTiles: number;
     parkedCarMeshes: number;
     parkedCarTriangles: number;
+    nightLightTiles: number;
+    nightLightMeshes: number;
     vehiclesDrawn: number;
     trainsDrawn: number;
   } {
@@ -1904,6 +1896,8 @@ class CoolMap {
       parkedCarTiles: this.parkedCars?.tileCount ?? 0,
       parkedCarMeshes: this.parkedCars?.meshCount ?? 0,
       parkedCarTriangles: this.parkedCars?.triangles ?? 0,
+      nightLightTiles: this.nightLights?.tileCount ?? 0,
+      nightLightMeshes: this.nightLights?.meshCount ?? 0,
       vehiclesDrawn: this.carsTraffic?.drawnCount ?? 0,
       trainsDrawn: this.trainsTraffic?.drawnCount ?? 0,
     };

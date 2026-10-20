@@ -24,18 +24,20 @@ const nightLights = (page: import("@playwright/test").Page) =>
     };
     map.customLayer.scene.traverse((object: any) => {
       const kind = object.userData?.kind;
+      // one object per tile and layer now, so sum the tiles and treat the
+      // layer as visible when any tile is
       if (kind === "lamplight") {
-        out.lamps = object.geometry.getAttribute("position").count;
-        out.lampsVisible = object.visible;
+        out.lamps += object.geometry.getAttribute("position").count;
+        out.lampsVisible ||= object.visible;
       } else if (kind === "lamppost") {
-        out.lampPosts = object.count;
-        out.lampPostsVisible = object.visible;
+        out.lampPosts += object.count;
+        out.lampPostsVisible ||= object.visible;
       } else if (kind === "signal_light") {
-        out.signals = object.geometry.getAttribute("position").count;
-        out.signalsVisible = object.visible;
+        out.signals += object.geometry.getAttribute("position").count;
+        out.signalsVisible ||= object.visible;
       } else if (kind === "signal_post") {
-        out.signalPosts = object.count;
-        out.signalPostsVisible = object.visible;
+        out.signalPosts += object.count;
+        out.signalPostsVisible ||= object.visible;
       }
     });
     return out;
@@ -51,16 +53,17 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("the lamp posts checkbox hides only the street lamps", async ({ page }) => {
+test("the lamp posts checkbox hides only the street lamps", async ({
+  page,
+}) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
   await expect
-    .poll(
-      () => page.evaluate(() => "__coolMap" in window).catch(() => false),
-      { timeout: 60_000 },
-    )
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
     .toBe(true);
 
   await page.evaluate(() => {
