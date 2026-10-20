@@ -16,6 +16,66 @@ export interface PreparedRun {
   bounds?: [number, number, number, number];
 }
 
+// the visible lon/lat window; a run outside it is not worth sampling
+export interface TrafficView {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+// vehicles just outside the view can enter it on the next pan; keep a margin
+// before culling them
+export const VIEW_PADDING = 0.08;
+
+// Grow the view by the padding margin. Culling against the padded box trades a
+// bit of overdraw for vehicles that would otherwise pop in at the edge on the
+// next pan.
+export function paddedView(view: TrafficView): TrafficView {
+  const padLon = (view.east - view.west) * VIEW_PADDING;
+  const padLat = (view.north - view.south) * VIEW_PADDING;
+  return {
+    west: view.west - padLon,
+    east: view.east + padLon,
+    south: view.south - padLat,
+    north: view.north + padLat,
+  };
+}
+
+// Whether any part of `run` can be on screen. A run without bounds is treated
+// as visible: better to draw it than to silently drop it.
+export function runInView(run: PreparedRun, view: TrafficView): boolean {
+  const bounds = run.bounds;
+  if (!bounds) return true;
+  return !(
+    bounds[2] < view.west ||
+    bounds[0] > view.east ||
+    bounds[3] < view.south ||
+    bounds[1] > view.north
+  );
+}
+
+// Pack the visible vehicles into the front of the instance buffer.
+//
+// `slots` maps a draw slot to its vehicle; only the first `count` entries are
+// meaningful, and `count` is the InstancedMesh count to draw. Pure and
+// allocation-free so the renderer can reuse the typed array across remaps. The
+// order of the surviving vehicles is preserved, which keeps the mapping stable
+// from one remap to the next.
+export function compactSlots(
+  vehicleCount: number,
+  isVisible: (vehicle: number) => boolean,
+  slots: Int32Array,
+): number {
+  let count = 0;
+  for (let i = 0; i < vehicleCount; i++) {
+    if (!isVisible(i)) continue;
+    slots[count] = i;
+    count++;
+  }
+  return count;
+}
+
 // a signal/crossing the vehicle passes, with the loop-time width of each side of
 // its bump (computed from the distances below and the local speed):
 // `t` is the seconds into the loop's period, `axis` the travel direction there
