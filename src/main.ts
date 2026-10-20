@@ -39,6 +39,7 @@ import {
   tileFacadeDetail,
   windowMaterial,
 } from "./elements3d/facade.ts";
+import { glassMaterial } from "./elements3d/glass.ts";
 import { greenMaterial } from "./elements3d/green.ts";
 import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
 import {
@@ -1488,6 +1489,17 @@ class CoolMap {
     windowMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
     windowMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
     windowMaterial.uniforms.uAmbientIntensity.value =
+      lighting.hemisphereIntensity;
+    // glass walls read the same sun and sky as the windows, so a curtain wall
+    // reflects the same dawn and goes just as dark at night
+    glassMaterial.uniforms.uNight.value = lighting.night;
+    glassMaterial.uniforms.uKeyDirection.value
+      .set(...lighting.keyDirection)
+      .normalize();
+    glassMaterial.uniforms.uKeyColor.value.setHex(lighting.keyColor);
+    glassMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
+    glassMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
+    glassMaterial.uniforms.uAmbientIntensity.value =
       lighting.hemisphereIntensity;
     waterMaterial.uniforms.uNight.value = lighting.night;
     greenMaterial.uniforms.uNight.value = lighting.night;
