@@ -428,6 +428,12 @@ export async function objectsAt(
                           : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
+      // The custom layer writes MapLibre's projection straight into
+      // camera.projectionMatrix, so three's frustum planes are only approximately
+      // right; a merged glass tile (the towers) has a big enough bounding sphere
+      // to fall outside them and vanish. The tiles are already the spatial batch
+      // and only a handful are loaded around the view, so skip the test.
+      if (kind === "glass") mesh.frustumCulled = false;
       // flat ground layers and the fence shader do not cast sensible shadows
       // (the fence's gaps are a shader discard the depth pass cannot see)
       // keep the shadow casters to the big silhouettes: buildings, roofs and
