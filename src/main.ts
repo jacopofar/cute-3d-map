@@ -569,11 +569,20 @@ class CoolMap {
         const scaleFactor = Math.cos(
           (2 * Math.PI * coolMap.tileCenter[1]) / 360,
         );
+        // cull vehicles whose run is outside what the camera can see; the
+        // renderer pads this window before dropping anything
+        const bounds = coolMap.map.getBounds();
+        const view = {
+          west: bounds.getWest(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          north: bounds.getNorth(),
+        };
         if (coolMap.carsTraffic) {
-          coolMap.carsTraffic.update(originMeters, scaleFactor);
+          coolMap.carsTraffic.update(originMeters, scaleFactor, view);
         }
         if (coolMap.trainsTraffic) {
-          coolMap.trainsTraffic.update(originMeters, scaleFactor);
+          coolMap.trainsTraffic.update(originMeters, scaleFactor, view);
         }
         coolMap.updateClouds(originMeters, scaleFactor);
         // planes are placed from wall-clock time and the loaded runways

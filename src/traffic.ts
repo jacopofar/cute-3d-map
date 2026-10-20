@@ -48,11 +48,66 @@ interface PreparedVehicle {
   crossings: PreparedCrossing[];
 }
 
+// the visible lon/lat window; a run outside it is not worth sampling
+export interface TrafficView {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+// vehicles update at ~30 Hz. Two slices are placed per cycle, one per update,
+// so the work is spread over frames instead of a spike every other one.
+const UPDATE_HZ = 30;
+const SLICES = 2;
+const SLICE_MS = 1000 / UPDATE_HZ / SLICES;
+// vehicles just outside the view can enter it on the next pan; keep a margin
+// before culling them
+const VIEW_PADDING = 0.08;
+
+function paddedView(view: TrafficView): TrafficView {
+  const padLon = (view.east - view.west) * VIEW_PADDING;
+  const padLat = (view.north - view.south) * VIEW_PADDING;
+  return {
+    west: view.west - padLon,
+    east: view.east + padLon,
+    south: view.south - padLat,
+    north: view.north + padLat,
+  };
+}
+
+function runInView(run: PreparedRun, view: TrafficView): boolean {
+  const bounds = run.bounds;
+  if (!bounds) return true;
+  return !(
+    bounds[2] < view.west ||
+    bounds[0] > view.east ||
+    bounds[3] < view.south ||
+    bounds[1] > view.north
+  );
+}
+
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
 
 function prepareRun(run: TrafficRun): PreparedRun {
-  return { t0: run.t0, t1: run.t1, coords: run.coords, times: run.times };
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const [lon, lat] of run.coords) {
+    if (lon < west) west = lon;
+    if (lon > east) east = lon;
+    if (lat < south) south = lat;
+    if (lat > north) north = lat;
+  }
+  return {
+    t0: run.t0,
+    t1: run.t1,
+    coords: run.coords,
+    times: run.times,
+    bounds: [west, south, east, north],
+  };
 }
 
 // the run whose [t0, t1) contains tau, or undefined when the vehicle is in a
@@ -130,6 +185,11 @@ export class TrafficRenderer {
   private readonly capacity: number;
   private readonly now: () => number;
   private vehicles: PreparedVehicle[] = [];
+  // slice scheduling: each update places one slice, at most 30 times a second
+  private sliceCursor = 0;
+  private lastSlice = 0;
+  private lastOriginKey = "";
+  private needsFullUpdate = true;
   // when disabled (map zoomed out) the mesh is hidden and the per-frame update
   // is skipped
   enabled = true;
@@ -156,6 +216,8 @@ export class TrafficRenderer {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     this.mesh.visible = enabled;
+    // the positions may have gone stale while hidden
+    if (enabled) this.needsFullUpdate = true;
   }
 
   // live vehicle count, for the perf benchmark
@@ -214,17 +276,57 @@ export class TrafficRenderer {
       console.warn("traffic: vehicle capacity exceeded, dropping routes");
     }
     this.vehicles = vehicles;
+    this.mesh.count = 0;
+    this.needsFullUpdate = true;
+    this.sliceCursor = 0;
+    this.lastSlice = 0;
+    this.lastOriginKey = "";
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
-  // place every vehicle for the current wall-clock phase. Positions are
-  // recomputed in model space every frame because the projection origin can be
-  // reset while panning (resetOrigin in main.ts).
-  update(originMeters: [number, number], scaleFactor: number): void {
+  // Place the vehicles for the current wall-clock phase. A full pass happens
+  // when the loop set or the projection origin changes; otherwise one slice is
+  // placed per update at ~30 Hz, and runs outside the visible lon/lat window are
+  // culled before sampling. Nothing accumulates: every position is a pure
+  // function of time.
+  update(
+    originMeters: [number, number],
+    scaleFactor: number,
+    view?: TrafficView,
+  ): void {
     if (!this.enabled) return;
+    if (this.vehicles.length === 0) {
+      this.mesh.count = 0;
+      return;
+    }
     const now = this.now();
-    let count = 0;
-    for (const vehicle of this.vehicles) {
+    const nowMs = now * 1000;
+    const originKey = `${originMeters[0].toFixed(3)}:${originMeters[1].toFixed(3)}:${scaleFactor.toFixed(6)}`;
+    let start = 0;
+    let end = this.vehicles.length;
+    const full = this.needsFullUpdate || originKey !== this.lastOriginKey;
+    if (full) {
+      this.needsFullUpdate = false;
+      this.lastOriginKey = originKey;
+      this.sliceCursor = 0;
+      this.lastSlice = nowMs;
+    } else {
+      if (nowMs - this.lastSlice < SLICE_MS) return;
+      this.lastSlice = nowMs;
+      const sliceSize = Math.ceil(this.vehicles.length / SLICES);
+      start = this.sliceCursor * sliceSize;
+      end = Math.min(this.vehicles.length, start + sliceSize);
+      this.sliceCursor = (this.sliceCursor + 1) % SLICES;
+      if (start >= this.vehicles.length) {
+        start = 0;
+        end = Math.min(this.vehicles.length, sliceSize);
+        this.sliceCursor = 1 % SLICES;
+      }
+    }
+
+    const cull = view ? paddedView(view) : undefined;
+    for (let i = start; i < end; i++) {
+      const vehicle = this.vehicles[i];
       const period = vehicle.period;
       let tau = (now + vehicle.phase * period) % period;
       if (tau < 0) tau += period;
@@ -233,11 +335,9 @@ export class TrafficRenderer {
       let drawn = tau + crossingShift(tau, vehicle.crossings, now);
       drawn = ((drawn % period) + period) % period;
       const run = findRun(vehicle.runs, drawn);
-      if (!run) {
-        // the tile holding this part of the loop is not loaded: hide the
-        // vehicle with a zero-scale matrix but keep its slot for the color
-        this.mesh.setMatrixAt(count, this.hidden);
-        count++;
+      if (!run || (cull && !runInView(run, cull))) {
+        // unloaded tile or outside the view: keep the slot, hide the instance
+        this.mesh.setMatrixAt(i, this.hidden);
         continue;
       }
       const seconds = drawn - run.t0;
@@ -246,10 +346,9 @@ export class TrafficRenderer {
       this.dummy.position.set(m[0], m[1], this.config.height / 2);
       this.dummy.rotation.set(0, 0, heading);
       this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(count, this.dummy.matrix);
-      count++;
+      this.mesh.setMatrixAt(i, this.dummy.matrix);
     }
-    this.mesh.count = count;
+    this.mesh.count = this.vehicles.length;
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 }
