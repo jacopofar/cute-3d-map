@@ -1,0 +1,584 @@
+{
+  "when": "2026-10-20",
+  "commit": "6568159",
+  "renderer": "ANGLE (Intel, Mesa Intel(R) Graphics (ARL), OpenGL ES 3.2)",
+  "viewport": "1280x800",
+  "view": {
+    "center": [
+      9.209,
+      45.478
+    ],
+    "zoom": 17.2,
+    "pitch": 30
+  },
+  "method": "npm run bench:gpu (perf/interactive.spec.ts), headed Chrome, GPU rasterization, night (bloom active), 7 s warm-up, 3.5 s settle, then 5 s pan / tilt / zoom; 2 runs before and 3 after the parked-car LOD",
+  "before": {
+    "parkedCarTriangles": 3711240,
+    "note": "drawCalls/triangles in the startup stats are the bloom composite quad (stats bug fixed in the LOD commit); usage counts are valid",
+    "runs": [
+      {
+        "when": "2026-10-20T18:10:19.277Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "vertices": 4779403,
+          "drawCalls": 1,
+          "triangles": 2,
+          "byKind": {
+            "bench": {
+              "meshes": 47,
+              "vertices": 448416,
+              "triangles": 224208
+            },
+            "tree": {
+              "meshes": 49,
+              "vertices": 1514149,
+              "triangles": 1368060
+            },
+            "green": {
+              "meshes": 49,
+              "vertices": 67353,
+              "triangles": 22451
+            },
+            "water": {
+              "meshes": 39,
+              "vertices": 15534,
+              "triangles": 5178
+            },
+            "building": {
+              "meshes": 49,
+              "vertices": 2424954,
+              "triangles": 808318
+            },
+            "fence": {
+              "meshes": 49,
+              "vertices": 79560,
+              "triangles": 26520
+            },
+            "bridge": {
+              "meshes": 34,
+              "vertices": 38622,
+              "triangles": 12874
+            },
+            "roof": {
+              "meshes": 49,
+              "vertices": 116271,
+              "triangles": 38757
+            },
+            "church": {
+              "meshes": 43,
+              "vertices": 10368,
+              "triangles": 3456
+            },
+            "tunnel": {
+              "meshes": 37,
+              "vertices": 56808,
+              "triangles": 18936
+            },
+            "glass": {
+              "meshes": 6,
+              "vertices": 7368,
+              "triangles": 2456
+            }
+          },
+          "buildings": 25488,
+          "vehicles": 12988,
+          "trains": 48,
+          "facadeTiles": 18,
+          "facadeVertices": 5683470,
+          "parkedCars": 71370,
+          "parkedCarTiles": 9
+        },
+        "phases": {
+          "pan": {
+            "frames": 281,
+            "fps": 56.2,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 155.5,
+            "worst": 166.7,
+            "longTasks": 11,
+            "longTaskMs": 851,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 390,
+            "fps": 77.8,
+            "p50": 11.1,
+            "p90": 22.2,
+            "p99": 33.3,
+            "worst": 33.5,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 376,
+            "fps": 75.4,
+            "p50": 11.1,
+            "p90": 22.2,
+            "p99": 22.3,
+            "worst": 33.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:11:30.079Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "vertices": 4779403,
+          "drawCalls": 1,
+          "triangles": 2,
+          "byKind": {
+            "tree": {
+              "meshes": 49,
+              "vertices": 1514149,
+              "triangles": 1368060
+            },
+            "bench": {
+              "meshes": 47,
+              "vertices": 448416,
+              "triangles": 224208
+            },
+            "building": {
+              "meshes": 49,
+              "vertices": 2424954,
+              "triangles": 808318
+            },
+            "fence": {
+              "meshes": 49,
+              "vertices": 79560,
+              "triangles": 26520
+            },
+            "roof": {
+              "meshes": 49,
+              "vertices": 116271,
+              "triangles": 38757
+            },
+            "green": {
+              "meshes": 49,
+              "vertices": 67353,
+              "triangles": 22451
+            },
+            "bridge": {
+              "meshes": 34,
+              "vertices": 38622,
+              "triangles": 12874
+            },
+            "tunnel": {
+              "meshes": 37,
+              "vertices": 56808,
+              "triangles": 18936
+            },
+            "water": {
+              "meshes": 39,
+              "vertices": 15534,
+              "triangles": 5178
+            },
+            "church": {
+              "meshes": 43,
+              "vertices": 10368,
+              "triangles": 3456
+            },
+            "glass": {
+              "meshes": 6,
+              "vertices": 7368,
+              "triangles": 2456
+            }
+          },
+          "buildings": 25488,
+          "vehicles": 12988,
+          "trains": 48,
+          "facadeTiles": 18,
+          "facadeVertices": 5683470,
+          "parkedCars": 71370,
+          "parkedCarTiles": 9
+        },
+        "phases": {
+          "pan": {
+            "frames": 297,
+            "fps": 59.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 155.6,
+            "worst": 222.2,
+            "longTasks": 10,
+            "longTaskMs": 679,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 336,
+            "fps": 66.9,
+            "p50": 11.1,
+            "p90": 22.3,
+            "p99": 44.4,
+            "worst": 55.6,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 125,
+            "fps": 25,
+            "p50": 33.4,
+            "p90": 55.7,
+            "p99": 88.9,
+            "worst": 88.9,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      }
+    ]
+  },
+  "after": {
+    "parkedCarTriangles": 1379840,
+    "parkedCarMeshes": 14,
+    "vehiclesDrawn": 287,
+    "trainsDrawn": 3,
+    "runs": [
+      {
+        "when": "2026-10-20T18:19:14.149Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "vertices": 4779403,
+          "drawCalls": 75,
+          "triangles": 3183040,
+          "byKind": {
+            "tree": {
+              "meshes": 49,
+              "vertices": 1514149,
+              "triangles": 1368060
+            },
+            "bench": {
+              "meshes": 47,
+              "vertices": 448416,
+              "triangles": 224208
+            },
+            "building": {
+              "meshes": 49,
+              "vertices": 2424954,
+              "triangles": 808318
+            },
+            "fence": {
+              "meshes": 49,
+              "vertices": 79560,
+              "triangles": 26520
+            },
+            "roof": {
+              "meshes": 49,
+              "vertices": 116271,
+              "triangles": 38757
+            },
+            "green": {
+              "meshes": 49,
+              "vertices": 67353,
+              "triangles": 22451
+            },
+            "bridge": {
+              "meshes": 34,
+              "vertices": 38622,
+              "triangles": 12874
+            },
+            "tunnel": {
+              "meshes": 37,
+              "vertices": 56808,
+              "triangles": 18936
+            },
+            "water": {
+              "meshes": 39,
+              "vertices": 15534,
+              "triangles": 5178
+            },
+            "church": {
+              "meshes": 43,
+              "vertices": 10368,
+              "triangles": 3456
+            },
+            "glass": {
+              "meshes": 6,
+              "vertices": 7368,
+              "triangles": 2456
+            }
+          },
+          "buildings": 25488,
+          "vehicles": 12988,
+          "trains": 48,
+          "facadeTiles": 18,
+          "facadeVertices": 5683470,
+          "parkedCars": 71370,
+          "parkedCarTiles": 9,
+          "parkedCarMeshes": 14,
+          "vehiclesDrawn": 287,
+          "trainsDrawn": 5
+        },
+        "phases": {
+          "pan": {
+            "frames": 250,
+            "fps": 50,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 166.6,
+            "worst": 311.1,
+            "longTasks": 12,
+            "longTaskMs": 1082,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 423,
+            "fps": 84.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 55.5,
+            "longTasks": 1,
+            "longTaskMs": 58,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 432,
+            "fps": 86.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:20:32.572Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "vertices": 4779403,
+          "drawCalls": 75,
+          "triangles": 3182936,
+          "byKind": {
+            "tree": {
+              "meshes": 49,
+              "vertices": 1514149,
+              "triangles": 1368060
+            },
+            "bench": {
+              "meshes": 47,
+              "vertices": 448416,
+              "triangles": 224208
+            },
+            "building": {
+              "meshes": 49,
+              "vertices": 2424954,
+              "triangles": 808318
+            },
+            "fence": {
+              "meshes": 49,
+              "vertices": 79560,
+              "triangles": 26520
+            },
+            "roof": {
+              "meshes": 49,
+              "vertices": 116271,
+              "triangles": 38757
+            },
+            "green": {
+              "meshes": 49,
+              "vertices": 67353,
+              "triangles": 22451
+            },
+            "bridge": {
+              "meshes": 34,
+              "vertices": 38622,
+              "triangles": 12874
+            },
+            "tunnel": {
+              "meshes": 37,
+              "vertices": 56808,
+              "triangles": 18936
+            },
+            "water": {
+              "meshes": 39,
+              "vertices": 15534,
+              "triangles": 5178
+            },
+            "church": {
+              "meshes": 43,
+              "vertices": 10368,
+              "triangles": 3456
+            },
+            "glass": {
+              "meshes": 6,
+              "vertices": 7368,
+              "triangles": 2456
+            }
+          },
+          "buildings": 25488,
+          "vehicles": 12988,
+          "trains": 48,
+          "facadeTiles": 18,
+          "facadeVertices": 5683470,
+          "parkedCars": 71370,
+          "parkedCarTiles": 9,
+          "parkedCarMeshes": 14,
+          "vehiclesDrawn": 285,
+          "trainsDrawn": 5
+        },
+        "phases": {
+          "pan": {
+            "frames": 259,
+            "fps": 51.8,
+            "p50": 11.1,
+            "p90": 14.3,
+            "p99": 177.8,
+            "worst": 266.7,
+            "longTasks": 12,
+            "longTaskMs": 1049,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 414,
+            "fps": 82.6,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.3,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 433,
+            "fps": 86.4,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 33.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      },
+      {
+        "when": "2026-10-20T18:22:20.196Z",
+        "startup": {
+          "tiles": 49,
+          "meshes": 451,
+          "vertices": 4779403,
+          "drawCalls": 75,
+          "triangles": 3182988,
+          "byKind": {
+            "tree": {
+              "meshes": 49,
+              "vertices": 1514149,
+              "triangles": 1368060
+            },
+            "bench": {
+              "meshes": 47,
+              "vertices": 448416,
+              "triangles": 224208
+            },
+            "building": {
+              "meshes": 49,
+              "vertices": 2424954,
+              "triangles": 808318
+            },
+            "fence": {
+              "meshes": 49,
+              "vertices": 79560,
+              "triangles": 26520
+            },
+            "roof": {
+              "meshes": 49,
+              "vertices": 116271,
+              "triangles": 38757
+            },
+            "green": {
+              "meshes": 49,
+              "vertices": 67353,
+              "triangles": 22451
+            },
+            "bridge": {
+              "meshes": 34,
+              "vertices": 38622,
+              "triangles": 12874
+            },
+            "tunnel": {
+              "meshes": 37,
+              "vertices": 56808,
+              "triangles": 18936
+            },
+            "water": {
+              "meshes": 39,
+              "vertices": 15534,
+              "triangles": 5178
+            },
+            "church": {
+              "meshes": 43,
+              "vertices": 10368,
+              "triangles": 3456
+            },
+            "glass": {
+              "meshes": 6,
+              "vertices": 7368,
+              "triangles": 2456
+            }
+          },
+          "buildings": 25488,
+          "vehicles": 12988,
+          "trains": 48,
+          "facadeTiles": 18,
+          "facadeVertices": 5683470,
+          "parkedCars": 71370,
+          "parkedCarTiles": 9,
+          "parkedCarMeshes": 14,
+          "parkedCarTriangles": 1379840,
+          "vehiclesDrawn": 287,
+          "trainsDrawn": 3
+        },
+        "phases": {
+          "pan": {
+            "frames": 278,
+            "fps": 55.5,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 166.7,
+            "worst": 244.5,
+            "longTasks": 10,
+            "longTaskMs": 770,
+            "tileFetches": 49
+          },
+          "tilt": {
+            "frames": 417,
+            "fps": 83.2,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          },
+          "zoom": {
+            "frames": 425,
+            "fps": 85,
+            "p50": 11.1,
+            "p90": 11.2,
+            "p99": 22.3,
+            "worst": 44.4,
+            "longTasks": 0,
+            "longTaskMs": 0,
+            "tileFetches": 0
+          }
+        }
+      }
+    ]
+  }
+}
