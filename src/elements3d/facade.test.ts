@@ -239,6 +239,57 @@ describe("tileFacadeDetail", () => {
     // and a few buildings stay completely dark
     expect(allDark).toBeGreaterThan(0);
   });
+
+  it("flags windows for a procedural frame, and never the door", () => {
+    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building(),
+    ]).windows!;
+    const position = geometry.getAttribute("position");
+    const color = geometry.getAttribute("color");
+    const frame = geometry.getAttribute("aFrame");
+    expect(frame).not.toBeUndefined();
+    expect(frame.count).toBe(position.count);
+    let windowQuads = 0;
+    for (let q = 0; q < position.count; q += 6) {
+      const isDoor =
+        Math.abs(color.getX(q) - DOOR.r) < 1e-6 &&
+        Math.abs(color.getY(q) - DOOR.g) < 1e-6 &&
+        Math.abs(color.getZ(q) - DOOR.b) < 1e-6;
+      for (let v = 0; v < 6; v++) expect(frame.getX(q + v)).toBe(isDoor ? 0 : 1);
+      if (!isDoor) windowQuads++;
+    }
+    expect(windowQuads).toBeGreaterThan(0);
+  });
+
+  it("gives every flat quad the unit-square uv, bottom at v = 0", () => {
+    const geometry = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building(),
+    ]).windows!;
+    const position = geometry.getAttribute("position");
+    const uv = geometry.getAttribute("uv");
+    for (let q = 0; q < position.count; q += 6) {
+      // the frame shader assumes these four corners, whatever the winding
+      const corners = new Set<string>();
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (let v = 0; v < 6; v++) {
+        const z = position.getZ(q + v);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+      for (let v = 0; v < 6; v++) {
+        const u = uv.getX(q + v);
+        const w = uv.getY(q + v);
+        expect(u === 0 || u === 1).toBe(true);
+        expect(w === 0 || w === 1).toBe(true);
+        // v = 0 is the bottom edge, where the sill lives
+        if (Math.abs(position.getZ(q + v) - minZ) < 1e-6) expect(w).toBe(0);
+        if (Math.abs(position.getZ(q + v) - maxZ) < 1e-6) expect(w).toBe(1);
+        corners.add(`${u},${w}`);
+      }
+      expect(corners.size).toBe(4);
+    }
+  });
 });
 
 // the color of the first window vertex, or null when there is none
