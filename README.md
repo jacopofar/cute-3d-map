@@ -84,9 +84,9 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes**, **water**, **church crosses**, **parked cars** and **imputed
-colors** on and off, with a question mark beside the last one explaining what
-imputation means. All but imputed colors are mesh visibility switches (water's is
+**roof shapes**, **water**, **church crosses**, **parked cars**, **lamp posts**
+and **imputed colors** on and off, with a question mark beside the last one
+explaining what imputation means. All but imputed colors are mesh visibility switches (water's is
 all-or-nothing: unchecked, no water is drawn); imputed colors are baked into the
 geometry and so reload the loaded tiles.
 
@@ -106,7 +106,8 @@ the scene lights and parked cars dim, and the street lamps and traffic signals
 glow: `tilegen/lamps.py` puts a lamp every 55 m on both sides of every
 parking-eligible road, and the signal heads blink red/green on the same global
 8 s light the vehicles react to. Both are additive sprites on a thin instanced
-post (`src/night_lights.ts`), visible at night above zoom 15.
+post (`src/night_lights.ts`), visible at night above zoom 15. The **lamp posts**
+checkbox switches the street lamps and their posts off; the signal heads stay.
 
 ### Churches
 

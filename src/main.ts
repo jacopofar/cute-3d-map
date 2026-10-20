@@ -220,6 +220,7 @@ class CoolMap {
   private parkedCarsEnabled = true;
   private nightLights?: NightLights;
   private nightLightsKey = "";
+  private lamppostsEnabled = true;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -734,6 +735,10 @@ class CoolMap {
     wireToggle("#parked-cars-toggle", (on) => {
       this.parkedCarsEnabled = on;
       this.applyParkedCarVisibility();
+    });
+    wireToggle("#lampposts-toggle", (on) => {
+      this.lamppostsEnabled = on;
+      this.applyNightLightsVisibility();
     });
     wireToggle("#bridges-toggle", (on) => {
       this.bridgesEnabled = on;
@@ -1713,6 +1718,7 @@ class CoolMap {
   }
 
   private applyNightLightsVisibility() {
+    this.nightLights?.setLampsEnabled(this.lamppostsEnabled);
     this.nightLights?.setVisible(this.lighting.night, this.map.getZoom());
   }
 

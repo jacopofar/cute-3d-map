@@ -22,6 +22,14 @@ const LAMP_COLORS = [0xffd9a4, 0xffe4bd, 0xffcf8f, 0xffe9c9];
 const RED = new THREE.Color("#ff4438");
 const GREEN = new THREE.Color("#43ff86");
 
+// the night lamps are deliberately generous: a large halo plus a wider, dimmer
+// pool on the road, and the halo is three times over the base colour so it
+// blooms against the dark basemap
+const LAMP_GLOW_SIZE = 26;
+const LAMP_POOL_SIZE = 42;
+const LAMP_GLOW_INTENSITY = 3;
+const LAMP_POOL_INTENSITY = 1.8;
+
 let sharedGlow: THREE.Texture | undefined;
 
 function glowTexture(): THREE.Texture {
@@ -69,6 +77,7 @@ function points(
   positions: Array<[number, number, number]>,
   colors: Float32Array,
   size: number,
+  kind: string,
   opacity = 1,
 ): THREE.Points {
   const geometry = new THREE.BufferGeometry();
@@ -91,6 +100,7 @@ function points(
   const result = new THREE.Points(geometry, material);
   // the set is rebuilt as tiles/centre change, so stale bounds would cull it
   result.frustumCulled = false;
+  result.userData = { kind };
   return result;
 }
 
@@ -100,11 +110,15 @@ export class NightLights {
   private lamps?: THREE.Points;
   private lampPools?: THREE.Points;
   private signals?: THREE.Points;
-  private readonly posts: THREE.InstancedMesh;
+  private readonly lampPosts: THREE.InstancedMesh;
+  private readonly signalPosts: THREE.InstancedMesh;
   private readonly dummy = new THREE.Object3D();
   private readonly capacity: number;
   private signalAxes: number[] = [];
   private phase = -1;
+  private lampsEnabled = true;
+  private night = 0;
+  private zoom = 20;
 
   constructor(scene: THREE.Scene, capacity = 80_000) {
     this.scene = scene;
@@ -114,18 +128,28 @@ export class NightLights {
     pole.translate(0, 0, 2.1);
     const head = new THREE.BoxGeometry(0.5, 0.5, 0.22);
     head.translate(0, 0, 4.2);
-    const geometry = BufferGeometryUtils.mergeGeometries([pole, head]);
+    const geometry = BufferGeometryUtils.mergeGeometries([pole, head]) ?? pole;
     const material = new THREE.MeshBasicMaterial({ color: 0x1d2128 });
-    this.posts = new THREE.InstancedMesh(
-      geometry ?? pole,
+    this.lampPosts = new THREE.InstancedMesh(
+      geometry,
       material,
       this.capacity,
     );
-    this.posts.count = 0;
-    this.posts.frustumCulled = false;
-    this.posts.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-    this.posts.userData = { kind: "night_lights" };
-    scene.add(this.posts);
+    this.signalPosts = new THREE.InstancedMesh(
+      geometry,
+      material,
+      Math.min(this.capacity, 8192),
+    );
+    for (const [posts, kind] of [
+      [this.lampPosts, "lamppost"],
+      [this.signalPosts, "signal_post"],
+    ] as const) {
+      posts.count = 0;
+      posts.frustumCulled = false;
+      posts.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+      posts.userData = { kind };
+      scene.add(posts);
+    }
   }
 
   // the union of the centre tiles' lamps and signals, rebuilt only when that
@@ -155,13 +179,30 @@ export class NightLights {
       lampColors[i * 3 + 2] = color.b;
     }
     if (lamps.length > 0) {
-      this.lamps = points(lampPositions, lampColors, 10);
+      const glowColors = lampColors.map(
+        (value) => value * LAMP_GLOW_INTENSITY,
+      );
+      const poolColors = lampColors.map(
+        (value) => value * LAMP_POOL_INTENSITY,
+      );
+      this.lamps = points(
+        lampPositions,
+        glowColors,
+        LAMP_GLOW_SIZE,
+        "lamplight",
+      );
       this.scene.add(this.lamps);
       // a wider, dimmer billboard at ground level: the lamp's pool of light
       const pools = lampPositions.map(
         ([x, y]) => [x, y, 0.25] as [number, number, number],
       );
-      this.lampPools = points(pools, lampColors.slice(), 18, 0.32);
+      this.lampPools = points(
+        pools,
+        poolColors,
+        LAMP_POOL_SIZE,
+        "lamp_pool",
+        0.32,
+      );
       this.scene.add(this.lampPools);
       lampPositions.length = 0;
     }
@@ -179,36 +220,58 @@ export class NightLights {
       this.signalAxes.push(hashSpot(signals[i].lon, signals[i].lat) % 2);
     }
     if (signals.length > 0) {
-      this.signals = points(signalPositions, signalColors, 9);
+      this.signals = points(signalPositions, signalColors, 9, "signal_light");
       this.scene.add(this.signals);
       this.phase = -1;
     }
 
-    // one post per light, plus the signals, in a single instanced draw
-    const total = Math.min(this.capacity, lamps.length + signals.length);
-    let slot = 0;
-    for (const spot of [...lamps, ...signals]) {
-      if (slot >= total) break;
-      const m = toModelCoords([spot.lon, spot.lat], originMeters, scaleFactor);
-      this.dummy.position.set(m[0], m[1], 0);
-      this.dummy.rotation.set(0, 0, 0);
-      this.dummy.scale.setScalar(1);
-      this.dummy.updateMatrix();
-      this.posts.setMatrixAt(slot, this.dummy.matrix);
-      slot++;
-    }
-    this.posts.count = slot;
-    this.posts.instanceMatrix.needsUpdate = true;
+    // one post per light, split so the lamp posts can be switched off while the
+    // signal heads stay
+    const placePosts = (posts: THREE.InstancedMesh, spots: NightSpot[]) => {
+      const limit = Math.min(posts.instanceMatrix.count, spots.length);
+      for (let i = 0; i < limit; i++) {
+        const m = toModelCoords(
+          [spots[i].lon, spots[i].lat],
+          originMeters,
+          scaleFactor,
+        );
+        this.dummy.position.set(m[0], m[1], 0);
+        this.dummy.rotation.set(0, 0, 0);
+        this.dummy.scale.setScalar(1);
+        this.dummy.updateMatrix();
+        posts.setMatrixAt(i, this.dummy.matrix);
+      }
+      posts.count = limit;
+      posts.instanceMatrix.needsUpdate = true;
+    };
+    placePosts(this.lampPosts, lamps);
+    placePosts(this.signalPosts, signals);
     this.update(performance.now() / 1000);
+    this.applyVisibility();
   }
 
   setVisible(night: number, zoom: number): void {
-    const detailed = zoom >= NIGHT_LIGHT_MIN_ZOOM;
-    const dark = night > 0.2;
-    if (this.lamps) this.lamps.visible = detailed && dark;
-    if (this.lampPools) this.lampPools.visible = detailed && dark;
+    this.night = night;
+    this.zoom = zoom;
+    this.applyVisibility();
+  }
+
+  // the lampposts checkbox; the signal heads stay independent
+  setLampsEnabled(enabled: boolean): void {
+    this.lampsEnabled = enabled;
+    this.applyVisibility();
+  }
+
+  private applyVisibility(): void {
+    const detailed = this.zoom >= NIGHT_LIGHT_MIN_ZOOM;
+    const dark = this.night > 0.2;
+    if (this.lamps) this.lamps.visible = detailed && dark && this.lampsEnabled;
+    if (this.lampPools) {
+      this.lampPools.visible = detailed && dark && this.lampsEnabled;
+    }
+    if (this.lampPosts) this.lampPosts.visible = detailed && this.lampsEnabled;
     if (this.signals) this.signals.visible = detailed && dark;
-    this.posts.visible = detailed;
+    if (this.signalPosts) this.signalPosts.visible = detailed;
   }
 
   // the signal heads follow the same global light as the traffic speed bumps
