@@ -19,8 +19,9 @@ import { dirname, join } from "node:path";
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 const RESULT_FILE = join("perf-results", "latest-gpu.json");
 
-// central Milan, at a zoom where the facade detail exists (it starts above 17)
-const START = { lng: 9.1919, lat: 45.4641, zoom: 17.2, pitch: 30 };
+// Corso Buenos Aires, a busy avenue rather than the pedestrian Duomo square:
+// the view has moving traffic as well as the static layers
+const START = { lng: 9.209, lat: 45.478, zoom: 17.2, pitch: 30 };
 const WARMUP_MS = 7000;
 const SETTLE_MS = 3500;
 const PHASE_MS = 5000;
