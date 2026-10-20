@@ -98,46 +98,37 @@ describe("runInView", () => {
 });
 
 describe("compactSlots", () => {
-  // fresh typed arrays, as the renderer allocates them per loop set
-  const buffers = (n: number) => ({
-    slots: new Int32Array(n),
-    slotOf: new Int32Array(n).fill(-1),
-  });
+  // fresh typed array, as the renderer allocates one per loop set
+  const buffer = (n: number) => new Int32Array(n);
 
   it("leaves the mapping unchanged when every vehicle is visible", () => {
-    const { slots, slotOf } = buffers(3);
-    expect(compactSlots(3, () => true, slots, slotOf)).toBe(3);
+    const slots = buffer(3);
+    expect(compactSlots(3, () => true, slots)).toBe(3);
     expect(Array.from(slots)).toEqual([0, 1, 2]);
-    expect(Array.from(slotOf)).toEqual([0, 1, 2]);
   });
 
   it("compacts survivors into the front and returns the count", () => {
-    const { slots, slotOf } = buffers(5);
+    const slots = buffer(5);
     const visible = [true, false, true, false, true];
-    expect(compactSlots(5, (i) => visible[i], slots, slotOf)).toBe(3);
+    expect(compactSlots(5, (i) => visible[i], slots)).toBe(3);
     expect(Array.from(slots.subarray(0, 3))).toEqual([0, 2, 4]);
-    expect(Array.from(slotOf)).toEqual([0, -1, 1, -1, 2]);
   });
 
   it("handles nothing visible", () => {
-    const { slots, slotOf } = buffers(4);
-    expect(compactSlots(4, () => false, slots, slotOf)).toBe(0);
-    expect(Array.from(slotOf)).toEqual([-1, -1, -1, -1]);
+    expect(compactSlots(4, () => false, buffer(4))).toBe(0);
   });
 
   it("handles no vehicles", () => {
-    const { slots, slotOf } = buffers(0);
-    expect(compactSlots(0, () => true, slots, slotOf)).toBe(0);
+    expect(compactSlots(0, () => true, buffer(0))).toBe(0);
   });
 
   it("reuses a stale buffer, so no old slot survives below count", () => {
-    const { slots, slotOf } = buffers(4);
-    compactSlots(4, () => true, slots, slotOf);
+    const slots = buffer(4);
+    compactSlots(4, () => true, slots);
     // the next remap culls everything but the last vehicle
-    const count = compactSlots(4, (i) => i === 3, slots, slotOf);
+    const count = compactSlots(4, (i) => i === 3, slots);
     expect(count).toBe(1);
     expect(slots[0]).toBe(3);
-    expect(Array.from(slotOf)).toEqual([-1, -1, -1, 0]);
   });
 });
 

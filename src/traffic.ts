@@ -66,6 +66,10 @@ const SLICE_MS = 1000 / UPDATE_HZ / SLICES;
 // the padding margin without scanning the whole fleet every slice. A remap
 // rewrites only the visible instances, so it stays cheap.
 const REMAP_MS = 500;
+// A moving map changes the view every frame, but remapping the whole fleet at
+// frame rate is wasteful: the 8% padding hides the lag between two remaps, so
+// cap it at ~10 Hz while panning or zooming.
+const PAN_REMAP_MS = 100;
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
@@ -167,10 +171,9 @@ export class TrafficRenderer {
   private readonly now: () => number;
   private vehicles: PreparedVehicle[] = [];
   // The compacted instance buffer: `slots[0..visibleCount)` maps a draw slot
-  // back to its vehicle, `slotOf` maps a vehicle to its slot (-1 when culled).
-  // Both are rebuilt in place on a remap so nothing allocates per frame.
+  // back to its vehicle. Rebuilt in place on a remap so nothing allocates per
+  // frame.
   private slots = new Int32Array(0);
-  private slotOf = new Int32Array(0);
   private visibleCount = 0;
   // slice scheduling: each update places one slice, at most 30 times a second
   private sliceCursor = 0;
@@ -266,9 +269,8 @@ export class TrafficRenderer {
       console.warn("traffic: vehicle capacity exceeded, dropping routes");
     }
     this.vehicles = vehicles;
-    // the slot buffers follow the vehicle list; a remap fills them
+    // the slot buffer follows the vehicle list; a remap fills it
     this.slots = new Int32Array(vehicles.length);
-    this.slotOf = new Int32Array(vehicles.length).fill(-1);
     this.visibleCount = 0;
     this.mesh.count = 0;
     this.needsFullUpdate = true;
@@ -304,10 +306,11 @@ export class TrafficRenderer {
       : "";
     // A moving map changes the view key every frame, which is exactly when the
     // visible set must follow it; a static one still remaps every REMAP_MS.
+    const viewMoved =
+      originKey !== this.lastOriginKey || viewKey !== this.lastViewKey;
     const remap =
       this.needsFullUpdate ||
-      originKey !== this.lastOriginKey ||
-      viewKey !== this.lastViewKey ||
+      (viewMoved && nowMs - this.lastRemap >= PAN_REMAP_MS) ||
       nowMs - this.lastRemap >= REMAP_MS;
     if (remap) {
       this.needsFullUpdate = false;
@@ -365,7 +368,6 @@ export class TrafficRenderer {
         return run !== undefined && (!cull || runInView(run, cull));
       },
       this.slots,
-      this.slotOf,
     );
     this.visibleCount = count;
     for (let slot = 0; slot < count; slot++) {

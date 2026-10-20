@@ -57,26 +57,19 @@ export function runInView(run: PreparedRun, view: TrafficView): boolean {
 
 // Pack the visible vehicles into the front of the instance buffer.
 //
-// `slotOf` maps vehicle -> slot, or -1 when the vehicle is culled; `slots` maps
-// slot -> vehicle and only its first `count` entries are meaningful. Returns
-// the visible count, i.e. the InstancedMesh count to draw.
-//
-// Pure and allocation-free so the renderer can reuse both typed arrays across
-// remaps. The order of the surviving vehicles is preserved, which keeps the
-// mapping stable from one remap to the next.
+// `slots` maps a draw slot to its vehicle; only the first `count` entries are
+// meaningful, and `count` is the InstancedMesh count to draw. Pure and
+// allocation-free so the renderer can reuse the typed array across remaps. The
+// order of the surviving vehicles is preserved, which keeps the mapping stable
+// from one remap to the next.
 export function compactSlots(
   vehicleCount: number,
   isVisible: (vehicle: number) => boolean,
   slots: Int32Array,
-  slotOf: Int32Array,
 ): number {
   let count = 0;
   for (let i = 0; i < vehicleCount; i++) {
-    if (!isVisible(i)) {
-      slotOf[i] = -1;
-      continue;
-    }
-    slotOf[i] = count;
+    if (!isVisible(i)) continue;
     slots[count] = i;
     count++;
   }
