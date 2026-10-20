@@ -77,6 +77,19 @@ function applyFade(geometry: THREE.BufferGeometry, fade: number): void {
   geometry.setAttribute("aFade", new THREE.BufferAttribute(values, 1));
 }
 
+// 1 at a waterway bank, 0 in its middle (and 0 everywhere on an area). Only
+// the areas use this filler: a ribbon bakes its own per-vertex values. Every
+// water geometry has to carry the attribute, or merging the tile's water
+// geometries returns null and the whole layer disappears for that tile. See
+// the comment in areaGeometry.
+function applyFoam(geometry: THREE.BufferGeometry, foam: number): void {
+  const count = geometry.getAttribute("position").count;
+  geometry.setAttribute(
+    "aFoam",
+    new THREE.BufferAttribute(new Float32Array(count).fill(foam), 1),
+  );
+}
+
 // a flat, triangulated polygon (holes included) lying in the z = 0 plane
 function areaGeometry(
   rings: Geojson.Position[][],
@@ -93,8 +106,8 @@ function areaGeometry(
   }
   const shape = new THREE.ShapeGeometry(outline);
   // water is shaded by the shader, so the flat normal/uv the shape carries are
-  // dropped: every water geometry keeps the same position+color attributes so
-  // the per-tile merge never sees a mismatched set
+  // dropped: every water geometry keeps the same position+color+aFade+aFoam
+  // attributes so the per-tile merge never sees a mismatched set
   const geometry = shape.index ? shape.toNonIndexed() : shape;
   geometry.deleteAttribute("normal");
   geometry.deleteAttribute("uv");
@@ -104,6 +117,10 @@ function areaGeometry(
 // a polyline turned into a flat band: each point is pushed half a width to
 // either side of the centreline. The offset uses the average of the two
 // adjacent segments, so a bend does not pinch to nothing.
+//
+// The band carries three rows (bank, centreline, bank) instead of the bare two
+// the surface needs: the extra row is what lets `aFoam` fade from the bank
+// inward. Widths are the same, at the cost of two more triangles per segment.
 function ribbonGeometry(
   coords: Geojson.Position[],
   halfWidth: number,
@@ -131,25 +148,43 @@ function ribbonGeometry(
     offsets.push([-dy * halfWidth, dx * halfWidth]);
   }
   const positions: number[] = [];
-  const push = (p: [number, number], o: [number, number], side: number) =>
-    positions.push(p[0] + o[0] * side, p[1] + o[1] * side, 0);
+  const foam: number[] = [];
+  const row = (p: [number, number], o: [number, number], side: number) => [
+    p[0] + o[0] * side,
+    p[1] + o[1] * side,
+  ];
+  // `side` is 1 for the left bank, 0 for the centreline row, -1 for the right;
+  // foam is 1 on a bank and 0 down the middle
+  const push = (p: [number, number], o: [number, number], side: number) => {
+    const [x, y] = row(p, o, side);
+    positions.push(x, y, 0);
+    foam.push(Math.abs(side));
+  };
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
     const b = points[i + 1];
     const oa = offsets[i];
     const ob = offsets[i + 1];
+    // same winding as the old two-row ribbon, split down the middle
     push(a, oa, 1);
-    push(a, oa, -1);
+    push(a, oa, 0);
     push(b, ob, 1);
+    push(a, oa, 0);
+    push(b, ob, 0);
+    push(b, ob, 1);
+    push(a, oa, 0);
+    push(a, oa, -1);
+    push(b, ob, 0);
     push(a, oa, -1);
     push(b, ob, -1);
-    push(b, ob, 1);
+    push(b, ob, 0);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
     new THREE.Float32BufferAttribute(positions, 3),
   );
+  geometry.setAttribute("aFoam", new THREE.Float32BufferAttribute(foam, 1));
   return geometry;
 }
 
@@ -173,6 +208,9 @@ export function water(
     if (geometry) {
       applyVertexColor(geometry, color);
       applyFade(geometry, fade);
+      // a lake has no bank inside the tile: the foam attribute is present but
+      // silent, so the merge sees the same set as a ribbon
+      applyFoam(geometry, 0);
       geometries.push(geometry);
     }
   };
@@ -205,10 +243,46 @@ export function water(
 const HIGHLIGHT = new THREE.Color("#cfeaff");
 
 /**
+ * The physical camera behind a MapLibre projection: MapLibre bakes the whole
+ * view into the projection matrix, so the shader's built-in `cameraPosition`
+ * (the scene origin) is not where the eye is. The camera is the point the
+ * matrix sends nowhere, i.e. the null vector of the three top rows: solve
+ * P * [C, 1] = 0. The glitter swath needs the eye's ground point to know which
+ * side of the water faces the sun. Pure and unit-tested; `out` is reused so
+ * the render loop allocates nothing.
+ */
+export function cameraCenter(
+  projection: THREE.Matrix4,
+  out: THREE.Vector3,
+): THREE.Vector3 {
+  const e = projection.elements;
+  // The eye is where the image coordinates vanish: the point that makes the
+  // x row, the y row and the w row of the matrix all zero. The clip-z row is
+  // deliberately left out (it is depth, not an image coordinate).
+  const a = new THREE.Matrix3().set(
+    e[0],
+    e[4],
+    e[8],
+    e[1],
+    e[5],
+    e[9],
+    e[3],
+    e[7],
+    e[11],
+  );
+  return out
+    .set(e[12], e[13], e[15])
+    .applyMatrix3(a.invert())
+    .multiplyScalar(-1);
+}
+
+/**
  * One shared water material. A ShaderMaterial (not a lit one): the ripples are
  * procedural, so there are no lights or normals to feed. `uTime` is advanced by
- * the render loop. The ripples are anchored to model space, so a rebuild (or an
- * origin reset) shifts their phase once; that is invisible on a moving surface.
+ * the render loop, and `uSunDirection` / `uSunColor` come from the same key
+ * light the windows use, so the glitter path follows the real sun. The ripples
+ * are anchored to model space, so a rebuild (or an origin reset) shifts their
+ * phase once; that is invisible on a moving surface.
  */
 export const waterMaterial = new THREE.ShaderMaterial({
   uniforms: {
@@ -217,16 +291,26 @@ export const waterMaterial = new THREE.ShaderMaterial({
     // 0 by day, 1 at night; dims the (unlit) water so a lake does not glow
     // bright blue next to the dark buildings
     uNight: { value: 0 },
+    // the key light, in model space; seeded so a test that never renders still
+    // gets a sane shader
+    uSunDirection: { value: new THREE.Vector3(0, -0.35, 1).normalize() },
+    uSunColor: { value: new THREE.Color(0xfff2df) },
+    uSunIntensity: { value: 2.4 },
+    // the eye, in model space; refreshed from the projection each frame
+    uCameraPosition: { value: new THREE.Vector3(0, 0, 1000) },
   },
   vertexShader: /* glsl */ `
     attribute vec3 color;
     attribute float aFade;
+    attribute float aFoam;
     varying vec3 vColor;
     varying float vFade;
+    varying float vFoam;
     varying vec2 vPos;
     void main() {
       vColor = color;
       vFade = aFade;
+      vFoam = aFoam;
       vPos = position.xy;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
@@ -235,8 +319,13 @@ export const waterMaterial = new THREE.ShaderMaterial({
     uniform float uTime;
     uniform vec3 uHighlight;
     uniform float uNight;
+    uniform vec3 uSunDirection;
+    uniform vec3 uSunColor;
+    uniform float uSunIntensity;
+    uniform vec3 uCameraPosition;
     varying vec3 vColor;
     varying float vFade;
+    varying float vFoam;
     varying vec2 vPos;
 
     float hash(vec2 p) {
@@ -268,8 +357,41 @@ export const waterMaterial = new THREE.ShaderMaterial({
         0.5 + 0.5 * sin((ripple * 6.0 + grain * 3.0) * 6.2831853 - t * 1.6);
       float glint = pow(bands, 12.0);
 
+      // Sun glitter: the bands run along the sun's azimuth, so the sparkle
+      // reads as a path toward the sun rather than random noise. A true
+      // mirror reflection would sit out at the horizon, where a map view
+      // cannot see it, so this is deliberately stylised.
+      vec2 sunFlat = normalize(uSunDirection.xy + vec2(1e-5));
+      vec2 away = normalize(vPos - uCameraPosition.xy + vec2(1e-5));
+      float swath = pow(max(dot(away, sunFlat), 0.0), 5.0);
+      float alongSun = dot(vPos, sunFlat);
+      float sunBands =
+        0.5 + 0.5 * sin(alongSun * 0.11 - t * 1.1 + ripple * 5.0);
+      float sunGlint = pow(sunBands, 10.0);
+
+      // a low sun paints a long, warm path: full strength at dusk, a faint
+      // sheen at noon. uNight then dims whatever is left.
+      float lowSun = 1.0 - smoothstep(0.15, 0.65, uSunDirection.z);
+      float sunPower = uSunIntensity * 0.4 * mix(0.1, 1.0, lowSun);
+      vec3 glitter =
+        uSunColor * (0.25 + sunGlint * 0.9 + glint * 0.8) *
+        (0.5 + swath) * sunPower;
+
       vec3 color = mix(vColor * 0.82, vColor, ripple);
-      color += uHighlight * glint * 0.5;
+      // a faint sky sheen from the travelling bands, so still water reads as a
+      // surface even when the sun is not in view
+      color += uHighlight * glint * 0.22;
+      // bank foam: the ribbon's outer rows, broken up by drifting noise so it
+      // reads as lapping water and not a painted kerb. fwidth fades it out
+      // once the ribbon is only a couple of pixels wide, where it would just
+      // shimmer. Areas carry aFoam = 0, so lakes get none: tilegen clips them,
+      // and a ring foam would draw a seam across every tile boundary.
+      float bank = smoothstep(0.55, 1.0, vFoam);
+      float lap = noise(vPos * 0.5 + vec2(t * 0.25, -t * 0.12));
+      float foam = bank * smoothstep(0.4, 0.8, lap);
+      foam *= 1.0 - smoothstep(0.3, 0.7, fwidth(vFoam));
+      color = mix(color, uHighlight, foam * 0.6);
+      color += glitter;
       // at night keep the water dark, with just a hint of reflected moonlight
       color = mix(color, color * 0.28 + uHighlight * glint * 0.15, uNight);
       gl_FragColor = vec4(color, vFade);

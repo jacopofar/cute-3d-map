@@ -6,19 +6,25 @@ import {
   type TrafficRun,
 } from "./geojson_data";
 import {
+  compactSlots,
   crossingShift,
   crossingsAlongLoop,
   coordKey,
+  paddedView,
+  runInView,
   type PreparedCrossing,
   type PreparedRun,
+  type TrafficView,
 } from "./traffic_math";
+import { vehicleGeometry, type VehicleBodySize } from "./vehicle_body";
 
-// a fleet of precomputed vehicles: one InstancedMesh of boxes, placed from the
-// route data every frame
-export interface TrafficFleetConfig {
-  length: number; // vehicle box size, meters
-  width: number;
-  height: number;
+export type { TrafficView } from "./traffic_math";
+
+export { vehicleGeometry };
+
+// a fleet of precomputed vehicles: one InstancedMesh of car bodies, placed from
+// the route data every frame
+export interface TrafficFleetConfig extends VehicleBodySize {
   maxVehicles: number;
 }
 
@@ -26,6 +32,7 @@ export const CAR_TRAFFIC: TrafficFleetConfig = {
   length: 8 / 3,
   width: 4 / 3,
   height: 1,
+  body: "car",
   // long random loops mean many vehicles pass through the loaded window at
   // once; keep enough slots that none are dropped
   maxVehicles: 120000,
@@ -36,24 +43,18 @@ export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   length: 15,
   width: 1.5,
   height: 2,
+  body: "train",
   maxVehicles: 500,
 };
 
 interface PreparedVehicle {
   phase: number;
   period: number;
+  color: number;
   // shared by every vehicle on the loop, so the geometry is prepared once
   runs: PreparedRun[];
   // shared too: the loop's crossings, matched from the tile's point features
   crossings: PreparedCrossing[];
-}
-
-// the visible lon/lat window; a run outside it is not worth sampling
-export interface TrafficView {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
 }
 
 // vehicles update at ~30 Hz. Two slices are placed per cycle, one per update,
@@ -61,31 +62,16 @@ export interface TrafficView {
 const UPDATE_HZ = 30;
 const SLICES = 2;
 const SLICE_MS = 1000 / UPDATE_HZ / SLICES;
-// vehicles just outside the view can enter it on the next pan; keep a margin
-// before culling them
-const VIEW_PADDING = 0.08;
-
-function paddedView(view: TrafficView): TrafficView {
-  const padLon = (view.east - view.west) * VIEW_PADDING;
-  const padLat = (view.north - view.south) * VIEW_PADDING;
-  return {
-    west: view.west - padLon,
-    east: view.east + padLon,
-    south: view.south - padLat,
-    north: view.north + padLat,
-  };
-}
-
-function runInView(run: PreparedRun, view: TrafficView): boolean {
-  const bounds = run.bounds;
-  if (!bounds) return true;
-  return !(
-    bounds[2] < view.west ||
-    bounds[0] > view.east ||
-    bounds[3] < view.south ||
-    bounds[1] > view.north
-  );
-}
+// How often the visible set is recomputed. Culling depends on where each
+// vehicle is on its loop, so a static map still needs a periodic remap for
+// vehicles whose loop re-enters the view; half a second keeps the pop-in below
+// the padding margin without scanning the whole fleet every slice. A remap
+// rewrites only the visible instances, so it stays cheap.
+const REMAP_MS = 500;
+// A moving map changes the view every frame, but remapping the whole fleet at
+// frame rate is wasteful: the 8% padding hides the lag between two remaps, so
+// cap it at ~10 Hz while panning or zooming.
+const PAN_REMAP_MS = 100;
 
 // rounding of the tile's t0/t1 (3 decimals) can leave a sub-millisecond gap
 const TIME_EPS = 2e-3;
@@ -163,13 +149,8 @@ function sampleRun(
   return { lon, lat, heading };
 }
 
-// the body shared by moving and parked cars: a simple box in the fleet's
-// dimensions, so the two layers always match
-export function vehicleGeometry(
-  config: TrafficFleetConfig,
-): THREE.BufferGeometry {
-  return new THREE.BoxGeometry(config.length, config.width, config.height);
-}
+// the body shared by moving and parked cars lives in vehicle_body.ts: a
+// low-poly car, or a long windowed box for trains
 
 /**
  * Renders precomputed traffic: every vehicle is a pure function of wall-clock
@@ -182,13 +163,21 @@ export class TrafficRenderer {
   private readonly config: TrafficFleetConfig;
   private readonly dummy = new THREE.Object3D();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  private readonly tint = new THREE.Color();
   private readonly capacity: number;
   private readonly now: () => number;
   private vehicles: PreparedVehicle[] = [];
+  // The compacted instance buffer: `slots[0..visibleCount)` maps a draw slot
+  // back to its vehicle. Rebuilt in place on a remap so nothing allocates per
+  // frame.
+  private slots = new Int32Array(0);
+  private visibleCount = 0;
   // slice scheduling: each update places one slice, at most 30 times a second
   private sliceCursor = 0;
   private lastSlice = 0;
+  private lastRemap = 0;
   private lastOriginKey = "";
+  private lastViewKey = "";
   private needsFullUpdate = true;
   // when disabled (map zoomed out) the mesh is hidden and the per-frame update
   // is skipped
@@ -203,7 +192,13 @@ export class TrafficRenderer {
     this.now = now;
     this.capacity = Math.max(1, config.maxVehicles);
     const geometry = vehicleGeometry(config);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    // vertex colors carry the car's own part colors; three multiplies them by
+    // each instance's paint, so the body is tinted and the glass/wheels stay
+    // dark
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+    });
     this.mesh = new THREE.InstancedMesh(geometry, material, this.capacity);
     this.mesh.count = 0;
     // instances move every frame, so frustum culling against stale bounds
@@ -223,6 +218,11 @@ export class TrafficRenderer {
   // live vehicle count, for the perf benchmark
   get count(): number {
     return this.vehicles.length;
+  }
+
+  // instances actually drawn after compaction
+  get drawnCount(): number {
+    return this.visibleCount;
   }
 
   // the union of the loaded tiles' traffic; the per-tile pieces of one loop
@@ -253,42 +253,43 @@ export class TrafficRenderer {
     }
 
     const vehicles: PreparedVehicle[] = [];
-    let slot = 0;
     for (const group of byId.values()) {
-      if (slot >= this.capacity) break;
+      if (vehicles.length >= this.capacity) break;
       group.runs.sort((a, b) => a.t0 - b.t0);
       const crossings = crossingsAlongLoop(group.runs, keys);
       for (const vehicle of group.vehicles) {
-        if (slot >= this.capacity) break;
-        // colors are static, so they are written once here; the update loop
-        // keeps every vehicle in the same slot whether it is visible or not
-        this.mesh.setColorAt(slot, new THREE.Color(vehicle.color));
+        if (vehicles.length >= this.capacity) break;
         vehicles.push({
           phase: vehicle.phase,
           period: group.period,
+          color: vehicle.color,
           runs: group.runs,
           crossings,
         });
-        slot++;
       }
     }
-    if (slot >= this.capacity) {
+    if (vehicles.length >= this.capacity) {
       console.warn("traffic: vehicle capacity exceeded, dropping routes");
     }
     this.vehicles = vehicles;
+    // the slot buffer follows the vehicle list; a remap fills it
+    this.slots = new Int32Array(vehicles.length);
+    this.visibleCount = 0;
     this.mesh.count = 0;
     this.needsFullUpdate = true;
     this.sliceCursor = 0;
     this.lastSlice = 0;
+    this.lastRemap = 0;
     this.lastOriginKey = "";
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    this.lastViewKey = "";
   }
 
-  // Place the vehicles for the current wall-clock phase. A full pass happens
-  // when the loop set or the projection origin changes; otherwise one slice is
-  // placed per update at ~30 Hz, and runs outside the visible lon/lat window are
-  // culled before sampling. Nothing accumulates: every position is a pure
-  // function of time.
+  // Place the vehicles for the current wall-clock phase. The visible set is
+  // remapped when the view, origin or loop set changes, and periodically so a
+  // vehicle whose loop re-enters a static view is not lost. A remap writes every
+  // visible instance once; otherwise one slice of the compacted buffer is placed
+  // per update at ~30 Hz. Nothing accumulates: every position is a pure function
+  // of time.
   update(
     originMeters: [number, number],
     scaleFactor: number,
@@ -296,59 +297,124 @@ export class TrafficRenderer {
   ): void {
     if (!this.enabled) return;
     if (this.vehicles.length === 0) {
+      this.visibleCount = 0;
       this.mesh.count = 0;
       return;
     }
     const now = this.now();
     const nowMs = now * 1000;
     const originKey = `${originMeters[0].toFixed(3)}:${originMeters[1].toFixed(3)}:${scaleFactor.toFixed(6)}`;
-    let start = 0;
-    let end = this.vehicles.length;
-    const full = this.needsFullUpdate || originKey !== this.lastOriginKey;
-    if (full) {
+    const viewKey = view
+      ? `${view.west.toFixed(5)}:${view.south.toFixed(5)}:${view.east.toFixed(5)}:${view.north.toFixed(5)}`
+      : "";
+    // A moving map changes the view key every frame, which is exactly when the
+    // visible set must follow it; a static one still remaps every REMAP_MS.
+    const viewMoved =
+      originKey !== this.lastOriginKey || viewKey !== this.lastViewKey;
+    const remap =
+      this.needsFullUpdate ||
+      (viewMoved && nowMs - this.lastRemap >= PAN_REMAP_MS) ||
+      nowMs - this.lastRemap >= REMAP_MS;
+    if (remap) {
       this.needsFullUpdate = false;
       this.lastOriginKey = originKey;
+      this.lastViewKey = viewKey;
+      this.lastRemap = nowMs;
+      this.lastSlice = nowMs;
       this.sliceCursor = 0;
-      this.lastSlice = nowMs;
-    } else {
-      if (nowMs - this.lastSlice < SLICE_MS) return;
-      this.lastSlice = nowMs;
-      const sliceSize = Math.ceil(this.vehicles.length / SLICES);
-      start = this.sliceCursor * sliceSize;
-      end = Math.min(this.vehicles.length, start + sliceSize);
-      this.sliceCursor = (this.sliceCursor + 1) % SLICES;
-      if (start >= this.vehicles.length) {
-        start = 0;
-        end = Math.min(this.vehicles.length, sliceSize);
-        this.sliceCursor = 1 % SLICES;
-      }
+      this.remap(now, originMeters, scaleFactor, view);
+      return;
     }
-
+    if (nowMs - this.lastSlice < SLICE_MS) return;
+    this.lastSlice = nowMs;
+    const count = this.visibleCount;
+    const sliceSize = Math.ceil(count / SLICES);
+    let start = this.sliceCursor * sliceSize;
+    let end = Math.min(count, start + sliceSize);
+    this.sliceCursor = (this.sliceCursor + 1) % SLICES;
+    if (start >= count) {
+      start = 0;
+      end = Math.min(count, sliceSize);
+      this.sliceCursor = 1 % SLICES;
+    }
     const cull = view ? paddedView(view) : undefined;
-    for (let i = start; i < end; i++) {
-      const vehicle = this.vehicles[i];
-      const period = vehicle.period;
-      let tau = (now + vehicle.phase * period) % period;
-      if (tau < 0) tau += period;
-      // the cosmetic speed bump through crossings shifts which point of the
-      // loop is drawn, but returns to zero, so the schedule is untouched
-      let drawn = tau + crossingShift(tau, vehicle.crossings, now);
-      drawn = ((drawn % period) + period) % period;
-      const run = findRun(vehicle.runs, drawn);
-      if (!run || (cull && !runInView(run, cull))) {
-        // unloaded tile or outside the view: keep the slot, hide the instance
-        this.mesh.setMatrixAt(i, this.hidden);
-        continue;
-      }
-      const seconds = drawn - run.t0;
-      const { lon, lat, heading } = sampleRun(run, seconds);
-      const m = toModelCoords([lon, lat], originMeters, scaleFactor);
-      this.dummy.position.set(m[0], m[1], this.config.height / 2);
-      this.dummy.rotation.set(0, 0, heading);
-      this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
+    for (let slot = start; slot < end; slot++) {
+      this.place(this.slots[slot], slot, now, originMeters, scaleFactor, cull);
     }
-    this.mesh.count = this.vehicles.length;
+    this.mesh.count = count;
     this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Rebuild the vehicle -> slot map for the current view and write every visible
+  // instance once. Slots above the new count are not drawn, so a shrinking
+  // visible set never leaves a ghost behind; every slot below it is freshly
+  // written here.
+  private remap(
+    now: number,
+    originMeters: [number, number],
+    scaleFactor: number,
+    view?: TrafficView,
+  ): void {
+    const cull = view ? paddedView(view) : undefined;
+    // Visibility tests the unshifted loop-time: the crossing bump shifts the
+    // drawn point by a couple of seconds at most, so a vehicle can only be
+    // misclassified within one bump width of an edge, and the next remap
+    // corrects it. Running crossingShift over the whole fleet on every remap
+    // would cost more than the handful of instances it saves.
+    const count = compactSlots(
+      this.vehicles.length,
+      (i) => {
+        const vehicle = this.vehicles[i];
+        let tau = (now + vehicle.phase * vehicle.period) % vehicle.period;
+        if (tau < 0) tau += vehicle.period;
+        const run = findRun(vehicle.runs, tau);
+        return run !== undefined && (!cull || runInView(run, cull));
+      },
+      this.slots,
+    );
+    this.visibleCount = count;
+    for (let slot = 0; slot < count; slot++) {
+      const vehicle = this.vehicles[this.slots[slot]];
+      // colors follow the compacted slot, so they are rewritten on every remap
+      // instead of once per vehicle in setLoops
+      this.mesh.setColorAt(slot, this.tint.set(vehicle.color));
+      this.place(this.slots[slot], slot, now, originMeters, scaleFactor, cull);
+    }
+    this.mesh.count = count;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  // Sample one vehicle's current point and write it into `slot`. A culled or
+  // unloaded run hides the instance: a stale matrix below the count would read
+  // as a ghost at the old position.
+  private place(
+    vehicleIndex: number,
+    slot: number,
+    now: number,
+    originMeters: [number, number],
+    scaleFactor: number,
+    cull?: TrafficView,
+  ): void {
+    const vehicle = this.vehicles[vehicleIndex];
+    const period = vehicle.period;
+    let tau = (now + vehicle.phase * period) % period;
+    if (tau < 0) tau += period;
+    // the cosmetic speed bump through crossings shifts which point of the
+    // loop is drawn, but returns to zero, so the schedule is untouched
+    let drawn = tau + crossingShift(tau, vehicle.crossings, now);
+    drawn = ((drawn % period) + period) % period;
+    const run = findRun(vehicle.runs, drawn);
+    if (!run || (cull && !runInView(run, cull))) {
+      this.mesh.setMatrixAt(slot, this.hidden);
+      return;
+    }
+    const seconds = drawn - run.t0;
+    const { lon, lat, heading } = sampleRun(run, seconds);
+    const m = toModelCoords([lon, lat], originMeters, scaleFactor);
+    this.dummy.position.set(m[0], m[1], this.config.height / 2);
+    this.dummy.rotation.set(0, 0, heading);
+    this.dummy.updateMatrix();
+    this.mesh.setMatrixAt(slot, this.dummy.matrix);
   }
 }

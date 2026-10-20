@@ -10,6 +10,8 @@ interface Probe {
     getZoom(): number;
     jumpTo(options: { center: [number, number]; zoom: number }): void;
   };
+  tileCenter: [number, number];
+  modelTransform: { translateX: number; translateY: number };
 }
 
 const HASH = /#map=([\d.-]+)\/([\d.-]+)\/([\d.-]+)/;
@@ -63,4 +65,45 @@ test("a #map= fragment sets the view and then follows the map", async ({
   expect(Number(match[3])).toBeCloseTo(9.2, 2);
 
   expect(errors).toEqual([]);
+});
+
+test("anchors the 3D model at the opened hash center", async ({ page }) => {
+  // 45.495/9.190 is within the two-tile origin-reset margin of the hardcoded
+  // default (45.497/9.186). The model transform used to be seeded from the
+  // default while tileCenter followed the hash, shifting the scene by
+  // kilometers until a move triggered an origin reset.
+  await page.goto("/#map=15/45.495/9.190");
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
+
+  const probe = await page.evaluate(() => {
+    const c = (window as unknown as { __coolMap: Probe }).__coolMap;
+    return {
+      tileCenter: c.tileCenter,
+      transform: c.modelTransform,
+      center: c.map.getCenter(),
+    };
+  });
+  // the constructor's default, if it ever leaks back in
+  expect(probe.tileCenter[0]).toBeCloseTo(9.19, 3);
+  expect(probe.tileCenter[1]).toBeCloseTo(45.495, 3);
+  expect(probe.center.lng).toBeCloseTo(9.19, 3);
+  expect(probe.center.lat).toBeCloseTo(45.495, 3);
+
+  // MapLibre's MercatorCoordinate formula; translateX/Y are in those units.
+  const mercator = (lng: number, lat: number) => ({
+    x: (180 + lng) / 360,
+    y:
+      (180 -
+        (180 / Math.PI) *
+          Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))) /
+      360,
+  });
+  const expected = mercator(probe.tileCenter[0], probe.tileCenter[1]);
+  expect(probe.transform.translateX).toBeCloseTo(expected.x, 7);
+  expect(probe.transform.translateY).toBeCloseTo(expected.y, 7);
 });

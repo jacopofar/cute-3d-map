@@ -30,8 +30,9 @@ import type {
   WaterInfo,
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
-import { ParkedCarLayer } from "./parked_cars.ts";
+import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
 import { NightLights } from "./night_lights.ts";
+import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
 import {
@@ -39,8 +40,14 @@ import {
   tileFacadeDetail,
   windowMaterial,
 } from "./elements3d/facade.ts";
+import { glassMaterial } from "./elements3d/glass.ts";
 import { greenMaterial } from "./elements3d/green.ts";
-import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
+import {
+  cameraCenter,
+  waterMaterial,
+  waterwayWidth,
+} from "./elements3d/water.ts";
+import { treeSway } from "./elements3d/tree_material.ts";
 import {
   DAY_HOUR,
   NIGHT_HOUR,
@@ -78,6 +85,9 @@ const basemapStyleUrl = (name: string): string =>
 // the night/day boundary that decides which basemap to show (the lighting model
 // fades smoothly, but a style can only be one or the other)
 const BASEMAP_NIGHT_AT = 0.5;
+// below this night factor the pass is off: the lamps are hidden and a bloom
+// over a daylight scene would only wash out the roofs
+const BLOOM_NIGHT_AT = 0.35;
 
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -213,14 +223,16 @@ class CoolMap {
   private loadedLamps: { [key: string]: LampSpot[] } = {};
   // parked cars per loaded tile, for the static cars around the centre
   private loadedParking: { [key: string]: ParkedCar[] } = {};
-  // the tile set + origin the parked cars were built for, so the layer is only
-  // rebuilt when that changes
-  private parkedCarsKey = "";
+  // the layer keeps one mesh per tile and diffs them itself
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
   private nightLights?: NightLights;
   private nightLightsKey = "";
   private lamppostsEnabled = true;
+  // bloom is a post pass over the 3D scene only, so this is a plain switch; it
+  // is forced off on the software rasterizer in render()
+  private bloomEnabled = true;
+  private bloom?: BloomPass;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -338,8 +350,12 @@ class CoolMap {
       }),
       "top-right",
     );
-    // parameters to ensure the model is georeferenced correctly on the map
-    const modelOrigin = tileCenter;
+    // parameters to ensure the model is georeferenced correctly on the map.
+    // Use the center the map actually opened on (a #map= fragment may have
+    // moved it): seeding this from the constructor argument shifted the whole
+    // scene by kilometers whenever the hash stayed within the 2-tile
+    // origin-reset margin, so the scene was never realigned.
+    const modelOrigin = this.tileCenter;
     const modelAltitude = 0;
     const modelRotate = [0, 0, 0];
 
@@ -485,6 +501,9 @@ class CoolMap {
         this.renderer.shadowMap.autoUpdate = false;
 
         this.renderer.autoClear = false;
+        // night bloom: a post pass over the scene only, composited back over
+        // MapLibre's basemap. Created here because it needs the renderer.
+        coolMap.bloom = new BloomPass(this.renderer);
         // animated cars and trains, added to the scene directly — NOT via
         // loadedTiles — so the origin reset does not touch them; their
         // positions are recomputed each frame from the precomputed loops
@@ -593,11 +612,46 @@ class CoolMap {
         // drive the water ripples from wall-clock time (the render loop runs
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
+        // MapLibre bakes the view into the projection, so recover the eye from
+        // it each frame: the glitter path needs a view direction that follows
+        // a pan or a tilt
+        cameraCenter(
+          this.camera.projectionMatrix,
+          waterMaterial.uniforms.uCameraPosition.value as THREE.Vector3,
+        );
         greenMaterial.uniforms.uTime.value = performance.now() / 1000;
+        // the trees' canopy sway, patched into their Lambert material
+        treeSway.value = performance.now() / 1000;
         coolMap.nightLights?.update(performance.now() / 1000);
         if (this.renderer) {
           this.renderer.resetState();
-          this.renderer.render(this.scene, this.camera);
+          // bloom only at night, where the lit windows and lamps are; by day it
+          // would just soften the whole city and cost two extra passes
+          let bloomed = false;
+          if (
+            coolMap.bloom &&
+            coolMap.bloomEnabled &&
+            !coolMap.softwareRenderer &&
+            coolMap.lighting.night > BLOOM_NIGHT_AT
+          ) {
+            try {
+              bloomed = coolMap.bloom.render(this.scene, this.camera);
+            } catch (error) {
+              // a failed pass must never cost us the frame: fall through to the
+              // direct render, and try the pass again next frame
+              console.warn(
+                "bloom pass failed, falling back to direct render",
+                error,
+              );
+              bloomed = false;
+            }
+          }
+          if (!bloomed) {
+            this.renderer.render(this.scene, this.camera);
+          }
+          // hand a clean context back to MapLibre: resetState unbinds our
+          // targets and restores the default framebuffer
+          this.renderer.resetState();
         } else {
           // this.renderer is set up on onAdd, so it should always be present
           // but typescript does not know that
@@ -721,6 +775,9 @@ class CoolMap {
       this.waterEnabled = on;
       this.applyWaterVisibility();
     });
+    wireToggle("#bloom-toggle", (on) => {
+      this.bloomEnabled = on;
+    });
     wireToggle("#benches-toggle", (on) => {
       this.benchesEnabled = on;
       this.applyBenchVisibility();
@@ -812,7 +869,7 @@ class CoolMap {
     this.loadedRunways = {};
     this.loadedAprons = {};
     this.loadedParking = {};
-    this.parkedCarsKey = "";
+    this.parkedCars?.clear();
     this.nightLightsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
@@ -1489,7 +1546,26 @@ class CoolMap {
     windowMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
     windowMaterial.uniforms.uAmbientIntensity.value =
       lighting.hemisphereIntensity;
+    // glass walls read the same sun and sky as the windows, so a curtain wall
+    // reflects the same dawn and goes just as dark at night
+    glassMaterial.uniforms.uNight.value = lighting.night;
+    glassMaterial.uniforms.uKeyDirection.value
+      .set(...lighting.keyDirection)
+      .normalize();
+    glassMaterial.uniforms.uKeyColor.value.setHex(lighting.keyColor);
+    glassMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
+    glassMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
+    glassMaterial.uniforms.uAmbientIntensity.value =
+      lighting.hemisphereIntensity;
     waterMaterial.uniforms.uNight.value = lighting.night;
+    // the glitter on the water is the same key light the windows get: its
+    // color warms at the horizon and its direction is the real sun, so the
+    // reflection sits under the sun instead of wherever the bands happen to be
+    waterMaterial.uniforms.uSunDirection.value
+      .set(...lighting.keyDirection)
+      .normalize();
+    waterMaterial.uniforms.uSunColor.value.setHex(lighting.keyColor);
+    waterMaterial.uniforms.uSunIntensity.value = lighting.keyIntensity;
     greenMaterial.uniforms.uNight.value = lighting.night;
     this.clouds?.setNight(lighting.night);
     // the fog and the MapLibre sky follow the same palette as the lights, so
@@ -1660,7 +1736,9 @@ class CoolMap {
   // Parked cars follow the facade detail: only the tiles around the centre and
   // only above the windows zoom. The full loaded window is seven tiles across,
   // which would be hundreds of thousands of cars almost all off-screen; the
-  // 3x3 centre is what is actually in view at this zoom.
+  // 3x3 center is what is actually in view at this zoom. The layer keeps one
+  // mesh per tile and diffs the window, so a move builds only the tiles that
+  // entered it.
   private syncParkedCars() {
     if (!this.parkedCars) return;
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
@@ -1668,23 +1746,17 @@ class CoolMap {
       return;
     }
     const [cx, cy] = getTileIndex(this.map.getCenter());
-    const keys: string[] = [];
+    const tiles: ParkedTile[] = [];
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        if (this.loadedParking[key]) keys.push(key);
+        const spots = this.loadedParking[key];
+        if (spots) tiles.push({ key, spots });
       }
     }
-    // rebuild only when the centre tiles or the projection origin changed
-    const key = `${this.originGeneration}:${keys.join(",")}`;
-    if (key !== this.parkedCarsKey) {
-      this.parkedCarsKey = key;
-      const spots: ParkedCar[] = [];
-      for (const tileKey of keys) spots.push(...this.loadedParking[tileKey]);
-      const originMeters = epsg4326toEpsg3857(this.tileCenter);
-      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-      this.parkedCars.setSpots(spots, originMeters, scaleFactor);
-    }
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    this.parkedCars.setTiles(tiles, originMeters, scaleFactor);
     this.applyParkedCarVisibility();
   }
 
@@ -1749,6 +1821,7 @@ class CoolMap {
     facadeTiles: number;
     facadeVertices: number;
     parkedCars: number;
+    parkedCarTiles: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -1803,6 +1876,7 @@ class CoolMap {
       facadeTiles,
       facadeVertices,
       parkedCars: this.parkedCars?.count ?? 0,
+      parkedCarTiles: this.parkedCars?.tileCount ?? 0,
     };
   }
 
