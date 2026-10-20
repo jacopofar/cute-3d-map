@@ -35,9 +35,15 @@ const WINDOW_GLOW = 0xffb15a;
 /*
  * Windows and doors as one merged geometry per tile, drawn with their own
  * ShaderMaterial: a vertex carries its glass `color` plus `aLight` (1 for the
- * seeded subset of lit windows, 0 otherwise). A `uNight` uniform blends between
- * the glass of the day and the amber lamps of the night, so the whole city can
- * go dark without rebuilding any geometry.
+ * seeded subset of lit windows, 0 otherwise) and `aFrame` (1 for a window, 0 for
+ * the door). A `uNight` uniform blends between the glass of the day and the
+ * amber lamps of the night, so the whole city can go dark without rebuilding any
+ * geometry.
+ *
+ * The frame, the sill and the mullion are painted procedurally from the quad's
+ * uv, so they cost no extra triangles: a windowed city has hundreds of thousands
+ * of windows, and real frames would triple that. `aFrame` keeps them off the
+ * door, whose uv square would otherwise look like a window.
  *
  * It does its own lighting rather than using a lambert material because it also
  * needs the night branch; the day branch is a plain lambert term (key light +
@@ -57,12 +63,17 @@ export const windowMaterial = new THREE.ShaderMaterial({
   },
   vertexShader: /* glsl */ `
     attribute float aLight;
+    attribute float aFrame;
     varying vec3 vColor;
     varying float vLight;
+    varying float vFrame;
+    varying vec2 vUv;
     varying vec3 vNormal;
     void main() {
       vColor = color;
       vLight = aLight;
+      vFrame = aFrame;
+      vUv = uv;
       // the facade meshes carry no local transform, so the object-space normal
       // is already the model-space one the lights are expressed in
       vNormal = normal;
@@ -79,19 +90,50 @@ export const windowMaterial = new THREE.ShaderMaterial({
     uniform vec3 uGlow;
     varying vec3 vColor;
     varying float vLight;
+    varying float vFrame;
+    varying vec2 vUv;
     varying vec3 vNormal;
 
     const float INV_PI = 0.3183099;
+
+    // The frame and sill are a fixed fraction of the quad, not a fixed number of
+    // meters: that makes them thin on a small window and chunky on a wide one,
+    // but it needs no per-window size attribute. Acceptable at facade zoom.
+    const float FRAME_BAND = 0.075;
+    const float SILL_BAND = 0.13;
+    const float MULLION_HALF = 0.012;
 
     void main() {
       // day: the same lambert term the rest of the facade gets from the lights
       float ndl = max(dot(normalize(vNormal), uKeyDirection), 0.0);
       vec3 light = uAmbientColor * uAmbientIntensity + uKeyColor * uKeyIntensity * ndl;
-      vec3 day = vColor * light * INV_PI;
+
+      // OSM has no frame color, so derive one from the glass: lift it toward
+      // white to get painted wood or uPVC. The sill converges to a warm stone
+      // tone instead of just brightening, so it still reads on a white frame
+      // (slightly darker, like a shadowed ledge) and on a dark one (brighter).
+      vec3 frameColor = clamp(vColor * 1.35 + 0.18, 0.0, 1.0);
+      vec3 sillColor = clamp(frameColor * 0.82 + 0.14, 0.0, 1.0);
+
+      // uv runs 0..1 across the quad, v = 0 at the bottom (see pushQuad); the
+      // border is the distance to the nearest edge in uv space
+      float edge = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+      float isSill = step(vUv.y, SILL_BAND);
+      float trim = max(step(edge, FRAME_BAND), isSill);
+      trim = max(trim, step(abs(vUv.x - 0.5), MULLION_HALF));
+      // doors and balconies share the shader but never get a frame
+      trim *= vFrame;
+      vec3 trimColor = mix(frameColor, sillColor, isSill);
+
+      vec3 day = mix(vColor, trimColor, trim) * light * INV_PI;
       // night: unlit glass goes near-black, a lit window glows warm amber
       vec3 darkGlass = vColor * 0.05;
       vec3 litWindow = vColor * 0.2 + uGlow;
       vec3 night = mix(darkGlass, litWindow, vLight);
+      // the frame is painted, not lit from inside: a faint ambient keeps its
+      // outline readable against a lit window without joining the glow
+      night = mix(night, trimColor * 0.09, trim);
+
       gl_FragColor = vec4(mix(day, night, uNight), 1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -116,9 +158,20 @@ export const FACADE_COLORS = {
 type Triple = [number, number, number];
 type Point = [number, number];
 
-// the five vertex buffers of a geometry being built: position, normal, uv,
-// color and the per-window night light flag
-type Buffers = [number[], number[], number[], number[], number[]];
+// the six vertex buffers of a geometry being built: position, normal, uv,
+// color, the per-window night light flag and the "this quad is a window, draw a
+// frame and sill" flag. The last two stay zero for doors and balconies.
+type Buffers = [number[], number[], number[], number[], number[], number[]];
+
+// the unit-square uv of the four corners in the order pushQuad lays them out:
+// bottom-left, bottom-right, top-right, top-left. Indexed by the ORIGINAL
+// corner, so the winding reorder in pushFace cannot scramble it.
+const CORNER_UV: [number, number][] = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+];
 
 interface Edge {
   a: Point;
@@ -130,15 +183,17 @@ interface Edge {
 // append a quad. The winding is set so the face points along `facing`: three.js
 // culls back faces, and OSM rings come in both windings, so getting this wrong
 // makes quads invisible from the side that matters. `light` is the per-vertex
-// night flag (a lit window is 1).
+// night flag (a lit window is 1); `frame` asks the window shader to draw a frame
+// and a sill inside the quad (1 for windows, 0 for doors and balconies).
 function pushFace(
   buffers: Buffers,
   corners: Triple[],
   facing: Triple,
   rgb: THREE.Color,
   light = 0,
+  frame = 0,
 ): void {
-  const [position, normal, uv, color, lit] = buffers;
+  const [position, normal, uv, color, lit, framed] = buffers;
   const e1: Triple = [
     corners[1][0] - corners[0][0],
     corners[1][1] - corners[0][1],
@@ -160,9 +215,10 @@ function pushFace(
   for (const i of order) {
     position.push(corners[i][0], corners[i][1], corners[i][2]);
     normal.push(facing[0], facing[1], facing[2]);
-    uv.push(0, 0);
+    uv.push(CORNER_UV[i][0], CORNER_UV[i][1]);
     color.push(rgb.r, rgb.g, rgb.b);
     lit.push(light);
+    framed.push(frame);
   }
 }
 
@@ -176,6 +232,7 @@ function pushQuad(
   facing: Point,
   rgb: THREE.Color,
   light = 0,
+  frame = 0,
 ): void {
   pushFace(
     buffers,
@@ -188,6 +245,7 @@ function pushQuad(
     [facing[0], facing[1], 0],
     rgb,
     light,
+    frame,
   );
 }
 
@@ -289,8 +347,8 @@ export function tileFacadeDetail(
   scaleFactor: number,
   infos: BuildingInfo[],
 ): FacadeDetail {
-  const windows: Buffers = [[], [], [], [], []];
-  const balconies: Buffers = [[], [], [], [], []];
+  const windows: Buffers = [[], [], [], [], [], []];
+  const balconies: Buffers = [[], [], [], [], [], []];
   const rgb = new THREE.Color();
 
   for (const info of infos) {
@@ -337,6 +395,7 @@ export function tileFacadeDetail(
             edge.normal,
             windowColor,
             lit,
+            1,
           );
           if (columnBalconies.includes(floor)) {
             pushBalcony(
@@ -376,9 +435,10 @@ export function tileFacadeDetail(
   };
 }
 
-// positions/normals/uvs/colors/light -> a BufferGeometry, or null when empty
+// positions/normals/uvs/colors/light/frame -> a BufferGeometry, or null when
+// empty
 function geometryFrom(buffers: number[][]): THREE.BufferGeometry | null {
-  const [position, normal, uv, color, light] = buffers;
+  const [position, normal, uv, color, light, frame] = buffers;
   if (position.length === 0) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
@@ -389,5 +449,6 @@ function geometryFrom(buffers: number[][]): THREE.BufferGeometry | null {
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
   geometry.setAttribute("aLight", new THREE.Float32BufferAttribute(light, 1));
+  geometry.setAttribute("aFrame", new THREE.Float32BufferAttribute(frame, 1));
   return geometry;
 }
