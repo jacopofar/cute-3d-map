@@ -5,6 +5,7 @@ import { building } from "./elements3d/building";
 import { church, isChurch } from "./elements3d/church";
 import { green, greenMaterial } from "./elements3d/green";
 import { tree } from "./elements3d/tree";
+import { treeMaterial as treeSurfaceMaterial } from "./elements3d/tree_material";
 import { tree_row } from "./elements3d/tree_row";
 import { water, waterMaterial } from "./elements3d/water";
 import { bench } from "./elements3d/bench";
@@ -165,8 +166,9 @@ export function geoJSONtoGeometries(
 // colors, so a whole tile renders in a single draw call per kind instead of
 // one mesh per feature
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
-// trees are lit too, so they shade with the sun instead of being flat
-const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+// trees are lit too, so they shade with the sun instead of being flat; their
+// material also carries the wind-sway vertex patch
+const treeMaterial = treeSurfaceMaterial;
 // benches are lit the same way, so their wood and metal shade
 const benchMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 // the church ornament (a cross) is lit as well, and small enough that the

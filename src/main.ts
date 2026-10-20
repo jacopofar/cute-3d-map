@@ -41,6 +41,7 @@ import {
 } from "./elements3d/facade.ts";
 import { greenMaterial } from "./elements3d/green.ts";
 import { waterMaterial, waterwayWidth } from "./elements3d/water.ts";
+import { treeSway } from "./elements3d/tree_material.ts";
 import {
   DAY_HOUR,
   NIGHT_HOUR,
@@ -594,6 +595,8 @@ class CoolMap {
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
         greenMaterial.uniforms.uTime.value = performance.now() / 1000;
+        // the trees' canopy sway, patched into their Lambert material
+        treeSway.value = performance.now() / 1000;
         coolMap.nightLights?.update(performance.now() / 1000);
         if (this.renderer) {
           this.renderer.resetState();
