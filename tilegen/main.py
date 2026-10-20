@@ -90,6 +90,20 @@ def parse_level(value) -> float | None:
     return int(number) if number.is_integer() else number
 
 
+GLASS_MATERIAL_TAGS = ("building:material", "building:facade:material")
+
+
+def is_glass(tags) -> bool:
+    """Whether the facade is tagged as glass/mirror. The values are free text and
+    may be `;` lists (`plaster;glass`), so look for the words rather than compare
+    the whole string."""
+    for tag in GLASS_MATERIAL_TAGS:
+        value = str(tags.get(tag, "")).lower()
+        if "glass" in value or "mirror" in value:
+            return True
+    return False
+
+
 def vertical_level(tags) -> float | None:
     """A feature's OSM vertical position: `layer` when it is set (the tunnel /
     bridge ordering: Seveso is `layer=-2`, a bridge is `layer=1`), else `level`.
@@ -118,6 +132,10 @@ def to_building(feature_id, tags, s, distributions=None) -> dict | None:
         "name": tags.get("name"),
         "street": tags.get("addr:street"),
         "housenumber": tags.get("addr:housenumber"),
+        # a curtain wall: the frontend drops the windows/balconies/door and gives
+        # the walls their own glass material. Never imputed: a glass look is a
+        # statement about the real facade, not something to invent.
+        "glass": is_glass(tags) or None,
         # a church is an ordinary building=* polygon, so the value that says so
         # (church, chapel, cathedral, ...) has to be reported; religion only
         # matters for a place of worship that is not tagged by building value
