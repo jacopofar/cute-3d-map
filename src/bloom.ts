@@ -155,6 +155,9 @@ export class BloomPass {
   private brightMaterial: THREE.ShaderMaterial;
   private blurMaterial: THREE.ShaderMaterial;
   private compositeMaterial: THREE.ShaderMaterial;
+  // the scene's draw stats before the post passes: stats() and the benchmark
+  // need the scene, not the final composite quad
+  readonly lastSceneInfo = { calls: 0, triangles: 0 };
   readonly tuning: BloomTuning = {
     strength: 1.0,
     threshold: 0.4,
@@ -324,6 +327,9 @@ export class BloomPass {
     this.renderer.setRenderTarget(this.sceneTarget);
     this.renderer.clear(true, true, true);
     this.renderer.render(scene, camera);
+    // capture before the bright/blur/composite quads reset renderer.info
+    this.lastSceneInfo.calls = this.renderer.info.render.calls;
+    this.lastSceneInfo.triangles = this.renderer.info.render.triangles;
 
     // 2. bright pass into the quarter-size target
     this.brightMaterial.uniforms.tDiffuse.value = this.sceneTarget.texture;

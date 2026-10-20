@@ -31,7 +31,7 @@ import type {
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
-import { NightLights } from "./night_lights.ts";
+import { NightLights, type NightLightTile } from "./night_lights.ts";
 import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
@@ -227,12 +227,14 @@ class CoolMap {
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
   private nightLights?: NightLights;
-  private nightLightsKey = "";
   private lamppostsEnabled = true;
   // bloom is a post pass over the 3D scene only, so this is a plain switch; it
   // is forced off on the software rasterizer in render()
   private bloomEnabled = true;
   private bloom?: BloomPass;
+  // The scene's own draw stats, captured before the bloom passes overwrite
+  // renderer.info (the final composite is a one-draw, two-triangle quad).
+  private lastSceneDraw = { calls: 0, triangles: 0 };
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -648,6 +650,15 @@ class CoolMap {
           }
           if (!bloomed) {
             this.renderer.render(this.scene, this.camera);
+            // renderer.info now describes the scene, before the bloom passes
+            // (which render quads) overwrite it
+            coolMap.lastSceneDraw.calls = this.renderer.info.render.calls;
+            coolMap.lastSceneDraw.triangles =
+              this.renderer.info.render.triangles;
+          } else if (coolMap.bloom) {
+            coolMap.lastSceneDraw.calls = coolMap.bloom.lastSceneInfo.calls;
+            coolMap.lastSceneDraw.triangles =
+              coolMap.bloom.lastSceneInfo.triangles;
           }
           // hand a clean context back to MapLibre: resetState unbinds our
           // targets and restores the default framebuffer
@@ -870,7 +881,6 @@ class CoolMap {
     this.loadedAprons = {};
     this.loadedParking = {};
     this.parkedCars?.clear();
-    this.nightLightsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
@@ -1756,7 +1766,16 @@ class CoolMap {
     }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    this.parkedCars.setTiles(tiles, originMeters, scaleFactor);
+    // the distance LOD follows the view center: cars within
+    // PARKED_CAR_DETAIL_RADIUS get the full body, the rest a box. The layer
+    // quantizes this, so only a meaningful move rebuilds the split.
+    const center = this.map.getCenter();
+    const detailCenter = toModelCoords(
+      [center.lng, center.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.parkedCars.setTiles(tiles, originMeters, scaleFactor, detailCenter);
     this.applyParkedCarVisibility();
   }
 
@@ -1771,30 +1790,22 @@ class CoolMap {
   private syncNightLights() {
     if (!this.nightLights) return;
     const [cx, cy] = getTileIndex(this.map.getCenter());
-    const keys: string[] = [];
+    const tiles: NightLightTile[] = [];
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        if (this.loadedSignals[key] || this.loadedLamps[key]) keys.push(key);
-      }
-    }
-    const key = `${this.originGeneration}:${keys.join(",")}`;
-    if (key !== this.nightLightsKey) {
-      this.nightLightsKey = key;
-      const signals: { lon: number; lat: number }[] = [];
-      const lamps: { lon: number; lat: number }[] = [];
-      for (const tileKey of keys) {
-        for (const [lon, lat] of this.loadedSignals[tileKey] ?? []) {
-          signals.push({ lon, lat });
-        }
-        for (const lamp of this.loadedLamps[tileKey] ?? []) {
-          lamps.push(lamp);
+        const lamps = this.loadedLamps[key] ?? [];
+        const signals = this.loadedSignals[key] ?? [];
+        if (lamps.length > 0 || signals.length > 0) {
+          // the raw per-tile arrays are the identity the layer diffs on, so do
+          // not copy them here
+          tiles.push({ key, lamps, signals });
         }
       }
-      const originMeters = epsg4326toEpsg3857(this.tileCenter);
-      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-      this.nightLights.setSpots(lamps, signals, originMeters, scaleFactor);
     }
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    this.nightLights.setTiles(tiles, originMeters, scaleFactor);
     this.applyNightLightsVisibility();
   }
 
@@ -1822,6 +1833,12 @@ class CoolMap {
     facadeVertices: number;
     parkedCars: number;
     parkedCarTiles: number;
+    parkedCarMeshes: number;
+    parkedCarTriangles: number;
+    nightLightTiles: number;
+    nightLightMeshes: number;
+    vehiclesDrawn: number;
+    trainsDrawn: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -1849,7 +1866,6 @@ class CoolMap {
         vertices += count;
       }
     }
-    const renderInfo = this.customLayer.renderer?.info.render;
     let facadeTiles = 0;
     let facadeVertices = 0;
     for (const detail of Object.values(this.loadedDetail)) {
@@ -1863,9 +1879,10 @@ class CoolMap {
       tiles: Object.keys(this.loadedTiles).length,
       meshes,
       vertices,
-      // last frame, as reported by three's renderer
-      drawCalls: renderInfo?.calls ?? 0,
-      triangles: renderInfo?.triangles ?? 0,
+      // last frame's scene, captured before the bloom quads overwrite
+      // renderer.info
+      drawCalls: this.lastSceneDraw.calls,
+      triangles: this.lastSceneDraw.triangles,
       byKind,
       buildings: Object.values(this.loadedBuildings).reduce(
         (n, b) => n + b.length,
@@ -1877,6 +1894,12 @@ class CoolMap {
       facadeVertices,
       parkedCars: this.parkedCars?.count ?? 0,
       parkedCarTiles: this.parkedCars?.tileCount ?? 0,
+      parkedCarMeshes: this.parkedCars?.meshCount ?? 0,
+      parkedCarTriangles: this.parkedCars?.triangles ?? 0,
+      nightLightTiles: this.nightLights?.tileCount ?? 0,
+      nightLightMeshes: this.nightLights?.meshCount ?? 0,
+      vehiclesDrawn: this.carsTraffic?.drawnCount ?? 0,
+      trainsDrawn: this.trainsTraffic?.drawnCount ?? 0,
     };
   }
 
