@@ -509,6 +509,18 @@ def test_tile_to_geojson_includes_water():
     assert len(raw) == 1
 
 
+def test_outside_cemeteries_drops_ways_inside_the_walls():
+    cemetery = shapely.box(0, 0, 10, 10)
+    inside = main.ParkingWay(id="inside", coords=[(1, 1), (9, 9)], highway="service")
+    outside = main.ParkingWay(
+        id="outside", coords=[(20, 20), (30, 30)], highway="service"
+    )
+    kept = main.outside_cemeteries([inside, outside], cemetery)
+    assert [way.id for way in kept] == ["outside"]
+    # no cemeteries (or an empty union) changes nothing
+    assert main.outside_cemeteries([inside, outside], None) == [inside, outside]
+
+
 def test_green_kind_classifies_the_two_styles():
     # mown lawn / pitch / garden
     assert main.green_kind({"landuse": "grass"}) == "grass"
@@ -529,6 +541,32 @@ def test_green_kind_classifies_the_two_styles():
     assert main.green_kind({"landuse": "farmland"}) is None
     assert main.green_kind({"natural": "farmland"}) is None
     assert main.green_kind({"building": "yes"}) is None
+
+
+def test_is_cemetery_accepts_landuse_and_grave_yard():
+    assert main.is_cemetery({"landuse": "cemetery"})
+    assert main.is_cemetery({"amenity": "grave_yard"})
+    assert not main.is_cemetery({"landuse": "grass"})
+    assert not main.is_cemetery({"building": "yes"})
+
+
+def test_to_cemetery_clips_and_keeps_the_name():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    # a cemetery much larger than the tile, centred on it
+    cemetery = shapely.box(min_lon - 1, min_lat - 1, max_lon + 1, max_lat + 1)
+    f = main.to_cemetery(1, {"landuse": "cemetery", "name": "Cimitero"}, cemetery, box)
+    assert f is not None
+    assert f["properties"] == {"cmtype": "cemetery", "name": "Cimitero"}
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.equals(box)
+    # an unnamed cemetery has no name key
+    plain = main.to_cemetery(2, {"amenity": "grave_yard"}, cemetery, box)
+    assert plain is not None
+    assert "name" not in plain["properties"]
+    # a sliver at the tile edge is dropped
+    away = shapely.box(max_lon + 1, max_lat + 1, max_lon + 1.0001, max_lat + 1.0001)
+    assert main.to_cemetery(3, {"landuse": "cemetery"}, away, box) is None
 
 
 def test_to_green_clips_a_park_to_the_tile():

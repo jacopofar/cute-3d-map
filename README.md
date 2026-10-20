@@ -30,6 +30,9 @@ The project has two halves:
      is **clipped to the tile** (a lake spans many tiles), unlike the small
      buildings, and drawn by an animated shader. The `water` property carries
      the sub-kind (`lake`, `river`, `canal`, ...) that picks its color/width;
+   - `cmtype: "cemetery"` — a `landuse=cemetery` or `amenity=grave_yard`
+     polygon, **clipped to the tile** like a park; the frontend fills it with
+     procedural rows of tombstones;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -50,7 +53,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church).
+   water, church, cemetery).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -156,6 +159,25 @@ features. tilegen emits the effective vertical position as the feature's `layer`
 and reports the positions it finds: water below 0 (the ones that fade) and roads
 above 0 (bridges; see *Bridges and tunnels* below; the road network itself is not
 emitted).
+
+### Cemeteries
+
+Cemeteries are OSM areas (`landuse=cemetery` or `amenity=grave_yard`), clipped
+to the tile like a park and emitted as `cmtype: "cemetery"`. The frontend leaves
+the basemap's cemetery ground and path network visible and fills the area with
+rows of simple tombstones (`src/elements3d/cemetery.ts`, layout in
+`tombstone_rows.ts`).
+
+The graves themselves are almost never mapped, so the rows are procedural: the
+grid is aligned to the cemetery's longest wall, inset from the boundary, given a
+seeded gap pattern so it does not read as a checkerboard, and capped at
+`MAX_TOMBSTONES_PER_TILE` (6,000). A very large cemetery widens the row and
+stone spacing rather than leaving holes in the rows. Most stones are slabs with
+a seeded height and pale stone; about one in ten is a simple cross. The stones
+are one geometry and one Lambert material per tile (kind `cemetery`), so a tile
+is one draw call and the stones darken at night with the rest of the scene. They
+are small enough not to cast shadows. Parking and street lamps skip ways whose
+midpoint is inside a cemetery, so the grave paths do not fill with parked cars.
 
 ### Bridges and tunnels
 

@@ -17,6 +17,7 @@ from lamps import lamp_spots
 from parking import PARKING_HIGHWAYS, ParkingWay, parking_spots
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
+from shapely.prepared import prep
 from traffic import (
     CAR_CONFIG,
     DRIVABLE_HIGHWAYS,
@@ -386,6 +387,37 @@ def green_kind(tags) -> str | None:
 
 def is_green(tags) -> bool:
     return green_kind(tags) is not None
+
+
+# cemeteries: the ground is a clipped polygon like a park; the frontend fills it
+# with procedural rows of tombstones. Kept as its own cmtype so the frontend can
+# use a stone/grass palette instead of the park shader.
+MIN_CEMETERY_AREA = 80.0
+
+
+def is_cemetery(tags) -> bool:
+    return tags.get("landuse") == "cemetery" or tags.get("amenity") == "grave_yard"
+
+
+def to_cemetery(feature_id, tags, s, tile_box) -> dict | None:
+    """A cemetery area, clipped to the tile like a park. The individual graves
+    are not mapped in enough places to render, so the frontend lays out rows of
+    simple tombstones inside this polygon."""
+    if s.geom_type not in ("Polygon", "MultiPolygon"):
+        return None
+    clipped = _flatten(s.intersection(tile_box), "Polygon")
+    if clipped is None or area_square_meters(clipped) < MIN_CEMETERY_AREA:
+        return None
+    properties = {
+        "cmtype": "cemetery",
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
 
 
 # meters per degree of latitude; the longitude shrinks by cos(latitude)
@@ -776,6 +808,8 @@ def tile_to_geojson(
             ret.append(to_bench(feature_id, tags, s))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
+        elif is_cemetery(tags):
+            ret.append(to_cemetery(feature_id, tags, s, tile_box))
         elif is_green(tags):
             ret.append(to_green(feature_id, tags, s, tile_box))
         elif tags.get("aeroway") in (AEROWAY_LINE_KINDS | AEROWAY_AREA_KINDS):
@@ -859,6 +893,40 @@ def load_parking_ways(input_parquet: Path) -> list[ParkingWay]:
                     )
                 )
     return ways
+
+
+def load_cemetery_areas(input_parquet: Path) -> BaseGeometry | None:
+    """All cemetery polygons of the extract as one prepared-able geometry, or
+    None when there are none. Used to keep parked cars and lamps out of the
+    grave paths."""
+    rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where (tags['landuse'] = 'cemetery' or tags['amenity'] = 'grave_yard')
+          and ST_GeometryType(geometry) in ('POLYGON', 'MULTIPOLYGON')
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    polygons = [shapely.from_wkb(wkb) for (wkb,) in rows]
+    return shapely.union_all(polygons) if polygons else None
+
+
+def outside_cemeteries(
+    ways: list[ParkingWay], area: BaseGeometry | None
+) -> list[ParkingWay]:
+    """Drop the parking/lamps of ways whose midpoint is inside a cemetery. The
+    service paths inside a cemetery are parking-eligible, and cars on every grave
+    path read as a car park; the streets around the walls keep their parking."""
+    if area is None or area.is_empty:
+        return ways
+    prepared = prep(area)
+    outside: list[ParkingWay] = []
+    for way in ways:
+        if prepared.contains(Point(way.coords[len(way.coords) // 2])):
+            continue
+        outside.append(way)
+    return outside
 
 
 def crossing_points_from_rows(rows) -> list[CrossingPoint]:
@@ -1191,6 +1259,14 @@ def parquet_to_tiles(
     if parking or lamps:
         logger.info("Building parked cars and street lamps")
         parking_ways = load_parking_ways(input_parquet)
+        cemetery_area = load_cemetery_areas(input_parquet)
+        kept = outside_cemeteries(parking_ways, cemetery_area)
+        if len(kept) != len(parking_ways):
+            logger.info(
+                "parking: dropped %d ways inside cemeteries",
+                len(parking_ways) - len(kept),
+            )
+        parking_ways = kept
         if parking:
             parking_by_tile = parking_spots(parking_ways, zoom_level)
             logger.info(

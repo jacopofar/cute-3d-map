@@ -66,6 +66,14 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   per-vertex `aFade`. tilegen clips water to the tile (a lake spans many tiles),
   unlike buildings; water is its own per-tile mesh (kind `water`), so the
   checkbox is a visibility switch.
+- `src/elements3d/cemetery.ts` / `tombstone_rows.ts` — cemeteries
+  (`landuse=cemetery`, `amenity=grave_yard`) as procedural rows of simple
+  tombstones over the basemap ground. tilegen clips the area like a park and
+  emits `cmtype=cemetery`; OSM rarely maps the individual graves, so the layout
+  is pure maths (aligned to the longest wall, inset from the boundary, seeded
+  gaps, capped with wider spacing), unit-tested in `tombstone_rows.test.ts`.
+  The stones are one merged Lambert mesh per tile (kind `cemetery`), and there
+  is no 3D ground, so the basemap's cemetery paths stay visible.
 - `src/elements3d/bridge.ts` — bridges and tunnels. A bridge way becomes a
   raised slab (deck + parapets, both ends ramped to the ground) and a
   `man_made=bridge` footprint a flat deck slab; a tunnel becomes a dark portal
@@ -137,7 +145,8 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   Overlapping ways (a service way along a road, dual carriageways) are deduped
   at `MIN_SPOT_SPACING`, the higher road class winning. Pure
   (plain `ParkingWay` inputs; `main.load_parking_ways` reads the parquet), so it
-  is unit-tested like `traffic.py`.
+  is unit-tested like `traffic.py`. `main.outside_cemeteries` drops ways whose
+  midpoint is inside a cemetery, so the grave paths do not fill with cars.
 - `tilegen/lamps.py` — street lamps for the night glow: one every `LAMP_SPACING`
   (55 m) on both sides of every parking-eligible road, just beyond the kerb,
   grouped per tile. Pure and unit-tested; uses the same `ParkingWay` inputs.
@@ -152,8 +161,8 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row`, `water`, `traffic_signal`, `crossing` (the road/rail network is
-  not emitted; routes come from `traffic`).
+  `tree_row`, `water`, `cemetery`, `traffic_signal`, `crossing` (the road/rail
+  network is not emitted; routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -195,6 +204,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **cemetery** — a `landuse=cemetery` or `amenity=grave_yard` polygon, clipped
+  to the tile and filled with procedural rows of tombstones over the basemap
+  ground. The rows are laid out frontend-side from the polygon (the graves
+  themselves are not mapped), so there is no per-grave tile data.
 - **layer** — the OSM vertical position of water, a bridge or a tunnel, carried
   as a tile's `layer` property: `layer` when set (Seveso is `layer=-2`, a bridge
   `layer=1`), else `level` as a fallback; negative is below ground. Water below 0

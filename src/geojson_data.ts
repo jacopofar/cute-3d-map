@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
+import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
 import { green, greenMaterial } from "./elements3d/green";
@@ -90,6 +91,7 @@ export function geoJSONtoGeometries(
     | "tree"
     | "water"
     | "green"
+    | "cemetery"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -148,6 +150,14 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "green") {
     return [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "cemetery") {
+    return [
+      {
+        kind: "cemetery",
+        geometries: cemetery(originMeters, scaleFactor, f),
+      },
+    ];
   }
   if (f.properties.cmtype === "aeroway") {
     return [
@@ -412,22 +422,24 @@ export async function objectsAt(
           : kind === "glass"
             ? glassMaterial
             : kind === "church"
-            ? churchMaterial
-            : kind === "water"
-              ? waterMaterial
-              : kind === "green"
-                ? greenMaterial
-                : kind === "aeroway"
-                  ? aerowayMaterial
-                  : kind === "fence"
-                    ? fenceMaterial
-                    : kind === "bridge"
-                      ? bridgeMaterial
-                      : kind === "tunnel"
-                        ? tunnelMaterial
-                        : kind === "bench"
-                          ? benchMaterial
-                          : treeMaterial;
+              ? churchMaterial
+              : kind === "water"
+                ? waterMaterial
+                : kind === "green"
+                  ? greenMaterial
+                  : kind === "cemetery"
+                    ? cemeteryMaterial
+                    : kind === "aeroway"
+                      ? aerowayMaterial
+                      : kind === "fence"
+                        ? fenceMaterial
+                        : kind === "bridge"
+                          ? bridgeMaterial
+                          : kind === "tunnel"
+                            ? tunnelMaterial
+                            : kind === "bench"
+                              ? benchMaterial
+                              : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
