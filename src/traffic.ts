@@ -16,11 +16,15 @@ import {
   type PreparedRun,
   type TrafficView,
 } from "./traffic_math";
-import { vehicleGeometry, type VehicleBodySize } from "./vehicle_body";
+import {
+  simpleVehicleGeometry,
+  vehicleGeometry,
+  type VehicleBodySize,
+} from "./vehicle_body";
 
 export type { TrafficView } from "./traffic_math";
 
-export { vehicleGeometry };
+export { simpleVehicleGeometry, vehicleGeometry };
 
 // a fleet of precomputed vehicles: one InstancedMesh of car bodies, placed from
 // the route data every frame

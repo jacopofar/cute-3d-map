@@ -233,6 +233,9 @@ class CoolMap {
   // is forced off on the software rasterizer in render()
   private bloomEnabled = true;
   private bloom?: BloomPass;
+  // The scene's own draw stats, captured before the bloom passes overwrite
+  // renderer.info (the final composite is a one-draw, two-triangle quad).
+  private lastSceneDraw = { calls: 0, triangles: 0 };
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -648,6 +651,15 @@ class CoolMap {
           }
           if (!bloomed) {
             this.renderer.render(this.scene, this.camera);
+            // renderer.info now describes the scene, before the bloom passes
+            // (which render quads) overwrite it
+            coolMap.lastSceneDraw.calls = this.renderer.info.render.calls;
+            coolMap.lastSceneDraw.triangles =
+              this.renderer.info.render.triangles;
+          } else if (coolMap.bloom) {
+            coolMap.lastSceneDraw.calls = coolMap.bloom.lastSceneInfo.calls;
+            coolMap.lastSceneDraw.triangles =
+              coolMap.bloom.lastSceneInfo.triangles;
           }
           // hand a clean context back to MapLibre: resetState unbinds our
           // targets and restores the default framebuffer
@@ -1756,7 +1768,16 @@ class CoolMap {
     }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    this.parkedCars.setTiles(tiles, originMeters, scaleFactor);
+    // the distance LOD follows the view center: cars within
+    // PARKED_CAR_DETAIL_RADIUS get the full body, the rest a box. The layer
+    // quantizes this, so only a meaningful move rebuilds the split.
+    const center = this.map.getCenter();
+    const detailCenter = toModelCoords(
+      [center.lng, center.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.parkedCars.setTiles(tiles, originMeters, scaleFactor, detailCenter);
     this.applyParkedCarVisibility();
   }
 
@@ -1822,6 +1843,10 @@ class CoolMap {
     facadeVertices: number;
     parkedCars: number;
     parkedCarTiles: number;
+    parkedCarMeshes: number;
+    parkedCarTriangles: number;
+    vehiclesDrawn: number;
+    trainsDrawn: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -1849,7 +1874,6 @@ class CoolMap {
         vertices += count;
       }
     }
-    const renderInfo = this.customLayer.renderer?.info.render;
     let facadeTiles = 0;
     let facadeVertices = 0;
     for (const detail of Object.values(this.loadedDetail)) {
@@ -1863,9 +1887,10 @@ class CoolMap {
       tiles: Object.keys(this.loadedTiles).length,
       meshes,
       vertices,
-      // last frame, as reported by three's renderer
-      drawCalls: renderInfo?.calls ?? 0,
-      triangles: renderInfo?.triangles ?? 0,
+      // last frame's scene, captured before the bloom quads overwrite
+      // renderer.info
+      drawCalls: this.lastSceneDraw.calls,
+      triangles: this.lastSceneDraw.triangles,
       byKind,
       buildings: Object.values(this.loadedBuildings).reduce(
         (n, b) => n + b.length,
@@ -1877,6 +1902,10 @@ class CoolMap {
       facadeVertices,
       parkedCars: this.parkedCars?.count ?? 0,
       parkedCarTiles: this.parkedCars?.tileCount ?? 0,
+      parkedCarMeshes: this.parkedCars?.meshCount ?? 0,
+      parkedCarTriangles: this.parkedCars?.triangles ?? 0,
+      vehiclesDrawn: this.carsTraffic?.drawnCount ?? 0,
+      trainsDrawn: this.trainsTraffic?.drawnCount ?? 0,
     };
   }
 

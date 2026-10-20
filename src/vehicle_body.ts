@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+import { applyVertexColor } from "./elements3d/vertex_color";
+
 /*
  * The body shared by the moving and parked cars: a low-poly car (chassis,
  * cabin, four wheels) and a boxy long body with a window band for trains.
@@ -275,4 +277,17 @@ function trainBody(size: VehicleBodySize): THREE.BufferGeometry {
 /** The body for one fleet, in the fleet's dimensions. */
 export function vehicleGeometry(size: VehicleBodySize): THREE.BufferGeometry {
   return size.body === "train" ? trainBody(size) : carBody(size);
+}
+
+/**
+ * A box body for cars too far away to show a cabin or wheels: 12 triangles
+ * instead of 52, with the same dimensions and near-white vertex color, so it
+ * shares the material and the per-instance paint with the detailed body.
+ */
+export function simpleVehicleGeometry(
+  size: VehicleBodySize,
+): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(size.length, size.width, size.height);
+  applyVertexColor(geometry, BODY_COLOR);
+  return geometry;
 }

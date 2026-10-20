@@ -2,13 +2,23 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
 import { CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic";
-import { vehicleGeometry, type VehicleBodySize } from "./vehicle_body";
+import {
+  simpleVehicleGeometry,
+  vehicleGeometry,
+  type VehicleBodySize,
+} from "./vehicle_body";
 
 const EPS = 1e-6;
 
 function triangles(geometry: THREE.BufferGeometry): number {
   const position = geometry.getAttribute("position");
   return position.count / 3;
+}
+
+function indexedTriangles(geometry: THREE.BufferGeometry): number {
+  return geometry.index
+    ? geometry.index.count / 3
+    : geometry.getAttribute("position").count / 3;
 }
 
 function bounds(geometry: THREE.BufferGeometry): THREE.Box3 {
@@ -39,6 +49,18 @@ function vertices(geometry: THREE.BufferGeometry): THREE.Vector3[] {
   }
   return out;
 }
+
+describe("simpleVehicleGeometry", () => {
+  it("is a 12-triangle box with the body paint and the fleet's bounds", () => {
+    const geometry = simpleVehicleGeometry(CAR_TRAFFIC);
+    expect(indexedTriangles(geometry)).toBe(12);
+    expectWithin(geometry, CAR_TRAFFIC);
+    const color = geometry.getAttribute("color");
+    expect(color).not.toBeUndefined();
+    // near white, so the per-instance paint decides the car color
+    expect(color.getX(0)).toBeGreaterThan(0.9);
+  });
+});
 
 describe("vehicleGeometry", () => {
   it("keeps the car within the fleet's box and its triangle budget", () => {
