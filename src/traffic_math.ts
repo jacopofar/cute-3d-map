@@ -12,6 +12,8 @@ export interface PreparedRun {
   t1: number;
   coords: [number, number][];
   times: number[];
+  // [west, south, east, north] of the run, for cheap view culling
+  bounds?: [number, number, number, number];
 }
 
 // a signal/crossing the vehicle passes, with the loop-time width of each side of

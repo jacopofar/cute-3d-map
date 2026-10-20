@@ -90,7 +90,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   just above it. The cross is its own per-tile kind (`church`), so its checkbox
   hides just the ornament.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
-  routes; the only fleet renderer.
+  routes; the only fleet renderer. It places a slice of vehicles per update at
+  ~30 Hz (spread over frames) and culls runs outside the map bounds, so the CPU
+  only samples what is on screen; positions stay a pure function of time.
 - `src/parked_cars.ts` — static parked cars. The tile's `parking` block
   (`[lon, lat, heading]` per occupied bay) becomes one InstancedMesh with the
   moving cars' body (`CAR_TRAFFIC`), rebuilt only when the centre tiles or the

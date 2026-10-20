@@ -215,7 +215,9 @@ is a stateless renderer that samples it. There is no runtime simulation.
   green it nudges up to 1.15x and settles. The bump is smooth and returns to
   zero, so the lap (path and timing) is unchanged: nothing waits, nothing is
   simulated.
-- Vehicles are gated on the zoom (and the traffic checkbox) as before.
+- Vehicles are gated on the zoom (and the traffic checkbox) as before. The
+  renderer updates a slice of the fleet per frame at ~30 Hz and culls runs
+  outside the map bounds, so only the vehicles in view are sampled and placed.
 
 ### Parked cars
 
