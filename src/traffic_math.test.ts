@@ -7,11 +7,15 @@ import {
   CROSSING_GREEN_PEAK,
   CROSSING_RECOVER_M,
   CROSSING_RECOVER_PEAK,
+  VIEW_PADDING,
   axisOf,
+  compactSlots,
   coordKey,
   crossingShift,
   crossingsAlongLoop,
   lightGreen,
+  paddedView,
+  runInView,
   type PreparedCrossing,
   type PreparedRun,
 } from "./traffic_math";
@@ -47,6 +51,94 @@ const crossing = (t: number, axis: 0 | 1): PreparedCrossing => ({
   brake: CROSSING_BRAKE_M / V,
   recover: CROSSING_RECOVER_M / V,
   near: CROSSING_GREEN_M / V,
+});
+
+describe("paddedView", () => {
+  it("grows each side by the padding fraction", () => {
+    const padded = paddedView({ west: 0, south: 0, east: 10, north: 20 });
+    expect(padded.west).toBeCloseTo(-10 * VIEW_PADDING);
+    expect(padded.east).toBeCloseTo(10 + 10 * VIEW_PADDING);
+    expect(padded.south).toBeCloseTo(-20 * VIEW_PADDING);
+    expect(padded.north).toBeCloseTo(20 + 20 * VIEW_PADDING);
+  });
+
+  it("is a no-op for an empty view", () => {
+    const view = { west: 1, south: 2, east: 1, north: 2 };
+    expect(paddedView(view)).toEqual(view);
+  });
+});
+
+describe("runInView", () => {
+  const run = (bounds?: [number, number, number, number]): PreparedRun => ({
+    t0: 0,
+    t1: 1,
+    coords: [],
+    times: [0],
+    bounds,
+  });
+  const view = { west: 0, south: 0, east: 10, north: 10 };
+
+  it("keeps a run whose bounds touch the view", () => {
+    expect(runInView(run([1, 1, 2, 2]), view)).toBe(true);
+    // touching an edge still counts: the vehicle can be exactly on it
+    expect(runInView(run([-5, -5, 0, 5]), view)).toBe(true);
+    expect(runInView(run([10, 5, 15, 15]), view)).toBe(true);
+  });
+
+  it("culls a run entirely on one side", () => {
+    expect(runInView(run([-10, -10, -1, 10]), view)).toBe(false);
+    expect(runInView(run([11, 0, 20, 10]), view)).toBe(false);
+    expect(runInView(run([0, -10, 10, -1]), view)).toBe(false);
+    expect(runInView(run([0, 11, 10, 20]), view)).toBe(false);
+  });
+
+  it("keeps a run without bounds", () => {
+    expect(runInView(run(), view)).toBe(true);
+  });
+});
+
+describe("compactSlots", () => {
+  // fresh typed arrays, as the renderer allocates them per loop set
+  const buffers = (n: number) => ({
+    slots: new Int32Array(n),
+    slotOf: new Int32Array(n).fill(-1),
+  });
+
+  it("leaves the mapping unchanged when every vehicle is visible", () => {
+    const { slots, slotOf } = buffers(3);
+    expect(compactSlots(3, () => true, slots, slotOf)).toBe(3);
+    expect(Array.from(slots)).toEqual([0, 1, 2]);
+    expect(Array.from(slotOf)).toEqual([0, 1, 2]);
+  });
+
+  it("compacts survivors into the front and returns the count", () => {
+    const { slots, slotOf } = buffers(5);
+    const visible = [true, false, true, false, true];
+    expect(compactSlots(5, (i) => visible[i], slots, slotOf)).toBe(3);
+    expect(Array.from(slots.subarray(0, 3))).toEqual([0, 2, 4]);
+    expect(Array.from(slotOf)).toEqual([0, -1, 1, -1, 2]);
+  });
+
+  it("handles nothing visible", () => {
+    const { slots, slotOf } = buffers(4);
+    expect(compactSlots(4, () => false, slots, slotOf)).toBe(0);
+    expect(Array.from(slotOf)).toEqual([-1, -1, -1, -1]);
+  });
+
+  it("handles no vehicles", () => {
+    const { slots, slotOf } = buffers(0);
+    expect(compactSlots(0, () => true, slots, slotOf)).toBe(0);
+  });
+
+  it("reuses a stale buffer, so no old slot survives below count", () => {
+    const { slots, slotOf } = buffers(4);
+    compactSlots(4, () => true, slots, slotOf);
+    // the next remap culls everything but the last vehicle
+    const count = compactSlots(4, (i) => i === 3, slots, slotOf);
+    expect(count).toBe(1);
+    expect(slots[0]).toBe(3);
+    expect(Array.from(slotOf)).toEqual([-1, -1, -1, 0]);
+  });
 });
 
 describe("crossingShift", () => {
