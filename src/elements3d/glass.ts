@@ -90,9 +90,13 @@ export const glassMaterial = new THREE.ShaderMaterial({
       vec3 n = normalize(vNormal);
       float ndl = max(dot(n, uKeyDirection), 0.0);
 
-      // pane grid from the model-space position: the vertical band uses z, the
-      // horizontal one either x or y depending on which way the wall faces
-      float across = abs(n.z) > 0.5 ? vPosition.x : vPosition.y;
+      // pane grid from the model-space position: a wall seen from the side
+      // tiles along its horizontal extent (y when it faces x, x otherwise) and
+      // up its height. Floors and roofs are not curtain wall and get the x/y
+      // grid, which they barely show anyway.
+      float across = abs(n.z) > 0.5
+        ? vPosition.x
+        : (abs(n.x) > abs(n.y) ? vPosition.y : vPosition.x);
       vec2 cell = abs(fract(vec2(across, vPosition.z) / PANE) - 0.5);
       float grid = smoothstep(0.44, 0.5, max(cell.x, cell.y));
       vec3 pane = vColor * mix(1.0, MULLION, (1.0 - grid));
