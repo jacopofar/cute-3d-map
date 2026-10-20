@@ -16,6 +16,33 @@ body {
   height: 100dvh;
 }
 
+/* A brief fade-through-black when the basemap swaps between the day and night
+   styles, hiding the style reload instead of popping. */
+#basemap-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  background: #000;
+  transition: opacity 220ms ease;
+}
+
+/* Golden-hour grade: a warm multiply over the canvas (map + 3D scene), below
+   the MapLibre controls and the layers menu. Invisible by day and at night. */
+#grade {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background: #fff;
+  mix-blend-mode: multiply;
+  transition:
+    background-color 400ms linear,
+    opacity 400ms linear;
+}
+
 /* Layers menu: a gear button that opens the list of checkboxes, with a chevron
    at the top of the list to collapse it again. */
 #layer-menu {

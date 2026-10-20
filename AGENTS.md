@@ -46,7 +46,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
   center (`loadUnloadCoord`), debounced 150 ms. The map carries its view in a
   `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre reads and writes it)
-  and the projection origin is seeded from wherever the map opens.
+  and the projection origin is seeded from wherever the map opens. The scene
+  lights, sun shadows (a 2 km cascade following the view, received only by the
+  ground catcher), sky/fog, the dawn/dusk grade and the night-light visibility
+  are driven from `applyLighting()`.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
@@ -96,6 +99,14 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   than the ~370k of the whole loaded window. `#parked-cars-toggle` is a plain
   visibility switch. Uses a lit material (unlike the moving fleet's unlit basic
   one), so parked cars darken at night.
+- `src/night_lights.ts` — the night light sources: street lamps (`lamps` tile
+  block) and traffic-signal heads (`signals` from the signal Points). Warm lamp
+  sprites plus a wider ground "pool", red/green signal sprites on the global 8 s
+  light, all on a thin instanced post. One draw call per layer; visible at night
+  above `NIGHT_LIGHT_MIN_ZOOM` (15), and only for the 3x3 centre tiles.
+- `src/daynight.ts` — the approximate solar model (Milan, local mean solar
+  time): sun altitude/azimuth, key/fill/hemisphere colors, sky and fog colors,
+  dawn/dusk warmth and the screen grade. Pure and unit-tested.
 - `src/clouds.ts` — decorative volumetric cloud layer (disabled above a zoom).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
@@ -118,6 +129,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   at `MIN_SPOT_SPACING`, the higher road class winning. Pure
   (plain `ParkingWay` inputs; `main.load_parking_ways` reads the parquet), so it
   is unit-tested like `traffic.py`.
+- `tilegen/lamps.py` — street lamps for the night glow: one every `LAMP_SPACING`
+  (55 m) on both sides of every parking-eligible road, just beyond the kerb,
+  grouped per tile. Pure and unit-tested; uses the same `ParkingWay` inputs.
 
 ## Domain lexicon
 
@@ -203,6 +217,13 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   (parallel, perpendicular or fishbone), and an occupied one, stored as
   `[lon, lat, heading]` in a tile's top-level `parking` block. 95% of bays are
   occupied; the layer is static and gated like the facade detail.
+- **street lamp / signal head** — the night light sources. Lamps are
+  `[lon, lat]` in a tile's top-level `lamps` block; a signal head is a
+  `traffic_signal` Point. Both are additive sprites on a thin instanced post,
+  visible at night above zoom 15.
+- **grade / basemap fade** — the two full-canvas DOM overlays: `#grade` is the
+  warm multiply at dawn/dusk, `#basemap-fade` hides the day/night style swap
+  behind a short fade to black.
 - **cloud field** — the repeating sky the clouds live in; **torus** — the wrap
   that keeps sky overhead when panning; **variant / slot** — the shared cloud
   mesh shapes and their instance slots.

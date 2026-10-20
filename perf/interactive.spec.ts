@@ -257,6 +257,9 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
     const durations = await longTasks(page);
     phases[kind] = summarize(frames, durations, tileFetches - before);
     after[kind] = await stats(page);
+    // let the phase's tile loads, facade rebuild and the debounced shadow
+    // update settle before measuring the next phase
+    await page.waitForTimeout(5000);
   }
 
   const result = {

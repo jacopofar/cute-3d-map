@@ -51,6 +51,10 @@ test("the runway surface and planes appear at Linate and follow the toggle", asy
     map.map.jumpTo(place);
   }, LINATE);
 
+  // let the move's unload pass drop the old view's runway before polling, or a
+  // transient Bresso mesh can satisfy the poll and be gone by the next check
+  await page.waitForTimeout(1500);
+
   // the tarmac tiles load and merge into a per-tile aeroway mesh. Poll the
   // *visible* count: a mesh from the start view (Bresso is far enough to have a
   // runway in the default window) can be in the scene for a moment before the

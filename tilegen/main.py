@@ -13,6 +13,7 @@ import quackosm as qosm
 import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
+from lamps import lamp_spots
 from parking import PARKING_HIGHWAYS, ParkingWay, parking_spots
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
@@ -1104,6 +1105,7 @@ def parquet_to_tiles(
     borders_shape: shapely.Geometry | None = None,
     traffic: bool = True,
     parking: bool = True,
+    lamps: bool = True,
     report_dir: Path | None = None,
     report_polygon: BaseGeometry | None = None,
     cache_dir: Path = Path("cache"),
@@ -1163,27 +1165,42 @@ def parquet_to_tiles(
         )
         if report_dir is not None:
             write_loop_report(fleets, report_dir, report_polygon, crossing_points)
-    # parked cars: static, along both sides of the parking-eligible roads. Pure
-    # geometry, so it does not depend on (or need) the traffic loop build.
+    # parked cars and street lamps: static, along both sides of the
+    # parking-eligible roads. Pure geometry, so they do not depend on (or need)
+    # the traffic loop build.
     parking_by_tile: dict[tuple[int, int], list[list[float]]] = {}
-    if parking:
-        logger.info("Building parked cars")
+    lamp_by_tile: dict[tuple[int, int], list[list[float]]] = {}
+    if parking or lamps:
+        logger.info("Building parked cars and street lamps")
         parking_ways = load_parking_ways(input_parquet)
-        parking_by_tile = parking_spots(parking_ways, zoom_level)
-        logger.info(
-            "parking: %d ways -> %d spots in %d tiles",
-            len(parking_ways),
-            sum(len(spots) for spots in parking_by_tile.values()),
-            len(parking_by_tile),
-        )
+        if parking:
+            parking_by_tile = parking_spots(parking_ways, zoom_level)
+            logger.info(
+                "parking: %d ways -> %d spots in %d tiles",
+                len(parking_ways),
+                sum(len(spots) for spots in parking_by_tile.values()),
+                len(parking_by_tile),
+            )
+        if lamps:
+            lamp_by_tile = lamp_spots(parking_ways, zoom_level)
+            logger.info(
+                "lamps: %d ways -> %d lamps in %d tiles",
+                len(parking_ways),
+                sum(len(spots) for spots in lamp_by_tile.values()),
+                len(lamp_by_tile),
+            )
     # one scan groups every feature into the tiles it intersects, instead of a
     # full-parquet query per tile (the grid is mostly empty, and even an empty
     # query costs a full scan)
     features_by_tile = parquet_features_by_tile(input_parquet, zoom_level)
     logger.info(f"features fall in {len(features_by_tile)} tiles")
-    # a tile that holds traffic or parking but no OSM feature still gets a file
+    # a tile that holds traffic, parking or lamps but no OSM feature still gets
+    # a file
     for x, y in sorted(
-        set(features_by_tile) | set(traffic_by_tile) | set(parking_by_tile)
+        set(features_by_tile)
+        | set(traffic_by_tile)
+        | set(parking_by_tile)
+        | set(lamp_by_tile)
     ):
         logger.info(f"Generating tile {x}/{y}")
         target_path = target_folder / str(x)
@@ -1197,14 +1214,17 @@ def parquet_to_tiles(
         )
         traffic_loops = traffic_by_tile.get((x, y))
         parking_here = parking_by_tile.get((x, y))
+        lamps_here = lamp_by_tile.get((x, y))
         # compact JSON (indent=2 put every coordinate on its own line and
         # dominated the payload) and no files for empty tiles
-        if features or traffic_loops or parking_here:
+        if features or traffic_loops or parking_here or lamps_here:
             document: dict = {"type": "FeatureCollection", "features": features}
             if traffic_loops:
                 document["traffic"] = traffic_loops
             if parking_here:
                 document["parking"] = parking_here
+            if lamps_here:
+                document["lamps"] = lamps_here
             (target_path / f"{y}.json").write_text(
                 json.dumps(
                     document,
@@ -1259,6 +1279,11 @@ def parquet_to_tiles(
     help="Place static parked cars along the roads and write them into the tiles.",
 )
 @click.option(
+    "--lamps/--no-lamps",
+    default=True,
+    help="Place street lamps along the roads for the night glow.",
+)
+@click.option(
     "--report/--no-report",
     default=True,
     help="Write the loop report (report/loops.md and report/loops.geojson).",
@@ -1302,6 +1327,7 @@ def main(
     raw: bool,
     traffic: bool,
     parking: bool,
+    lamps: bool,
     report: bool,
     report_dir: Path,
     report_polygon: Path | None,
@@ -1332,6 +1358,7 @@ def main(
         borders_shape=borders_shape,
         traffic=traffic,
         parking=parking,
+        lamps=lamps,
         report_dir=report_dir if report and traffic else None,
         report_polygon=report_shape,
         cache_dir=cache_dir,
