@@ -1,5 +1,11 @@
 # Per-feature cost, real GPU — 2026-10-19
 
+> **Partly superseded.** The `vehicle traffic` row predates the culling and
+> 30 Hz update slices (`a717e97`, merged as `2ee8cf2`); the 2026-10-20
+> interactive report shows traffic no longer dominating the steady-state
+> phases. The other rows are still the best per-feature numbers available. See
+> `fps_report_20261020.md`.
+
 Hardware/browser: Intel Arc Pro iGPU via ANGLE/Mesa, Google Chrome (new headless)
 with GPU rasterization, 1280×800, 90 Hz display, vsync **off** for headroom.
 App at central Milan, zoom 18.5, pitch 30; each sample is a 5 s small pan + zoom

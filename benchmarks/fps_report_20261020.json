@@ -1,0 +1,143 @@
+{
+  "when": "2026-10-20",
+  "commit": "2ee8cf2",
+  "renderer": "ANGLE (Intel, Mesa Intel(R) Graphics (ARL), OpenGL ES 3.2)",
+  "viewport": "1280x800",
+  "view": {
+    "center": [
+      9.209,
+      45.478
+    ],
+    "zoom": 17.2,
+    "pitch": 30
+  },
+  "method": "npm run bench:gpu (perf/interactive.spec.ts), headed Chrome, GPU rasterization, 7 s warm-up, 3.5 s settle, then 5 s pan / tilt / zoom; three runs of the same code",
+  "startup": {
+    "tiles": 49,
+    "meshes": 445,
+    "drawCalls": 57,
+    "triangles": 3064512,
+    "buildings": 25488,
+    "vehicles": 12988,
+    "trains": 48,
+    "facadeTiles": 18,
+    "facadeVertices": 5758380,
+    "parkedCars": 71370
+  },
+  "runs": [
+    {
+      "when": "2026-10-20T13:19:52.096Z",
+      "phases": {
+        "pan": {
+          "frames": 180,
+          "fps": 35.9,
+          "p50": 16.7,
+          "p90": 37.9,
+          "p99": 188.9,
+          "worst": 246.7,
+          "longTasks": 11,
+          "longTaskMs": 1047,
+          "tileFetches": 49
+        },
+        "tilt": {
+          "frames": 355,
+          "fps": 70.8,
+          "p50": 11.1,
+          "p90": 22.2,
+          "p99": 33.4,
+          "worst": 66.6,
+          "longTasks": 1,
+          "longTaskMs": 69,
+          "tileFetches": 0
+        },
+        "zoom": {
+          "frames": 356,
+          "fps": 71,
+          "p50": 11.1,
+          "p90": 22.2,
+          "p99": 33.3,
+          "worst": 55.5,
+          "longTasks": 0,
+          "longTaskMs": 0,
+          "tileFetches": 0
+        }
+      }
+    },
+    {
+      "when": "2026-10-20T14:21:55.719Z",
+      "phases": {
+        "pan": {
+          "frames": 276,
+          "fps": 55.2,
+          "p50": 11.1,
+          "p90": 11.2,
+          "p99": 155.7,
+          "worst": 200.1,
+          "longTasks": 12,
+          "longTaskMs": 939,
+          "tileFetches": 49
+        },
+        "tilt": {
+          "frames": 370,
+          "fps": 73.9,
+          "p50": 11.2,
+          "p90": 16.7,
+          "p99": 17.8,
+          "worst": 33.4,
+          "longTasks": 0,
+          "longTaskMs": 0,
+          "tileFetches": 0
+        },
+        "zoom": {
+          "frames": 430,
+          "fps": 85.9,
+          "p50": 11.1,
+          "p90": 13.4,
+          "p99": 22.2,
+          "worst": 31,
+          "longTasks": 0,
+          "longTaskMs": 0,
+          "tileFetches": 0
+        }
+      }
+    },
+    {
+      "when": "2026-10-20T14:23:51.153Z",
+      "phases": {
+        "pan": {
+          "frames": 249,
+          "fps": 49.8,
+          "p50": 11.2,
+          "p90": 20.8,
+          "p99": 166.8,
+          "worst": 235.7,
+          "longTasks": 11,
+          "longTaskMs": 779,
+          "tileFetches": 49
+        },
+        "tilt": {
+          "frames": 357,
+          "fps": 71.2,
+          "p50": 12.2,
+          "p90": 19.7,
+          "p99": 24.8,
+          "worst": 50.9,
+          "longTasks": 21,
+          "longTaskMs": 3922,
+          "tileFetches": 0
+        },
+        "zoom": {
+          "frames": 343,
+          "fps": 68.5,
+          "p50": 15.7,
+          "p90": 18.4,
+          "p99": 24,
+          "worst": 24.4,
+          "longTasks": 0,
+          "longTaskMs": 0,
+          "tileFetches": 0
+        }
+      }
+    }
+  ]
+}
