@@ -12,13 +12,13 @@ import {
   type PreparedCrossing,
   type PreparedRun,
 } from "./traffic_math";
+import { vehicleGeometry, type VehicleBodySize } from "./vehicle_body";
 
-// a fleet of precomputed vehicles: one InstancedMesh of boxes, placed from the
-// route data every frame
-export interface TrafficFleetConfig {
-  length: number; // vehicle box size, meters
-  width: number;
-  height: number;
+export { vehicleGeometry };
+
+// a fleet of precomputed vehicles: one InstancedMesh of car bodies, placed from
+// the route data every frame
+export interface TrafficFleetConfig extends VehicleBodySize {
   maxVehicles: number;
 }
 
@@ -26,6 +26,7 @@ export const CAR_TRAFFIC: TrafficFleetConfig = {
   length: 8 / 3,
   width: 4 / 3,
   height: 1,
+  body: "car",
   // long random loops mean many vehicles pass through the loaded window at
   // once; keep enough slots that none are dropped
   maxVehicles: 120000,
@@ -36,6 +37,7 @@ export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   length: 15,
   width: 1.5,
   height: 2,
+  body: "train",
   maxVehicles: 500,
 };
 
@@ -163,13 +165,8 @@ function sampleRun(
   return { lon, lat, heading };
 }
 
-// the body shared by moving and parked cars: a simple box in the fleet's
-// dimensions, so the two layers always match
-export function vehicleGeometry(
-  config: TrafficFleetConfig,
-): THREE.BufferGeometry {
-  return new THREE.BoxGeometry(config.length, config.width, config.height);
-}
+// the body shared by moving and parked cars lives in vehicle_body.ts: a
+// low-poly car, or a long windowed box for trains
 
 /**
  * Renders precomputed traffic: every vehicle is a pure function of wall-clock
@@ -203,7 +200,13 @@ export class TrafficRenderer {
     this.now = now;
     this.capacity = Math.max(1, config.maxVehicles);
     const geometry = vehicleGeometry(config);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    // vertex colors carry the car's own part colors; three multiplies them by
+    // each instance's paint, so the body is tinted and the glass/wheels stay
+    // dark
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+    });
     this.mesh = new THREE.InstancedMesh(geometry, material, this.capacity);
     this.mesh.count = 0;
     // instances move every frame, so frustum culling against stale bounds
