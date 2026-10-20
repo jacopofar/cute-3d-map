@@ -32,6 +32,7 @@ import type {
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { ParkedCarLayer } from "./parked_cars.ts";
 import { NightLights } from "./night_lights.ts";
+import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
 import {
@@ -78,6 +79,9 @@ const basemapStyleUrl = (name: string): string =>
 // the night/day boundary that decides which basemap to show (the lighting model
 // fades smoothly, but a style can only be one or the other)
 const BASEMAP_NIGHT_AT = 0.5;
+// below this night factor the pass is off: the lamps are hidden and a bloom
+// over a daylight scene would only wash out the roofs
+const BLOOM_NIGHT_AT = 0.35;
 
 const HTML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -221,6 +225,10 @@ class CoolMap {
   private nightLights?: NightLights;
   private nightLightsKey = "";
   private lamppostsEnabled = true;
+  // bloom is a post pass over the 3D scene only, so this is a plain switch; it
+  // is forced off on the software rasterizer in render()
+  private bloomEnabled = true;
+  private bloom?: BloomPass;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -485,6 +493,9 @@ class CoolMap {
         this.renderer.shadowMap.autoUpdate = false;
 
         this.renderer.autoClear = false;
+        // night bloom: a post pass over the scene only, composited back over
+        // MapLibre's basemap. Created here because it needs the renderer.
+        coolMap.bloom = new BloomPass(this.renderer);
         // animated cars and trains, added to the scene directly — NOT via
         // loadedTiles — so the origin reset does not touch them; their
         // positions are recomputed each frame from the precomputed loops
@@ -597,7 +608,33 @@ class CoolMap {
         coolMap.nightLights?.update(performance.now() / 1000);
         if (this.renderer) {
           this.renderer.resetState();
-          this.renderer.render(this.scene, this.camera);
+          // bloom only at night, where the lit windows and lamps are; by day it
+          // would just soften the whole city and cost two extra passes
+          let bloomed = false;
+          if (
+            coolMap.bloom &&
+            coolMap.bloomEnabled &&
+            !coolMap.softwareRenderer &&
+            coolMap.lighting.night > BLOOM_NIGHT_AT
+          ) {
+            try {
+              bloomed = coolMap.bloom.render(this.scene, this.camera);
+            } catch (error) {
+              // a failed pass must never cost us the frame: fall through to the
+              // direct render, and try the pass again next frame
+              console.warn(
+                "bloom pass failed, falling back to direct render",
+                error,
+              );
+              bloomed = false;
+            }
+          }
+          if (!bloomed) {
+            this.renderer.render(this.scene, this.camera);
+          }
+          // hand a clean context back to MapLibre: resetState unbinds our
+          // targets and restores the default framebuffer
+          this.renderer.resetState();
         } else {
           // this.renderer is set up on onAdd, so it should always be present
           // but typescript does not know that
@@ -720,6 +757,9 @@ class CoolMap {
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
       this.applyWaterVisibility();
+    });
+    wireToggle("#bloom-toggle", (on) => {
+      this.bloomEnabled = on;
     });
     wireToggle("#benches-toggle", (on) => {
       this.benchesEnabled = on;

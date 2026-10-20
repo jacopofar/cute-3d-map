@@ -242,10 +242,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
   `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
-  `#lampposts-toggle`, `#imputed-colors-toggle`. Windows, balconies, roofs, water,
-  benches, church crosses, parks, airplanes, fences, bridges & tunnels, parked
-  cars and lamp posts are their own meshes, so those are plain visibility
-  switches; imputed colors are baked into the geometry, so changing that one
-  reloads the loaded tiles.
+  `#lampposts-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
+  balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
+  bridges & tunnels, parked cars and lamp posts are their own meshes, so those
+  are plain visibility switches; imputed colors are baked into the geometry, so
+  changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.
