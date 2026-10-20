@@ -52,7 +52,10 @@ export class ParkedCarLayer {
     this.capacity = Math.max(1, capacity);
     // Lambert, not the moving fleet's unlit basic material: parked cars follow
     // the sun and go dark at night, while the moving cars stay bright.
-    const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const material = new THREE.MeshLambertMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+    });
     this.mesh = new THREE.InstancedMesh(
       vehicleGeometry(CAR_TRAFFIC),
       material,
