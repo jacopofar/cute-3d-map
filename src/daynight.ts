@@ -32,6 +32,14 @@ export interface Lighting {
   exposure: number;
   // 0 in bright day, 1 at night; drives the window shader and the basemap
   night: number;
+  // the MapLibre sky and the scene fog (for the atmosphere at the horizon)
+  skyTop: number;
+  skyHorizon: number;
+  skyFog: number;
+  // a screen tint for the whole canvas (multiply); warm at dawn/dusk, none by
+  // day or at night. Ties the basemap into the 3D scene's golden hour.
+  gradeColor: number;
+  gradeOpacity: number;
 }
 
 // the tiles are a Milan extract, so the sun is the sun over Milan
@@ -48,16 +56,26 @@ const NIGHT_FILL = 0x8894b4;
 const DAY_SKY = 0xcfe0ff;
 // a dim, gray-blue night sky: saturated navy makes every wall look like
 // blueberry, so keep the blue subtle
-const NIGHT_SKY = 0x1a2130;
+const NIGHT_SKY = 0x1d2638;
 const DAY_GROUND = 0x4a4030;
-const NIGHT_GROUND = 0x07080c;
+const NIGHT_GROUND = 0x0a0d14;
+
+// the sky gradient MapLibre draws at the horizon, and the fog that blends the
+// 3D edges into it. Day is a soft blue; night is a deep blue-gray; twilight
+// warms the horizon via HORIZON_SUN.
+const DAY_SKY_TOP = 0x5f96d2;
+const DAY_SKY_HORIZON = 0xdbe6ee;
+const DAY_FOG = 0xd9e3ea;
+const NIGHT_SKY_TOP = 0x060a12;
+const NIGHT_SKY_HORIZON = 0x18243a;
+const NIGHT_FOG = 0x0a1018;
 
 const DAY_KEY = 2.4;
-const NIGHT_KEY = 0.34;
+const NIGHT_KEY = 0.4;
 const DAY_FILL_INTENSITY = 0.6;
-const NIGHT_FILL_INTENSITY = 0.16;
+const NIGHT_FILL_INTENSITY = 0.24;
 const DAY_HEMI = 1.0;
-const NIGHT_HEMI = 0.3;
+const NIGHT_HEMI = 0.48;
 
 const DEG = Math.PI / 180;
 
@@ -167,6 +185,19 @@ export function lightingAt(hour: number, date: Date = new Date()): Lighting {
   );
   const keyColor = lerpColor(dayColor, MOON, night);
 
+  // 1 at the horizon, 0 once the sun is 18 degrees up or down: the sky's
+  // horizon warms through sunrise/sunset and goes cold again at night
+  const twilight = clamp01(1 - Math.abs(altitude) / 18);
+  // the sun's strength above the horizon: full at 30 degrees and up, weaker
+  // and warmer when it grazes the horizon (golden hour, not a second noon)
+  const sunHeight = smoothstep(2, 30, altitude);
+  const ambient = 0.8 + 0.2 * sunHeight;
+  const skyHorizon = lerpColor(
+    lerpColor(NIGHT_SKY_HORIZON, DAY_SKY_HORIZON, 1 - night),
+    HORIZON_SUN,
+    twilight * 0.6,
+  );
+
   // by day the real sun direction; at night it blends toward a moon roughly
   // overhead, so the key never shines up from below the ground
   const keyDirection = normalize([
@@ -177,15 +208,30 @@ export function lightingAt(hour: number, date: Date = new Date()): Lighting {
 
   return {
     keyColor,
-    keyIntensity: DAY_KEY * daylight + NIGHT_KEY * night,
+    keyIntensity:
+      DAY_KEY * daylight * (0.6 + 0.4 * sunHeight) + NIGHT_KEY * night,
     keyDirection,
-    fillColor: lerpColor(NIGHT_FILL, DAY_FILL, 1 - night),
-    fillIntensity: lerp(NIGHT_FILL_INTENSITY, DAY_FILL_INTENSITY, 1 - night),
-    skyColor: lerpColor(NIGHT_SKY, DAY_SKY, 1 - night),
+    fillColor: lerpColor(
+      lerpColor(NIGHT_FILL, DAY_FILL, 1 - night),
+      HORIZON_SUN,
+      twilight * 0.3,
+    ),
+    fillIntensity:
+      lerp(NIGHT_FILL_INTENSITY, DAY_FILL_INTENSITY, 1 - night) * ambient,
+    skyColor: lerpColor(
+      lerpColor(NIGHT_SKY, DAY_SKY, 1 - night),
+      HORIZON_SUN,
+      twilight * 0.25,
+    ),
     groundColor: lerpColor(NIGHT_GROUND, DAY_GROUND, 1 - night),
-    hemisphereIntensity: lerp(NIGHT_HEMI, DAY_HEMI, 1 - night),
+    hemisphereIntensity: lerp(NIGHT_HEMI, DAY_HEMI, 1 - night) * ambient,
     // a touch darker at night so the moonlight does not read as daylight
-    exposure: lerp(0.82, 1.0, 1 - night),
+    exposure: lerp(0.9, 1.0, 1 - night),
+    skyTop: lerpColor(NIGHT_SKY_TOP, DAY_SKY_TOP, 1 - night),
+    skyHorizon,
+    skyFog: lerpColor(NIGHT_FOG, DAY_FOG, 1 - night),
+    gradeColor: HORIZON_SUN,
+    gradeOpacity: 0.18 * twilight,
     night,
   };
 }

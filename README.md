@@ -38,7 +38,9 @@ The project has two halves:
    A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
    the precomputed vehicle routes that fall inside the tile. See below. A
    `parking` array holds the static parked cars assigned to the tile, each
-   `[lon, lat, heading]` (heading in model-space radians); see "Parked cars".
+   `[lon, lat, heading]` (heading in model-space radians); see "Parked cars". A
+   `lamps` array holds the street lamps as `[lon, lat]`; see "Light and
+   atmosphere".
 
 2. **`src/`** (TypeScript, Vite app) — a `CoolMap` class wraps the MapLibre map
    and adds a Three.js `CustomLayerInterface`. The map keeps its view in the URL
@@ -82,11 +84,30 @@ Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
-**roof shapes**, **water**, **church crosses**, **parked cars** and **imputed
-colors** on and off, with a question mark beside the last one explaining what
-imputation means. All but imputed colors are mesh visibility switches (water's is
+**roof shapes**, **water**, **church crosses**, **parked cars**, **lamp posts**
+and **imputed colors** on and off, with a question mark beside the last one
+explaining what imputation means. All but imputed colors are mesh visibility switches (water's is
 all-or-nothing: unchecked, no water is drawn); imputed colors are baked into the
 geometry and so reload the loaded tiles.
+
+### Light and atmosphere
+
+The scene opens on the real sun over Milan (`src/daynight.ts`): the date's solar
+declination and the hour angle (the slider is local mean solar time) give the key
+light's direction and altitude. The directional light casts soft shadows over a
+2 km cascade that follows the view; a transparent `ShadowMaterial` plane is the
+only shadow receiver, so the shadows stay on the ground instead of banding roofs
+and walls. Sky/fog colors, ambient warmth
+and a whole-canvas warm multiply (`#grade`) follow the same model, so golden hour
+is warm with long shadows while noon is neutral.
+
+At night the basemap swaps to the dark style (with a short fade through black),
+the scene lights and parked cars dim, and the street lamps and traffic signals
+glow: `tilegen/lamps.py` puts a lamp every 55 m on both sides of every
+parking-eligible road, and the signal heads blink red/green on the same global
+8 s light the vehicles react to. Both are additive sprites on a thin instanced
+post (`src/night_lights.ts`), visible at night above zoom 15. The **lamp posts**
+checkbox switches the street lamps and their posts off; the signal heads stay.
 
 ### Churches
 

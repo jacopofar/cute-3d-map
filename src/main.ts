@@ -23,6 +23,7 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
+  LampSpot,
   ParkedCar,
   RunwayLine,
   TrafficLoop,
@@ -30,6 +31,7 @@ import type {
 } from "./geojson_data.ts";
 import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
 import { ParkedCarLayer } from "./parked_cars.ts";
+import { NightLights } from "./night_lights.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
 import {
@@ -207,6 +209,8 @@ class CoolMap {
   private loadedAprons: { [key: string]: ApronRing[] } = {};
   // signal/crossing points per loaded tile, for the traffic speed bump
   private loadedCrossings: { [key: string]: [number, number][] } = {};
+  private loadedSignals: { [key: string]: [number, number][] } = {};
+  private loadedLamps: { [key: string]: LampSpot[] } = {};
   // parked cars per loaded tile, for the static cars around the centre
   private loadedParking: { [key: string]: ParkedCar[] } = {};
   // the tile set + origin the parked cars were built for, so the layer is only
@@ -214,6 +218,9 @@ class CoolMap {
   private parkedCarsKey = "";
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
+  private nightLights?: NightLights;
+  private nightLightsKey = "";
+  private lamppostsEnabled = true;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -256,6 +263,9 @@ class CoolMap {
   private fillLight?: THREE.DirectionalLight;
   private hemisphereLight?: THREE.HemisphereLight;
   private groundMesh?: THREE.Mesh;
+  private shadowGround?: THREE.Mesh;
+  // headless CI runs on SwiftShader; the shadow pass is not worth it there
+  private softwareRenderer = false;
   // hours 0..24, local mean solar time at Milan; seeded from the real sun and
   // driven by the slider/night checkbox afterwards. The slider steps 0.25 h, so
   // round the seed to match rather than give the thumb a fractional value.
@@ -275,6 +285,7 @@ class CoolMap {
   private renderTileMargin: number = 3;
   // move fires continuously; debounce the tile load/unload pass
   private moveDebounce: ReturnType<typeof setTimeout> | undefined;
+  private shadowTimer: ReturnType<typeof setTimeout> | undefined;
   // increments every time the projection origin is reset, so in-flight
   // async tile loads from the old origin can be recognized and discarded
   private originGeneration: number = 0;
@@ -371,12 +382,40 @@ class CoolMap {
         this.map = map;
         if (this.renderer) return;
 
+        // headless CI renders on SwiftShader; skip the shadow pass there (it
+        // roughly doubles the software rasterizer's frame time)
+        const rendererInfo = gl.getExtension("WEBGL_debug_renderer_info");
+        const rendererName = rendererInfo
+          ? String(gl.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL))
+          : "";
+        coolMap.softwareRenderer =
+          /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
+
+        // atmospheric fog, matched to the sky color in applyLighting(); it
+        // blends the far 3D edges into the horizon instead of cutting off
+        this.scene.fog = new THREE.Fog(0xd9e3ea, 1200, 6000);
+
         // lighting: a warm sun, a cool fill from the opposite side, and a
         // hemisphere light so faces away from the sun are not pitch black.
         // Their colors and intensities are set from the time of day in
         // applyLighting(), so the starting values here do not matter much.
         const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
         sun.position.set(-40, 60, 100).normalize();
+        // one tight shadow cascade around the view: 2 km across is enough at
+        // city zooms and keeps the texel size usable at 2048
+        sun.castShadow = !coolMap.softwareRenderer;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.left = -1000;
+        sun.shadow.camera.right = 1000;
+        sun.shadow.camera.top = 1000;
+        sun.shadow.camera.bottom = -1000;
+        // the light sits 3 km out; a tight depth range keeps the 24-bit depth
+        // precise enough to avoid acne on roofs and walls
+        sun.shadow.camera.near = 1000;
+        sun.shadow.camera.far = 5000;
+        sun.shadow.bias = -0.0002;
+        sun.shadow.normalBias = 2.0;
+        this.scene.add(sun.target);
         this.scene.add(sun);
         coolMap.sunLight = sun;
 
@@ -404,6 +443,20 @@ class CoolMap {
         this.scene.add(ground);
         coolMap.groundMesh = ground;
 
+        // a transparent catcher for the sun shadows: it darkens the basemap
+        // and the ground under buildings, trees and cars without covering it
+        const shadowGround = new THREE.Mesh(
+          new THREE.PlaneGeometry(20000, 20000),
+          new THREE.ShadowMaterial({ opacity: 0.32 }),
+        );
+        shadowGround.position.z = -0.04;
+        shadowGround.receiveShadow = true;
+        shadowGround.material.depthWrite = false;
+        shadowGround.renderOrder = -0.5;
+        shadowGround.frustumCulled = false;
+        this.scene.add(shadowGround);
+        coolMap.shadowGround = shadowGround;
+
         // this.scene.add(heartMesh());
 
         // // use the three.js GLTF loader to add the 3D model to the three.js scene
@@ -426,6 +479,10 @@ class CoolMap {
         // filmic tone mapping for a less flat look
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.0;
+        this.renderer.shadowMap.enabled = !coolMap.softwareRenderer;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        // one shadow render when the view/time changes, not every frame
+        this.renderer.shadowMap.autoUpdate = false;
 
         this.renderer.autoClear = false;
         // animated cars and trains, added to the scene directly — NOT via
@@ -444,6 +501,8 @@ class CoolMap {
         // static parked cars: same body as the moving ones, around the centre
         coolMap.parkedCars = new ParkedCarLayer(this.scene);
         coolMap.parkedCars.setEnabled(coolMap.parkedCarsEnabled);
+        // warm lamps and red/green signal heads for the night
+        coolMap.nightLights = new NightLights(this.scene);
         // the lights now exist, so push the current time-of-day state onto them
         coolMap.applyLighting();
         // tiles may already have loaded before this layer was added, so seed
@@ -452,6 +511,7 @@ class CoolMap {
         coolMap.syncTraffic();
         coolMap.syncAirplanes();
         coolMap.syncParkedCars();
+        coolMap.syncNightLights();
         // NOTE: currently broken
         // see https://github.com/potree/potree/blob/develop/src/viewer/viewer.js#L1921
         // this.renderer.xr.enabled = true;
@@ -525,6 +585,7 @@ class CoolMap {
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
         greenMaterial.uniforms.uTime.value = performance.now() / 1000;
+        coolMap.nightLights?.update(performance.now() / 1000);
         if (this.renderer) {
           this.renderer.resetState();
           this.renderer.render(this.scene, this.camera);
@@ -546,6 +607,8 @@ class CoolMap {
       // load map data at setup before the user moves
       this.loadUnloadCoord(this.map.getCenter());
       this.applyTrafficState();
+      // a style swap drops the sky; re-apply the current time-of-day state
+      coolMap.applyLighting();
       // // this is only to show maplibre globe, not useful on a city-level map :)
       // this.map.setSky({ "atmosphere-blend": 1.0 });
       // this.map.setProjection({
@@ -568,6 +631,7 @@ class CoolMap {
         this.applyTrafficState();
         this.loadUnloadCoord(this.map.getCenter());
         this.syncBuildingDetail();
+        this.refreshSunShadow();
       }, 150);
     });
 
@@ -672,6 +736,10 @@ class CoolMap {
       this.parkedCarsEnabled = on;
       this.applyParkedCarVisibility();
     });
+    wireToggle("#lampposts-toggle", (on) => {
+      this.lamppostsEnabled = on;
+      this.applyNightLightsVisibility();
+    });
     wireToggle("#bridges-toggle", (on) => {
       this.bridgesEnabled = on;
       this.applyBridgeVisibility();
@@ -730,13 +798,18 @@ class CoolMap {
     this.loadedBuildings = {};
     this.loadedWater = {};
     this.loadedCrossings = {};
+    this.loadedSignals = {};
+    this.loadedLamps = {};
     this.loadedRunways = {};
     this.loadedAprons = {};
     this.loadedParking = {};
     this.parkedCarsKey = "";
+    this.nightLightsKey = "";
     this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
+    this.syncNightLights();
+    this.refreshSunShadow();
     this.loadUnloadCoord(this.map.getCenter());
   }
 
@@ -1015,6 +1088,8 @@ class CoolMap {
     this.originGeneration += 1;
     this.pendingTiles.clear();
     this.syncParkedCars();
+    this.syncNightLights();
+    this.refreshSunShadow();
     console.log("reset projection origin to", center.lng, center.lat);
   }
 
@@ -1055,6 +1130,8 @@ class CoolMap {
         delete this.loadedBuildings[k];
         delete this.loadedWater[k];
         delete this.loadedCrossings[k];
+        delete this.loadedSignals[k];
+        delete this.loadedLamps[k];
         delete this.loadedRunways[k];
         delete this.loadedAprons[k];
         delete this.loadedParking[k];
@@ -1070,6 +1147,8 @@ class CoolMap {
       this.syncTraffic();
       this.syncAirplanes();
       this.syncParkedCars();
+      this.syncNightLights();
+      this.refreshSunShadow();
     }
     const generation = this.originGeneration;
     // inclusive bounds so the loaded window matches the retention window
@@ -1103,9 +1182,11 @@ class CoolMap {
         water,
         traffic,
         crossings,
+        signals,
         runways,
         aprons,
         parking,
+        lamps,
       } = await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
@@ -1128,12 +1209,15 @@ class CoolMap {
       this.loadedBuildings[tileKey] = buildings;
       this.loadedWater[tileKey] = water;
       this.loadedCrossings[tileKey] = crossings;
+      this.loadedSignals[tileKey] = signals;
+      this.loadedLamps[tileKey] = lamps;
       this.loadedRunways[tileKey] = runways;
       this.loadedAprons[tileKey] = aprons;
       this.loadedParking[tileKey] = parking;
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
+      this.refreshSunShadow();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
       console.warn("failed to load tile", tileKey, e);
@@ -1157,6 +1241,7 @@ class CoolMap {
   // reset, so it is cheap when nothing changed (it only checks keys).
   private syncBuildingDetail() {
     this.syncParkedCars();
+    this.syncNightLights();
     // roofs and water follow their checkboxes whatever the zoom
     this.applyTileVisibility();
     if (this.map.getZoom() < FACADE_MIN_ZOOM) {
@@ -1202,6 +1287,9 @@ class CoolMap {
       group === "windows" ? windowMaterial : facadeMaterial,
     );
     mesh.userData = { kind: "facade", group, tileKey };
+    // thin quads lying on the walls: let the walls cast, not these
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
     this.customLayer.scene.add(mesh);
     return mesh;
   }
@@ -1393,8 +1481,82 @@ class CoolMap {
     windowMaterial.uniforms.uAmbientIntensity.value =
       lighting.hemisphereIntensity;
     waterMaterial.uniforms.uNight.value = lighting.night;
+    greenMaterial.uniforms.uNight.value = lighting.night;
     this.clouds?.setNight(lighting.night);
+    // the fog and the MapLibre sky follow the same palette as the lights, so
+    // distant geometry dissolves into the horizon instead of stopping abruptly
+    if (this.customLayer.scene.fog instanceof THREE.Fog) {
+      this.customLayer.scene.fog.color.setHex(lighting.skyFog);
+    }
+    if (this.shadowGround) {
+      this.shadowGround.visible = !this.softwareRenderer;
+      const material = this.shadowGround.material as THREE.ShadowMaterial;
+      material.opacity = Math.min(0.4, 0.15 * lighting.keyIntensity);
+    }
+    this.applySky(lighting);
+    this.applyNightLightsVisibility();
+    this.refreshSunShadow();
+    const grade = document.querySelector<HTMLElement>("#grade");
+    if (grade) {
+      grade.style.backgroundColor = `#${lighting.gradeColor
+        .toString(16)
+        .padStart(6, "0")}`;
+      grade.style.opacity = String(lighting.gradeOpacity);
+    }
     this.applyBasemap(lighting.night > BASEMAP_NIGHT_AT);
+  }
+
+  // MapLibre's sky/atmosphere: a gradient from the zenith to the horizon with
+  // fog, warmed through sunrise/sunset and deep blue at night.
+  private applySky(lighting: Lighting) {
+    if (!this.map.isStyleLoaded()) return;
+    const hex = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
+    this.map.setSky({
+      "sky-color": hex(lighting.skyTop),
+      "horizon-color": hex(lighting.skyHorizon),
+      "fog-color": hex(lighting.skyFog),
+      "sky-horizon-blend": 0.6,
+      "horizon-fog-blend": 0.45,
+      "fog-ground-blend": 0.6,
+      "atmosphere-blend": 1,
+    });
+  }
+
+  // Reposition the sun and its shadow camera and request one shadow-map
+  // render. Debounced: a burst of tile loads (each one would otherwise trigger
+  // a full 2.4M-caster shadow pass) coalesces into one, and the view settling
+  // updates it once.
+  private refreshSunShadow() {
+    if (!this.sunLight || this.softwareRenderer) return;
+    if (this.shadowTimer !== undefined) clearTimeout(this.shadowTimer);
+    this.shadowTimer = setTimeout(() => {
+      this.shadowTimer = undefined;
+      this.applySunShadow();
+    }, 200);
+  }
+
+  private applySunShadow() {
+    if (!this.sunLight || this.softwareRenderer) return;
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const center = this.map.getCenter();
+    const [x, y] = toModelCoords(
+      [center.lng, center.lat],
+      originMeters,
+      scaleFactor,
+    );
+    const direction = this.lighting.keyDirection;
+    this.sunLight.target.position.set(x, y, 0);
+    this.sunLight.target.updateMatrixWorld();
+    this.sunLight.position.set(
+      x + direction[0] * 3000,
+      y + direction[1] * 3000,
+      direction[2] * 3000,
+    );
+    this.sunLight.updateMatrixWorld();
+    if (this.customLayer.renderer) {
+      this.customLayer.renderer.shadowMap.needsUpdate = true;
+    }
   }
 
   // Swap the basemap to the dark MapTiler style at night (and back by day).
@@ -1405,7 +1567,25 @@ class CoolMap {
   private applyBasemap(night: boolean) {
     if (night === this.darkBasemap) return;
     this.darkBasemap = night;
-    this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
+    const fade = document.querySelector<HTMLElement>("#basemap-fade");
+    if (!fade) {
+      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
+      return;
+    }
+    // fade through black, swap under the cover, then reveal the new style
+    fade.style.opacity = "1";
+    let done = false;
+    const reveal = () => {
+      if (done) return;
+      done = true;
+      fade.style.opacity = "0";
+    };
+    setTimeout(() => {
+      this.map.once("style.load", reveal);
+      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
+      // the style load is normally quick; do not stay black if it never fires
+      setTimeout(reveal, 900);
+    }, 230);
   }
 
   // read-only day/night state for the e2e test (like stats()): the current
@@ -1502,6 +1682,44 @@ class CoolMap {
   private applyParkedCarVisibility() {
     const on = this.parkedCarsEnabled && this.map.getZoom() >= FACADE_MIN_ZOOM;
     this.parkedCars?.setEnabled(on);
+  }
+
+  // The signal heads (and, later, street lamps) for the centre tiles. Rebuilt
+  // only when that set or the origin changes; the glow is visibility-gated by
+  // night and zoom in the layer.
+  private syncNightLights() {
+    if (!this.nightLights) return;
+    const [cx, cy] = getTileIndex(this.map.getCenter());
+    const keys: string[] = [];
+    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
+      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
+        const key = `${x}_${y}`;
+        if (this.loadedSignals[key] || this.loadedLamps[key]) keys.push(key);
+      }
+    }
+    const key = `${this.originGeneration}:${keys.join(",")}`;
+    if (key !== this.nightLightsKey) {
+      this.nightLightsKey = key;
+      const signals: { lon: number; lat: number }[] = [];
+      const lamps: { lon: number; lat: number }[] = [];
+      for (const tileKey of keys) {
+        for (const [lon, lat] of this.loadedSignals[tileKey] ?? []) {
+          signals.push({ lon, lat });
+        }
+        for (const lamp of this.loadedLamps[tileKey] ?? []) {
+          lamps.push(lamp);
+        }
+      }
+      const originMeters = epsg4326toEpsg3857(this.tileCenter);
+      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+      this.nightLights.setSpots(lamps, signals, originMeters, scaleFactor);
+    }
+    this.applyNightLightsVisibility();
+  }
+
+  private applyNightLightsVisibility() {
+    this.nightLights?.setLampsEnabled(this.lamppostsEnabled);
+    this.nightLights?.setVisible(this.lighting.night, this.map.getZoom());
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the

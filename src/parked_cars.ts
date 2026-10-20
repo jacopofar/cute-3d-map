@@ -62,6 +62,7 @@ export class ParkedCarLayer {
     // the instance set changes as tiles/centre change, so a stale bounding
     // sphere would cull it wrongly; one draw call is cheap enough anyway
     this.mesh.frustumCulled = false;
+    this.mesh.castShadow = true;
     this.mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
     // so the e2e can find the layer
     this.mesh.userData = { kind: "parked_car" };

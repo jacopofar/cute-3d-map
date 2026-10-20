@@ -125,6 +125,7 @@ export function green(
 export const greenMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
+    uNight: { value: 0 },
   },
   vertexShader: /* glsl */ `
     attribute vec3 color;
@@ -141,6 +142,7 @@ export const greenMaterial = new THREE.ShaderMaterial({
   `,
   fragmentShader: /* glsl */ `
     uniform float uTime;
+    uniform float uNight;
     varying vec3 vColor;
     varying float vStyle;
     varying vec2 vPos;
@@ -182,6 +184,8 @@ export const greenMaterial = new THREE.ShaderMaterial({
       vec3 dense = mix(vColor * 0.45, vColor * 1.35, mottle);
 
       vec3 color = mix(lawn, dense, vStyle);
+      // the surface is unlit, so without this a park glows green in the dark
+      color *= mix(1.0, 0.16, uNight);
       gl_FragColor = vec4(color, 1.0);
     }
   `,

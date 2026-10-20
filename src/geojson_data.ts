@@ -259,6 +259,12 @@ export interface ParkedCar {
   heading: number;
 }
 
+// a street lamp point, for the night glow
+export interface LampSpot {
+  lon: number;
+  lat: number;
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -266,12 +272,16 @@ export interface TileObjects {
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
+  // traffic signals only, for the glowing signal heads at night
+  signals: [number, number][];
   // runway centrelines; a runway spanning tiles repeats, deduped by id in main
   runways: RunwayLine[];
   // apron outlines, for the parked airliners; deduped by id in main
   aprons: ApronRing[];
   // parked cars, already assigned to this tile by tilegen
   parking: ParkedCar[];
+  // street lamps, for the night glow
+  lamps: LampSpot[];
 }
 
 export async function objectsAt(
@@ -296,9 +306,11 @@ export async function objectsAt(
       water: [],
       traffic: [],
       crossings: [],
+      signals: [],
       runways: [],
       aprons: [],
       parking: [],
+      lamps: [],
     };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
@@ -313,9 +325,11 @@ export async function objectsAt(
       water: [],
       traffic: [],
       crossings: [],
+      signals: [],
       runways: [],
       aprons: [],
       parking: [],
+      lamps: [],
     };
   }
   if (!response.ok) {
@@ -329,11 +343,13 @@ export async function objectsAt(
   const parking = parkingIn(
     myGeoJSON as unknown as { parking?: [number, number, number][] },
   );
+  const lamps = lampsIn(myGeoJSON as unknown as { lamps?: [number, number][] });
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
   const water: WaterInfo[] = [];
   const crossings: [number, number][] = [];
+  const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
   const aprons: ApronRing[] = [];
   myGeoJSON.features.forEach((f) => {
@@ -342,7 +358,9 @@ export async function objectsAt(
       // not rendered, but the renderer detects when a car passes one and adds
       // a cosmetic speed bump
       if (f.geometry?.type === "Point") {
-        crossings.push(f.geometry.coordinates as [number, number]);
+        const point = f.geometry.coordinates as [number, number];
+        crossings.push(point);
+        if (cmtype === "traffic_signal") signals.push(point);
       }
       return;
     }
@@ -395,6 +413,16 @@ export async function objectsAt(
                           : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
+      // flat ground layers and the fence shader do not cast sensible shadows
+      // (the fence's gaps are a shader discard the depth pass cannot see)
+      // keep the shadow casters to the big silhouettes: buildings, roofs and
+      // trees carry the look, while every extra kind is another shadow draw
+      const casts = kind === "building" || kind === "roof" || kind === "tree";
+      mesh.castShadow = casts;
+      // only the ground catcher receives: shadows on roofs and walls read as
+      // artefacts at this stylised scale, while the ground shadows give the
+      // scene its depth
+      mesh.receiveShadow = false;
       meshes.push(mesh);
     } else {
       // mergeGeometries returns null when the geometries have mismatched
@@ -410,9 +438,11 @@ export async function objectsAt(
     water,
     traffic,
     crossings,
+    signals,
     runways,
     aprons,
     parking,
+    lamps,
   };
 }
 
@@ -530,6 +560,13 @@ function parkingIn(document: {
   const spots = document.parking;
   if (!Array.isArray(spots)) return [];
   return spots.map(([lon, lat, heading]) => ({ lon, lat, heading }));
+}
+
+// the lamp block written by tilegen: [lon, lat] per street lamp
+function lampsIn(document: { lamps?: [number, number][] }): LampSpot[] {
+  const spots = document.lamps;
+  if (!Array.isArray(spots)) return [];
+  return spots.map(([lon, lat]) => ({ lon, lat }));
 }
 
 function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
