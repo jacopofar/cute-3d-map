@@ -50,6 +50,32 @@ def test_to_building_height_and_color():
     assert f["properties"]["color"] == "#ff0000"
 
 
+def test_to_building_part_uses_min_height_and_levels():
+    f = main.to_building(
+        "way/766529419",
+        {
+            "building:part": "yes",
+            "height": "15",
+            "min_height": "10",
+            "min_level": "2",
+            "max_level": "4",
+        },
+        geom(POLYGON),
+    )
+    assert f is not None
+    assert f["properties"]["base"] == 10.0
+    assert f["properties"]["height"] == 15.0
+
+    levels = main.to_building(
+        20,
+        {"building:part": "yes", "min_level": "2", "max_level": "5"},
+        geom(POLYGON),
+    )
+    assert levels is not None
+    assert levels["properties"]["base"] == 6.0
+    assert levels["properties"]["height"] == 15.0
+
+
 def test_to_building_imputes_missing_color_and_roof():
     distributions = {
         "color": impute.Distribution.from_counts({"white": 1}),
