@@ -683,6 +683,51 @@ def furniture_kind(tags) -> str | None:
     return None
 
 
+def transit_kind(tags) -> str | None:
+    """The stop kind a tag pair names, or None. Metro wins over a bus stop on
+    the same node; trams are their own kind because the sign is the same but the
+    popup should say so."""
+    if tags.get("railway") == "subway_entrance":
+        return "metro"
+    if tags.get("railway") == "tram_stop":
+        return "tram"
+    if tags.get("highway") == "bus_stop":
+        return "bus"
+    return None
+
+
+def to_transit_stop(feature_id, tags, s) -> dict | None:
+    """A metro entrance, tram stop or bus stop as a point. Shelters are a
+    property (both the covered and the implied ones); the frontend draws the
+    pole/sign for all stops and adds the shelter when it is set."""
+    kind = transit_kind(tags)
+    if kind is None:
+        return None
+    if s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {"cmtype": "transit_stop", "stop": kind}
+    if tags.get("name"):
+        properties["name"] = tags["name"]
+    if kind != "metro" and (
+        tags.get("shelter") == "yes" or tags.get("covered") == "yes"
+    ):
+        properties["shelter"] = True
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": properties,
+    }
+
+
 def to_fountain(feature_id, tags, s) -> dict | None:
     """A fountain as a point render feature. A mapped area collapses to its
     centroid and its equivalent diameter (clamped, so a whole square mapped as
@@ -890,6 +935,8 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif transit_kind(tags) is not None:
+            ret.append(to_transit_stop(feature_id, tags, s))
         elif tags.get("amenity") == "fountain":
             ret.append(to_fountain(feature_id, tags, s))
         elif furniture_kind(tags) is not None:

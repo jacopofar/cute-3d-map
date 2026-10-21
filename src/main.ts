@@ -25,6 +25,7 @@ import type {
   BuildingInfo,
   FountainInfo,
   FurnitureInfo,
+  TransitInfo,
   LampSpot,
   ParkedCar,
   RunwayLine,
@@ -230,6 +231,8 @@ class CoolMap {
   private loadedFurniture: { [key: string]: FurnitureInfo[] } = {};
   // fountains per loaded tile, for click-picking
   private loadedFountains: { [key: string]: FountainInfo[] } = {};
+  // transit stops per loaded tile, for click-picking
+  private loadedTransit: { [key: string]: TransitInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -892,6 +895,7 @@ class CoolMap {
     this.loadedWater = {};
     this.loadedFurniture = {};
     this.loadedFountains = {};
+    this.loadedTransit = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -936,7 +940,9 @@ class CoolMap {
           kind === "building" ||
           (kind === "water" && mesh.visible) ||
           kind === "furniture" ||
-          kind === "fountain"
+          kind === "fountain" ||
+          kind === "transit_stop" ||
+          kind === "metro_sign"
         ) {
           pickable.push(mesh);
         }
@@ -967,6 +973,15 @@ class CoolMap {
     if (hit.object.userData.kind === "fountain") {
       const info = this.fountainAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectFountain(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (
+      hit.object.userData.kind === "transit_stop" ||
+      hit.object.userData.kind === "metro_sign"
+    ) {
+      const info = this.transitAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectTransit(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1157,6 +1172,81 @@ class CoolMap {
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       "Fountain",
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+  }
+
+  private transitAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): TransitInfo | undefined {
+    const candidates = this.loadedTransit[tileKey] ?? [];
+    let best: TransitInfo | undefined;
+    let bestSq = 36;
+    for (const info of candidates) {
+      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
+      const dx = m[0] - point.x;
+      const dy = m[1] - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = info;
+      }
+    }
+    return best;
+  }
+
+  private highlightPoint(x: number, y: number, radius: number): void {
+    const ring: THREE.Vector3[] = [];
+    for (let i = 0; i < 32; i++) {
+      const angle = (i / 32) * Math.PI * 2;
+      ring.push(
+        new THREE.Vector3(
+          x + Math.cos(angle) * radius,
+          y + Math.sin(angle) * radius,
+          0.12,
+        ),
+      );
+    }
+    const outline = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(ring),
+      new THREE.LineBasicMaterial({
+        color: 0xffcc00,
+        depthTest: false,
+        transparent: true,
+      }),
+    );
+    outline.renderOrder = 999;
+    this.customLayer.scene.add(outline);
+    this.highlight = outline;
+  }
+
+  private selectTransit(info: TransitInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 2.6);
+
+    const labels: Record<string, string> = {
+      metro: "Metro entrance",
+      bus: "Bus stop",
+      tram: "Tram stop",
+    };
+    const label = labels[info.kind] ?? "Transit stop";
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      label,
       osmLink(info.id),
     ].filter(Boolean);
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
@@ -1378,6 +1468,7 @@ class CoolMap {
         delete this.loadedWater[k];
         delete this.loadedFurniture[k];
         delete this.loadedFountains[k];
+        delete this.loadedTransit[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1431,6 +1522,7 @@ class CoolMap {
         water,
         furniture,
         fountains,
+        transit,
         traffic,
         crossings,
         signals,
@@ -1461,6 +1553,7 @@ class CoolMap {
       this.loadedWater[tileKey] = water;
       this.loadedFurniture[tileKey] = furniture;
       this.loadedFountains[tileKey] = fountains;
+      this.loadedTransit[tileKey] = transit;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
 
+// tile parsing and SwiftShader are slow on this box; the click probes need room
+test.setTimeout(90_000);
+
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };

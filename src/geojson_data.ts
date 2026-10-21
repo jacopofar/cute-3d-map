@@ -4,6 +4,11 @@ import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
 import { fountain, fountainMaterial } from "./elements3d/fountain";
+import {
+  metroSignMaterial,
+  transitStop,
+  transitStopMaterial,
+} from "./elements3d/transit";
 import { furniture, furnitureMaterial } from "./elements3d/furniture";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
@@ -96,6 +101,8 @@ export function geoJSONtoGeometries(
     | "cemetery"
     | "furniture"
     | "fountain"
+    | "transit_stop"
+    | "metro_sign"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -178,6 +185,15 @@ export function geoJSONtoGeometries(
         geometries: fountain(originMeters, scaleFactor, f),
       },
     ];
+  }
+  if (f.properties.cmtype === "transit_stop") {
+    const { body, sign } = transitStop(originMeters, scaleFactor, f);
+    const groups: {
+      kind: "transit_stop" | "metro_sign";
+      geometries: THREE.BufferGeometry[];
+    }[] = [{ kind: "transit_stop", geometries: body }];
+    if (sign.length > 0) groups.push({ kind: "metro_sign", geometries: sign });
+    return groups;
   }
   if (f.properties.cmtype === "aeroway") {
     return [
@@ -273,6 +289,14 @@ export interface BuildingInfo {
 }
 
 // a street-furniture point, for click-picking + the OSM link
+export interface TransitInfo {
+  id?: string;
+  name?: string;
+  kind: string;
+  lon: number;
+  lat: number;
+}
+
 export interface FountainInfo {
   id?: string;
   name?: string;
@@ -332,6 +356,7 @@ export interface TileObjects {
   water: WaterInfo[];
   furniture: FurnitureInfo[];
   fountains: FountainInfo[];
+  transit: TransitInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -369,6 +394,7 @@ export async function objectsAt(
       water: [],
       furniture: [],
       fountains: [],
+      transit: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -390,6 +416,7 @@ export async function objectsAt(
       water: [],
       furniture: [],
       fountains: [],
+      transit: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -417,6 +444,7 @@ export async function objectsAt(
   const water: WaterInfo[] = [];
   const furniture: FurnitureInfo[] = [];
   const fountains: FountainInfo[] = [];
+  const transit: TransitInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -448,6 +476,9 @@ export async function objectsAt(
     } else if (cmtype === "fountain") {
       const info = fountainInfo(f);
       if (info) fountains.push(info);
+    } else if (cmtype === "transit_stop") {
+      const info = transitInfo(f);
+      if (info) transit.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -479,17 +510,25 @@ export async function objectsAt(
                   ? greenMaterial
                   : kind === "cemetery"
                     ? cemeteryMaterial
-                    : kind === "aeroway"
-                      ? aerowayMaterial
-                      : kind === "fence"
-                        ? fenceMaterial
-                        : kind === "bridge"
-                          ? bridgeMaterial
-                          : kind === "tunnel"
-                            ? tunnelMaterial
-                            : kind === "bench"
-                              ? benchMaterial
-                              : treeMaterial;
+                    : kind === "furniture"
+                      ? furnitureMaterial
+                      : kind === "fountain"
+                        ? fountainMaterial
+                        : kind === "transit_stop"
+                          ? transitStopMaterial
+                          : kind === "metro_sign"
+                            ? metroSignMaterial()
+                            : kind === "aeroway"
+                              ? aerowayMaterial
+                              : kind === "fence"
+                                ? fenceMaterial
+                                : kind === "bridge"
+                                  ? bridgeMaterial
+                                  : kind === "tunnel"
+                                    ? tunnelMaterial
+                                    : kind === "bench"
+                                      ? benchMaterial
+                                      : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
@@ -529,6 +568,7 @@ export async function objectsAt(
     water,
     furniture,
     fountains,
+    transit,
     traffic,
     crossings,
     signals,
@@ -565,6 +605,22 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+  };
+}
+
+// a transit stop for click-picking + the OSM link
+export function transitInfo(f: Geojson.Feature): TransitInfo | null {
+  const props = f.properties ?? {};
+  const kind = props.stop;
+  if (typeof kind !== "string") return null;
+  const geom = f.geometry;
+  if (geom.type !== "Point") return null;
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    kind,
+    lon: geom.coordinates[0],
+    lat: geom.coordinates[1],
   };
 }
 
