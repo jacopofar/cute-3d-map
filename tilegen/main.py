@@ -253,12 +253,16 @@ def to_crossing(feature_id, tags, s) -> dict | None:
 
 
 @dataclass(frozen=True)
-class CrossingRoad:
-    """The road under a crossing: its local bearing and full width, both needed
-    to lay the zebra stripes across the carriageway."""
+class RoadData:
+    """The road under a crossing or a stop node: its local bearing, width and
+    lane tags, used by the zebra and the stop-line/arrow markings."""
 
     bearing: float
     width: float
+    lanes: int = 1
+    oneway: str | None = None
+    turn_lanes: str | None = None
+    turn_lanes_backward: str | None = None
 
 
 # full carriageway width by highway class, used when OSM gives neither width
@@ -341,14 +345,82 @@ def crossing_is_marked(tags) -> bool:
     return True
 
 
+def parse_lane_count(tags, width: float) -> int:
+    value = tags.get("lanes")
+    if value:
+        match = re.search(r"\d+", str(value))
+        if match:
+            return min(max(int(match.group()), 1), 8)
+    return min(max(round(width / 3.25), 1), 8)
+
+
+def approach_bearings(tags, road: RoadData) -> list[float]:
+    """Which traffic directions stop at this node. `direction=forward/backward`
+    is relative to the matched way and is common on Italian stop/give-way nodes;
+    signals get both approaches unless the road is one-way."""
+    oneway = (road.oneway or "").lower()
+    direction = (tags.get("direction") or "").strip().lower()
+    if direction == "forward":
+        return [road.bearing]
+    if direction == "backward":
+        return [(road.bearing + 180.0) % 360]
+    if direction:
+        try:
+            return [float(direction) % 360]
+        except ValueError:
+            pass
+    if oneway in ("yes", "true", "1"):
+        return [road.bearing]
+    if oneway == "-1":
+        return [(road.bearing + 180.0) % 360]
+    if tags.get("highway") == "traffic_signals":
+        return [road.bearing, (road.bearing + 180.0) % 360]
+    # A bare stop/give-way node has no direction; one approach is less wrong
+    # than painting the line on both sides of the road.
+    return [road.bearing]
+
+
+def to_road_marking(
+    feature_id, tags, s, road_data: dict[int, RoadData] | None
+) -> dict | None:
+    """Stop lines and lane arrows for a stop, give-way or signal node."""
+    if s.geom_type != "Point":
+        return None
+    kind = {
+        "stop": "stop",
+        "give_way": "give_way",
+        "traffic_signals": "signal",
+    }.get(tags.get("highway"))
+    road = (road_data or {}).get(feature_id)
+    if kind is None or road is None:
+        return None
+    directions = approach_bearings(tags, road)
+    properties = {
+        "cmtype": "road_marking",
+        "kind": kind,
+        "directions": [round(value, 1) for value in directions],
+        "width": round(road.width, 1),
+        "lanes": road.lanes,
+        "oneway": road.oneway,
+        "turn_lanes": road.turn_lanes,
+        "turn_lanes_backward": road.turn_lanes_backward,
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def to_crosswalk(
-    feature_id, tags, s, crossing_roads: dict[int, CrossingRoad] | None
+    feature_id, tags, s, road_data: dict[int, RoadData] | None
 ) -> dict | None:
     """A marked crossing as its own Point, with the road bearing and width.
     The plain `crossing` Point stays data-only for the traffic slowdown."""
     if s.geom_type != "Point" or not crossing_is_marked(tags):
         return None
-    road = (crossing_roads or {}).get(feature_id)
+    road = (road_data or {}).get(feature_id)
     if road is None:
         return None
     properties = {
@@ -1256,7 +1328,7 @@ def tile_to_geojson(
     zoom: int,
     distributions: dict[str, Distribution] | None = None,
     terrace_positions: dict[str, tuple[float, float]] | None = None,
-    crossing_roads: dict[int, CrossingRoad] | None = None,
+    road_data: dict[int, RoadData] | None = None,
 ) -> tuple[list, list]:
     """Build the render features (buildings, trees, water) and the raw-tag
     features.
@@ -1295,9 +1367,12 @@ def tile_to_geojson(
             ret.append(to_tree_row(feature_id, tags, s))
         elif tags.get("highway") == "traffic_signals":
             ret.append(to_traffic_signal(feature_id, tags, s))
+            ret.append(to_road_marking(feature_id, tags, s, road_data))
+        elif tags.get("highway") in ("stop", "give_way"):
+            ret.append(to_road_marking(feature_id, tags, s, road_data))
         elif tags.get("highway") == "crossing":
             ret.append(to_crossing(feature_id, tags, s))
-            ret.append(to_crosswalk(feature_id, tags, s, crossing_roads))
+            ret.append(to_crosswalk(feature_id, tags, s, road_data))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
         elif is_construction(tags):
@@ -1474,10 +1549,11 @@ def load_crossing_points(input_parquet: Path) -> list[CrossingPoint]:
     return crossing_points_from_rows(rows)
 
 
-def load_crossing_roads(input_parquet: Path) -> dict[int, CrossingRoad]:
-    """Match every crossing node to its road way and keep the local bearing and
-    width. A spatial index over the drivable ways is enough: the nodes sit on
-    the way geometry, so the nearest segment is the crossing's road."""
+def load_road_data(input_parquet: Path) -> dict[int, RoadData]:
+    """Match every crossing/stop/signal node to its road way and keep the local
+    bearing, width and lane tags. A spatial index over the drivable ways is
+    enough: the nodes sit on the way geometry, so the nearest segment is the
+    road."""
     classes = ",".join(f"'{name}'" for name in ROAD_WIDTHS)
     rows = duckdb.execute(
         f"""
@@ -1498,12 +1574,12 @@ def load_crossing_roads(input_parquet: Path) -> dict[int, CrossingRoad]:
         """
         select feature_id, ST_X(geometry), ST_Y(geometry)
         from read_parquet($input_path)
-        where tags['highway'] = 'crossing'
+        where tags['highway'] in ('crossing', 'traffic_signals', 'stop', 'give_way')
           and ST_GeometryType(geometry) = 'POINT'
         """,
         {"input_path": str(input_parquet)},
     ).fetchall()
-    roads: dict[int, CrossingRoad] = {}
+    roads: dict[int, RoadData] = {}
     for feature_id, lon, lat in crossings:
         point = Point(lon, lat)
         candidates = tree.query(point.buffer(0.00008))
@@ -1526,9 +1602,15 @@ def load_crossing_roads(input_parquet: Path) -> dict[int, CrossingRoad]:
         if best is None:
             continue
         line = ways[best[1]]
-        roads[feature_id] = CrossingRoad(
+        tags = tags_by_way[best[1]]
+        width = road_width(tags)
+        roads[feature_id] = RoadData(
             bearing=way_bearing(line, point),
-            width=road_width(tags_by_way[best[1]]),
+            width=width,
+            lanes=parse_lane_count(tags, width),
+            oneway=tags.get("oneway"),
+            turn_lanes=tags.get("turn:lanes"),
+            turn_lanes_backward=tags.get("turn:lanes:backward"),
         )
     return roads
 
@@ -1863,8 +1945,8 @@ def parquet_to_tiles(
     # query costs a full scan)
     features_by_tile = parquet_features_by_tile(input_parquet, zoom_level)
     logger.info(f"features fall in {len(features_by_tile)} tiles")
-    crossing_roads = load_crossing_roads(input_parquet)
-    logger.info(f"crossing road data for {len(crossing_roads)} crossings")
+    road_data = load_road_data(input_parquet)
+    logger.info(f"road data for {len(road_data)} crossing/stop nodes")
     # a tile that holds traffic, parking or lamps but no OSM feature still gets
     # a file
     for x, y in sorted(
@@ -1887,7 +1969,7 @@ def parquet_to_tiles(
             zoom_level,
             distributions,
             terrace_positions,
-            crossing_roads,
+            road_data,
         )
         traffic_loops = traffic_by_tile.get((x, y))
         parking_here = parking_by_tile.get((x, y))

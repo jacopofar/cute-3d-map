@@ -11,6 +11,10 @@ import {
 } from "./elements3d/crosswalk";
 export type { CrosswalkInfo } from "./elements3d/crosswalk";
 import {
+  roadMarking,
+  roadMarkingMaterial,
+} from "./elements3d/road_marking";
+import {
   construction,
   constructionInfo,
   constructionMaterial,
@@ -130,6 +134,7 @@ export function geoJSONtoGeometries(
     | "monument"
     | "construction"
     | "crosswalk"
+    | "road_marking"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -253,6 +258,14 @@ export function geoJSONtoGeometries(
       {
         kind: "crosswalk",
         geometries: crosswalk(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "road_marking") {
+    return [
+      {
+        kind: "road_marking",
+        geometries: roadMarking(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -659,7 +672,9 @@ export async function objectsAt(
                                       ? constructionMaterial
                                       : kind === "crosswalk"
                                         ? crosswalkMaterial
-                                        : kind === "aeroway"
+                                        : kind === "road_marking"
+                                          ? roadMarkingMaterial
+                                          : kind === "aeroway"
                                       ? aerowayMaterial
                                       : kind === "fence"
                                         ? fenceMaterial

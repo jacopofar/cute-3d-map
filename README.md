@@ -51,6 +51,9 @@ The project has two halves:
      holding the site centroid also carries `crane` and `site_area`;
    - `cmtype: "crosswalk"` (point) — a marked `highway=crossing`, with the road
      `bearing` and full `width` so the frontend can lay the zebra stripes;
+   - `cmtype: "road_marking"` (point) — a `highway=stop`, `give_way` or
+     `traffic_signals` node, with `directions`, `width`, `lanes`, `oneway` and
+     `turn_lanes` for stop lines and lane arrows;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. The plain `crossing`
      is data-only: the frontend does not draw it, but it slows vehicles as they
@@ -73,7 +76,7 @@ The project has two halves:
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
-   playground, monument, construction, crosswalk).
+   playground, monument, construction, crosswalk, road_marking).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -286,6 +289,20 @@ one mesh per tile. They sit a few centimetres above the ground so they do not z-
 basemap, and are clickable with a "Zebra crossing" popup and OSM link. The plain
 `crossing` point still drives the cosmetic vehicle slowdown; the two features
 share an id.
+
+### Stop lines and lane arrows
+
+`highway=stop`, `highway=give_way` and `highway=traffic_signals` nodes become
+`cmtype: "road_marking"` points carrying the road's approach `directions`, width,
+lane count and `turn:lanes`. tilegen uses `direction=forward/backward` on stop
+and give-way nodes (relative to the matched way), `oneway` and, for signals
+without a direction, both approaches. The frontend
+(`src/elements3d/road_marking.ts`) draws a solid white stop line 3.2 m before
+the node on the approach half of a two-way road (the full width when one-way),
+or a dashed give-way line, plus one white lane arrow per approach lane where
+there are at least two lanes; `turn:lanes` turns the arrow. One merged mesh per
+tile (kind `road_marking`), with a thin dark edge for contrast. These are
+painted markings, so there is no popup and no toggle.
 
 ### Bridges and tunnels
 
