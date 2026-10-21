@@ -41,6 +41,8 @@ The project has two halves:
      builds a stone basin, water surface and jet;
    - `cmtype: "transit_stop"` (point) — a metro entrance, tram stop or bus stop
      (`stop`), with `name` and `shelter` when OSM has them;
+   - `cmtype: "terrace"` (point) — a cafe/restaurant/bar with
+     `outdoor_seating`, carrying the amenity and name for the popup;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -61,7 +63,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church, cemetery, furniture, fountain, transit).
+   water, church, cemetery, furniture, fountain, transit, terrace).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -226,6 +228,15 @@ name, its kind and the OSM link.
 
 Platforms and the rail tracks themselves are not part of this pass yet; the
 precomputed trains still float over the basemap.
+
+### Outdoor terraces
+
+Food and drink places tagged with `outdoor_seating` become a point feature
+(`cmtype: "terrace"`, with the amenity and name). The frontend
+(`src/elements3d/terrace.ts`) lays out one or two umbrellas with tables and three
+chairs each, merged into one Lambert mesh per tile. The umbrellas are seeded
+cream/red/green/blue; the terrace is clickable and shows the place name, the
+terrace kind and the OSM link. No shadows.
 
 ### Bridges and tunnels
 

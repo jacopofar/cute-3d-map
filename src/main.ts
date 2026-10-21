@@ -25,6 +25,7 @@ import type {
   BuildingInfo,
   FountainInfo,
   FurnitureInfo,
+  TerraceInfo,
   TransitInfo,
   LampSpot,
   ParkedCar,
@@ -233,6 +234,8 @@ class CoolMap {
   private loadedFountains: { [key: string]: FountainInfo[] } = {};
   // transit stops per loaded tile, for click-picking
   private loadedTransit: { [key: string]: TransitInfo[] } = {};
+  // outdoor terraces per loaded tile, for click-picking
+  private loadedTerraces: { [key: string]: TerraceInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -896,6 +899,7 @@ class CoolMap {
     this.loadedFurniture = {};
     this.loadedFountains = {};
     this.loadedTransit = {};
+    this.loadedTerraces = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -942,7 +946,8 @@ class CoolMap {
           kind === "furniture" ||
           kind === "fountain" ||
           kind === "transit_stop" ||
-          kind === "metro_sign"
+          kind === "metro_sign" ||
+          kind === "terrace"
         ) {
           pickable.push(mesh);
         }
@@ -982,6 +987,12 @@ class CoolMap {
     ) {
       const info = this.transitAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectTransit(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "terrace") {
+      const info = this.terraceAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectTerrace(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1200,6 +1211,60 @@ class CoolMap {
       }
     }
     return best;
+  }
+
+  private terraceAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): TerraceInfo | undefined {
+    const candidates = this.loadedTerraces[tileKey] ?? [];
+    let best: TerraceInfo | undefined;
+    let bestSq = 25;
+    for (const info of candidates) {
+      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
+      const dx = m[0] - point.x;
+      const dy = m[1] - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = info;
+      }
+    }
+    return best;
+  }
+
+  private selectTerrace(info: TerraceInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 2.2);
+
+    const labels: Record<string, string> = {
+      cafe: "Cafe terrace",
+      restaurant: "Restaurant terrace",
+      bar: "Bar terrace",
+      pub: "Pub terrace",
+      fast_food: "Fast-food terrace",
+      ice_cream: "Ice-cream terrace",
+      biergarten: "Beer garden",
+    };
+    const label = labels[info.kind] ?? "Outdoor terrace";
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      label,
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
   }
 
   private highlightPoint(x: number, y: number, radius: number): void {
@@ -1469,6 +1534,7 @@ class CoolMap {
         delete this.loadedFurniture[k];
         delete this.loadedFountains[k];
         delete this.loadedTransit[k];
+        delete this.loadedTerraces[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1523,6 +1589,7 @@ class CoolMap {
         furniture,
         fountains,
         transit,
+        terraces,
         traffic,
         crossings,
         signals,
@@ -1554,6 +1621,7 @@ class CoolMap {
       this.loadedFurniture[tileKey] = furniture;
       this.loadedFountains[tileKey] = fountains;
       this.loadedTransit[tileKey] = transit;
+      this.loadedTerraces[tileKey] = terraces;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

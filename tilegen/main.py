@@ -683,6 +683,72 @@ def furniture_kind(tags) -> str | None:
     return None
 
 
+# food/drink places whose outdoor seating we can turn into a terrace; a stray
+# pharmacy or bench with the tag is not a cafe
+TERRACE_AMENITIES = frozenset(
+    {"restaurant", "cafe", "bar", "pub", "fast_food", "ice_cream", "biergarten"}
+)
+
+
+def is_terrace(tags) -> bool:
+    value = tags.get("outdoor_seating")
+    return (
+        value is not None and value != "no" and tags.get("amenity") in TERRACE_AMENITIES
+    )
+
+
+def terrace_place(point, road, building_tree, buildings, offset_max: float = 8.0):
+    """Move a terrace from the cafe point to the nearest point by the road that
+    is not inside a building. OSM often puts the cafe node inside the building;
+    a small step toward the cafe from the road stays at the kerb only until the
+    facade starts, so test candidates from the widest inward step and take the
+    first one outside every footprint."""
+    nearest = road.interpolate(road.project(point))
+    distance = point.distance(nearest)
+    if distance < 1e-6:
+        return nearest
+    ux = (point.x - nearest.x) / distance
+    uy = (point.y - nearest.y) / distance
+    candidates = [offset_max, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.5]
+    for offset in candidates:
+        if offset > distance:
+            continue
+        candidate = Point(nearest.x + ux * offset, nearest.y + uy * offset)
+        hits = building_tree.query(candidate)
+        if not any(buildings[int(index)].contains(candidate) for index in hits):
+            return candidate
+    return nearest
+
+
+def to_terrace(feature_id, tags, s, position=None) -> dict | None:
+    """An outdoor terrace as a point. The umbrellas/tables are procedural; the
+    amenity value only picks the popup label and the OSM link. `position` is the
+    precomputed sidewalk point (see terrace_positions_from_parquet)."""
+    if not is_terrace(tags):
+        return None
+    if position is not None:
+        point = Point(position)
+    elif s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {"cmtype": "terrace", "terrace": tags["amenity"]}
+    if tags.get("name"):
+        properties["name"] = tags["name"]
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": properties,
+    }
+
+
 def transit_kind(tags) -> str | None:
     """The stop kind a tag pair names, or None. Metro wins over a bus stop on
     the same node; trams are their own kind because the sign is the same but the
@@ -887,12 +953,87 @@ def to_aeroway(feature_id, tags, s) -> dict | None:
     }
 
 
+def terrace_positions_from_parquet(
+    input_parquet: Path,
+) -> dict[str, tuple[float, float]]:
+    """Sidewalk positions for the outdoor terraces: nearest road point plus a
+    short step toward the cafe. One STRtree over the road lines, so the cost is
+    paid once per generation."""
+    terraces = duckdb.execute(
+        f"""
+        select feature_id, tags, ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['outdoor_seating'] is not null
+          and tags['outdoor_seating'] != 'no'
+          and tags['amenity'] in {_in_list(TERRACE_AMENITIES)}
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    road_rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['highway'] is not null
+          and tags['highway'] not in ('motorway', 'motorway_link', 'trunk', 'trunk_link')
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    building_rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['building'] is not null
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    buildings = []
+    for (wkb,) in building_rows:
+        geometry = shapely.from_wkb(wkb)
+        if geometry.geom_type in ("Polygon", "MultiPolygon"):
+            buildings.append(geometry)
+    building_tree = shapely.STRtree(buildings)
+    lines = []
+    for (wkb,) in road_rows:
+        geometry = shapely.from_wkb(wkb)
+        parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
+        lines.extend(part for part in parts if isinstance(part, LineString))
+    if not lines:
+        return {}
+    tree = shapely.STRtree(lines)
+    positions: dict[str, tuple[float, float]] = {}
+    for feature_id, tags, wkb in terraces:
+        geometry = shapely.from_wkb(wkb)
+        if geometry.geom_type == "Point":
+            point = geometry
+        elif geometry.geom_type == "LineString":
+            point = geometry.interpolate(0.5, normalized=True)
+        elif geometry.geom_type in ("Polygon", "MultiPolygon"):
+            point = geometry.centroid
+        else:
+            continue
+        nearest = tree.query_nearest(point)
+        if len(nearest) == 0:
+            continue
+        placed = terrace_place(
+            point,
+            lines[int(nearest[0])],
+            building_tree,
+            buildings,
+        )
+        positions[str(feature_id)] = (placed.x, placed.y)
+    logger.info(
+        "terraces: %d cafe points moved to the nearest sidewalk", len(positions)
+    )
+    return positions
+
+
 def tile_to_geojson(
     data,
     tile_x: int,
     tile_y: int,
     zoom: int,
     distributions: dict[str, Distribution] | None = None,
+    terrace_positions: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[list, list]:
     """Build the render features (buildings, trees, water) and the raw-tag
     features.
@@ -935,6 +1076,15 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif is_terrace(tags):
+            ret.append(
+                to_terrace(
+                    feature_id,
+                    tags,
+                    s,
+                    (terrace_positions or {}).get(str(feature_id)),
+                )
+            )
         elif transit_kind(tags) is not None:
             ret.append(to_transit_stop(feature_id, tags, s))
         elif tags.get("amenity") == "fountain":
@@ -1337,6 +1487,7 @@ def parquet_to_tiles(
     # every building gets a color, roof shape and roof color: the real tag where
     # it has one, otherwise a sample from the dataset's own distribution
     distributions = building_distributions(input_parquet)
+    terrace_positions = terrace_positions_from_parquet(input_parquet)
     level_report(input_parquet)
     bb = duckdb.execute(
         """
@@ -1439,7 +1590,12 @@ def parquet_to_tiles(
             target_path_raw = target_folder_raw / str(x)
             target_path_raw.mkdir(parents=True, exist_ok=True)
         features, raw_features = tile_to_geojson(
-            features_by_tile.get((x, y), []), x, y, zoom_level, distributions
+            features_by_tile.get((x, y), []),
+            x,
+            y,
+            zoom_level,
+            distributions,
+            terrace_positions,
         )
         traffic_loops = traffic_by_tile.get((x, y))
         parking_here = parking_by_tile.get((x, y))

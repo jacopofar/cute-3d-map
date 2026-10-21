@@ -92,6 +92,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   into one Lambert mesh per tile (kind `transit_stop`); the signs are the
   separate `metro_sign` kind. Clickable with the OSM link. Platforms and rails
   are not in this pass.
+- `src/elements3d/terrace.ts` — outdoor seating for cafes/restaurants/bars tagged
+  `outdoor_seating`: one or two procedural umbrellas with tables and chairs,
+  merged per tile (kind `terrace`), clickable with the OSM link. No shadows.
 - `src/elements3d/fountain.ts` — `amenity=fountain` as a low stone basin with a
   still water disc and, for larger ones, a central pedestal, bowl and jet. tilegen
   emits a point with the equivalent diameter of a mapped area (clamped) and the
@@ -185,8 +188,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
-  `traffic_signal`, `crossing` (the road/rail network is not emitted; routes
-  come from `traffic`).
+  `terrace`, `traffic_signal`, `crossing` (the road/rail network is not emitted;
+  routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -228,6 +231,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **terrace** — a food/drink place with `outdoor_seating`, emitted as a point; the
+  frontend draws umbrellas, tables and chairs and makes it clickable. The OSM
+  amenity picks the popup label.
 - **transit stop** — a metro entrance, tram stop or bus stop emitted as a point
   with `stop`, `name` and `shelter`; the frontend gives the metro its red M totem
   and the bus/tram the yellow palina plus an optional shelter. Clickable.
