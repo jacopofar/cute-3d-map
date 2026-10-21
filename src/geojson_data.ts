@@ -14,6 +14,8 @@ import {
   transitStopMaterial,
 } from "./elements3d/transit";
 import { furniture, furnitureMaterial } from "./elements3d/furniture";
+import { monument, monumentMaterial } from "./elements3d/monument";
+import { playground, playgroundMaterial } from "./elements3d/playground";
 import { terrace, terraceMaterial } from "./elements3d/terrace";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
@@ -110,6 +112,8 @@ export function geoJSONtoGeometries(
     | "transit_stop"
     | "metro_sign"
     | "terrace"
+    | "playground"
+    | "monument"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -201,6 +205,22 @@ export function geoJSONtoGeometries(
       {
         kind: "terrace",
         geometries: terrace(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "playground") {
+    return [
+      {
+        kind: "playground",
+        geometries: playground(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "monument") {
+    return [
+      {
+        kind: "monument",
+        geometries: monument(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -307,6 +327,22 @@ export interface BuildingInfo {
 }
 
 // a street-furniture point, for click-picking + the OSM link
+export interface PlaygroundInfo {
+  id?: string;
+  name?: string;
+  lon: number;
+  lat: number;
+}
+
+export interface MonumentInfo {
+  id?: string;
+  name?: string;
+  kind: string;
+  memorial?: string;
+  lon: number;
+  lat: number;
+}
+
 export interface TerraceInfo {
   id?: string;
   name?: string;
@@ -384,6 +420,8 @@ export interface TileObjects {
   fountains: FountainInfo[];
   transit: TransitInfo[];
   terraces: TerraceInfo[];
+  playgrounds: PlaygroundInfo[];
+  monuments: MonumentInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -423,6 +461,8 @@ export async function objectsAt(
       fountains: [],
       transit: [],
       terraces: [],
+      playgrounds: [],
+      monuments: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -446,6 +486,8 @@ export async function objectsAt(
       fountains: [],
       transit: [],
       terraces: [],
+      playgrounds: [],
+      monuments: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -475,6 +517,8 @@ export async function objectsAt(
   const fountains: FountainInfo[] = [];
   const transit: TransitInfo[] = [];
   const terraces: TerraceInfo[] = [];
+  const playgrounds: PlaygroundInfo[] = [];
+  const monuments: MonumentInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -512,6 +556,12 @@ export async function objectsAt(
     } else if (cmtype === "terrace") {
       const info = terraceInfo(f);
       if (info) terraces.push(info);
+    } else if (cmtype === "playground") {
+      const info = playgroundInfo(f);
+      if (info) playgrounds.push(info);
+    } else if (cmtype === "monument") {
+      const info = monumentInfo(f);
+      if (info) monuments.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -555,17 +605,21 @@ export async function objectsAt(
                               ? metroSignMaterial()
                               : kind === "terrace"
                                 ? terraceMaterial
-                                : kind === "aeroway"
-                                ? aerowayMaterial
-                                : kind === "fence"
-                                  ? fenceMaterial
-                                  : kind === "bridge"
-                                    ? bridgeMaterial
-                                    : kind === "tunnel"
-                                      ? tunnelMaterial
-                                      : kind === "bench"
-                                        ? benchMaterial
-                                        : treeMaterial;
+                                : kind === "playground"
+                                  ? playgroundMaterial
+                                  : kind === "monument"
+                                    ? monumentMaterial
+                                    : kind === "aeroway"
+                                      ? aerowayMaterial
+                                      : kind === "fence"
+                                        ? fenceMaterial
+                                        : kind === "bridge"
+                                          ? bridgeMaterial
+                                          : kind === "tunnel"
+                                            ? tunnelMaterial
+                                            : kind === "bench"
+                                              ? benchMaterial
+                                              : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
@@ -607,6 +661,8 @@ export async function objectsAt(
     fountains,
     transit,
     terraces,
+    playgrounds,
+    monuments,
     traffic,
     crossings,
     signals,
@@ -643,6 +699,36 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+  };
+}
+
+// a playground for click-picking + the OSM link
+export function playgroundInfo(f: Geojson.Feature): PlaygroundInfo | null {
+  const props = f.properties ?? {};
+  const geom = f.geometry;
+  if (geom.type !== "Point") return null;
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    lon: geom.coordinates[0],
+    lat: geom.coordinates[1],
+  };
+}
+
+// a monument/memorial for click-picking + the OSM link
+export function monumentInfo(f: Geojson.Feature): MonumentInfo | null {
+  const props = f.properties ?? {};
+  const kind = props.kind;
+  if (typeof kind !== "string") return null;
+  const geom = f.geometry;
+  if (geom.type !== "Point") return null;
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    kind,
+    memorial: typeof props.memorial === "string" ? props.memorial : undefined,
+    lon: geom.coordinates[0],
+    lat: geom.coordinates[1],
   };
 }
 

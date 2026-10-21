@@ -43,6 +43,10 @@ The project has two halves:
      (`stop`), with `name` and `shelter` when OSM has them;
    - `cmtype: "terrace"` (point) — a cafe/restaurant/bar with
      `outdoor_seating`, carrying the amenity and name for the popup;
+   - `cmtype: "playground"` (point) — a `leisure=playground` with a
+     size (equivalent diameter) for the equipment spread;
+   - `cmtype: "monument"` (point) — a `historic=monument`/`memorial` or
+     `man_made=obelisk`, with the kind and `memorial` sub-kind for the look;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -63,7 +67,8 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church, cemetery, furniture, fountain, transit, terrace).
+   water, church, cemetery, furniture, fountain, transit, terrace,
+   playground, monument).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -240,6 +245,19 @@ one or two umbrellas with tables and three chairs each, merged into one Lambert
 mesh per tile. The umbrellas are seeded
 cream/red/green/blue; the terrace is clickable and shows the place name, the
 terrace kind and the OSM link. No shadows.
+
+### Playgrounds and monuments
+
+`leisure=playground` becomes a point with an equivalent diameter (6–18 m). The
+frontend (`src/elements3d/playground.ts`) draws a sand/rubber patch with a swing,
+a slide, a spring rider and, for wider patches, a climbing frame, merged into one
+Lambert mesh per tile and clickable.
+
+`historic=monument`, `historic=memorial` and `man_made=obelisk` become
+`cmtype: "monument"` points carrying the `kind` and `memorial` sub-kind. The
+frontend (`src/elements3d/monument.ts`) picks a pedestal/statue, bust, obelisk,
+war memorial, stele, plaque or Stolperstein from those tags, merges the pieces
+per tile and makes each one clickable with its name and OSM link.
 
 ### Bridges and tunnels
 

@@ -749,6 +749,83 @@ def to_terrace(feature_id, tags, s, position=None) -> dict | None:
     }
 
 
+def is_playground(tags) -> bool:
+    return tags.get("leisure") == "playground"
+
+
+def to_playground(feature_id, tags, s) -> dict | None:
+    """A playground as a point with a radius-like size. The equipment is
+    procedural; a mapped polygon gives a sensible spread, a node a default
+    ten-meter playground."""
+    if not is_playground(tags):
+        return None
+    size = 10.0
+    if s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+        area = area_square_meters(s)
+        size = max(6.0, min(18.0, 2.0 * math.sqrt(area / math.pi)))
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {"cmtype": "playground", "size": round(size, 2)}
+    if tags.get("name"):
+        properties["name"] = tags["name"]
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": properties,
+    }
+
+
+def monument_kind(tags) -> str | None:
+    if tags.get("man_made") == "obelisk":
+        return "obelisk"
+    if tags.get("historic") == "monument":
+        return "monument"
+    if tags.get("historic") == "memorial":
+        return "memorial"
+    return None
+
+
+def is_monument(tags) -> bool:
+    return monument_kind(tags) is not None
+
+
+def to_monument(feature_id, tags, s) -> dict | None:
+    """A monument/memorial as a point; the frontend picks a pedestal/statue/
+    obelisk/plaque from the kind and the `memorial` sub-tag."""
+    kind = monument_kind(tags)
+    if kind is None:
+        return None
+    if s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {"cmtype": "monument", "kind": kind}
+    if tags.get("memorial"):
+        properties["memorial"] = tags["memorial"]
+    if tags.get("name"):
+        properties["name"] = tags["name"]
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": properties,
+    }
+
+
 def transit_kind(tags) -> str | None:
     """The stop kind a tag pair names, or None. Metro wins over a bus stop on
     the same node; trams are their own kind because the sign is the same but the
@@ -1076,6 +1153,10 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif is_playground(tags):
+            ret.append(to_playground(feature_id, tags, s))
+        elif is_monument(tags):
+            ret.append(to_monument(feature_id, tags, s))
         elif is_terrace(tags):
             ret.append(
                 to_terrace(

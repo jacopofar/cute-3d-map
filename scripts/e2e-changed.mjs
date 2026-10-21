@@ -63,6 +63,11 @@ const rules = [
     /elements3d\/(cemetery|tombstone_rows)\.ts$/,
     () => ["e2e/cemetery.spec.ts"],
   ],
+  [/elements3d\/terrace\.ts$/, () => ["e2e/terrace.spec.ts"]],
+  [
+    /elements3d\/(playground|monument)\.ts$/,
+    () => ["e2e/playground_monument.spec.ts"],
+  ],
   [
     /elements3d\/(facade|facade_layout|building|glass|roof|roof_layout)\.ts$/,
     () => ["e2e/facade.spec.ts"],
