@@ -62,5 +62,39 @@ test("stop lines and lane arrows load at Viale Zara", async ({ page }) => {
   expect(state.maxHeight).toBeGreaterThan(0.03);
   expect(state.maxHeight).toBeLessThan(0.1);
   expect(state.triangles).toBeGreaterThan(100);
+
+  // night: the paint is Lambert and dimmed, so it does not feed the bloom
+  const night = await page.evaluate(() => {
+    const slider = document.querySelector("#time-slider") as HTMLInputElement;
+    slider.value = "1";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    let material: any = null;
+    (
+      window as unknown as { __coolMap: any }
+    ).__coolMap.customLayer.scene.traverse((object: any) => {
+      if (object.userData?.kind === "road_marking" && !material) {
+        material = object.material;
+      }
+    });
+    return { type: material?.type, r: material?.color?.r };
+  });
+  expect(night.type).toBe("MeshLambertMaterial");
+  expect(night.r).toBeLessThan(0.5);
+
+  const day = await page.evaluate(() => {
+    const slider = document.querySelector("#time-slider") as HTMLInputElement;
+    slider.value = "13";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    let material: any = null;
+    (
+      window as unknown as { __coolMap: any }
+    ).__coolMap.customLayer.scene.traverse((object: any) => {
+      if (object.userData?.kind === "road_marking" && !material) {
+        material = object.material;
+      }
+    });
+    return { r: material?.color?.r };
+  });
+  expect(day.r).toBeGreaterThan(0.9);
   expect(errors).toEqual([]);
 });

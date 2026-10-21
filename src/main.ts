@@ -48,8 +48,10 @@ import {
   tileFacadeDetail,
   windowMaterial,
 } from "./elements3d/facade.ts";
+import { crosswalkMaterial } from "./elements3d/crosswalk.ts";
 import { fountainWaterMaterial } from "./elements3d/fountain.ts";
 import { glassMaterial } from "./elements3d/glass.ts";
+import { roadMarkingMaterial } from "./elements3d/road_marking.ts";
 import { greenMaterial } from "./elements3d/green.ts";
 import {
   cameraCenter,
@@ -2146,6 +2148,12 @@ class CoolMap {
         lerpColor(0x11151c, 0x8a8f95, 1 - lighting.night),
       );
     }
+    // Painted road markings are lit, but a pure white Lambert still reads
+    // brighter than the night street and feeds the bloom. Dim the whole paint
+    // material with the same night factor; daylight stays pure white.
+    const paint = 1 - 0.72 * lighting.night;
+    crosswalkMaterial.color.setScalar(paint);
+    roadMarkingMaterial.color.setScalar(paint);
     if (this.customLayer.renderer) {
       this.customLayer.renderer.toneMappingExposure = lighting.exposure;
     }
