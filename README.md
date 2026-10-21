@@ -280,9 +280,9 @@ Marked `highway=crossing` nodes become `cmtype: "crosswalk"` points. tilegen
 matches each node to its road way and carries the local `bearing` and the full
 road `width` (from `width`, then `lanes`, then the highway class); unmarked and
 informal crossings, tunnel/bridge decks and nodes with no matching road are
-skipped. The frontend (`src/elements3d/crosswalk.ts`) lays five white bars
-across the carriageway, turns them with the road and merges them into one mesh
-per tile. They sit a few centimetres above the ground so they do not z-fight the
+skipped. The frontend (`src/elements3d/crosswalk.ts`) lays white bars along the
+carriageway, repeated across it, turns them with the road and merges them into
+one mesh per tile. They sit a few centimetres above the ground so they do not z-fight the
 basemap, and are clickable with a "Zebra crossing" popup and OSM link. The plain
 `crossing` point still drives the cosmetic vehicle slowdown; the two features
 share an id.

@@ -92,9 +92,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   into one Lambert mesh per tile (kind `transit_stop`); the signs are the
   separate `metro_sign` kind. Clickable with the OSM link. Platforms and rails
   are not in this pass.
-- `src/elements3d/crosswalk.ts` — marked `highway=crossing` nodes as five white
-  zebra bars across the road, using the tile's `bearing` and `width`; merged per
-  tile (kind `crosswalk`), clickable. The plain `crossing` point stays data-only
+- `src/elements3d/crosswalk.ts` — marked `highway=crossing` nodes as white zebra
+  bars along the road, repeated across it, using the tile's `bearing` and
+  `width`; merged per tile (kind `crosswalk`), clickable. The plain `crossing` point stays data-only
   for the cosmetic traffic slowdown.
 - `src/elements3d/construction.ts` — clipped `landuse=construction` sites as
   dirt/gravel ground with containers, a material stack and one to three
@@ -253,8 +253,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **construction** — a clipped `landuse=construction` area with dirt, containers
   and procedural tower cranes (only on the centroid tile). Clickable.
 - **crosswalk** — a marked `highway=crossing` with the road bearing and width;
-  the frontend draws five zebra bars, clickable. The plain `crossing` point is
-  kept only for the traffic slowdown.
+  the frontend draws zebra bars along the road, repeated across it; clickable.
+  The plain `crossing` point is kept only for the traffic slowdown.
 - **playground** — a `leisure=playground` point with a size; the frontend draws
   sand, swings, a slide, a spring rider and a climbing frame. Clickable.
 - **monument** — a `historic=monument`/`memorial` or `man_made=obelisk` point;
