@@ -36,6 +36,9 @@ The project has two halves:
    - `cmtype: "furniture"` (point) — a bollard, bin, bike rack, post box,
      drinking fountain, info board or hydrant. The `furniture` property picks
      the low-poly prop; the frontend merges a tile's props into one mesh;
+   - `cmtype: "fountain"` (point) — an `amenity=fountain`, with an equivalent
+     diameter (`size`) so a mapped basin gets a sensible circle; the frontend
+     builds a stone basin, water surface and jet;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -56,7 +59,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church, cemetery, furniture).
+   water, church, cemetery, furniture, fountain).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -195,6 +198,16 @@ cast shadows and darken at night with the benches and buildings.
 
 Benches remain their own layer (they carry a facing and have a checkbox); the
 street-furniture layer is always visible like trees and water.
+
+### Fountains
+
+`amenity=fountain` becomes a point with a `size` (the equivalent diameter of a
+mapped area, clamped to 1.5–12 m; a node keeps 2.4 m). The frontend
+(`src/elements3d/fountain.ts`) builds a stone basin with a blue water surface
+and, for the larger ones, a central pedestal, bowl and jet, merged into one
+Lambert mesh per fountain. The water is a still disc rather than the canal
+shader; animating the jet is the next step. Clicking one rings the basin and
+opens a popup with its name (when OSM has one) and the OSM link.
 
 ### Bridges and tunnels
 

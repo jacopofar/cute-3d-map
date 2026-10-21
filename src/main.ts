@@ -23,6 +23,7 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
+  FountainInfo,
   FurnitureInfo,
   LampSpot,
   ParkedCar,
@@ -227,6 +228,8 @@ class CoolMap {
   private loadedWater: { [key: string]: WaterInfo[] } = {};
   // street-furniture points per loaded tile, for click-picking
   private loadedFurniture: { [key: string]: FurnitureInfo[] } = {};
+  // fountains per loaded tile, for click-picking
+  private loadedFountains: { [key: string]: FountainInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -888,6 +891,7 @@ class CoolMap {
     this.loadedBuildings = {};
     this.loadedWater = {};
     this.loadedFurniture = {};
+    this.loadedFountains = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -931,7 +935,8 @@ class CoolMap {
         if (
           kind === "building" ||
           (kind === "water" && mesh.visible) ||
-          kind === "furniture"
+          kind === "furniture" ||
+          kind === "fountain"
         ) {
           pickable.push(mesh);
         }
@@ -956,6 +961,12 @@ class CoolMap {
     if (hit.object.userData.kind === "furniture") {
       const info = this.furnitureAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectFurniture(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "fountain") {
+      const info = this.fountainAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectFountain(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1082,6 +1093,72 @@ class CoolMap {
       osmLink(info.id),
     ].filter(Boolean);
     if (lines.length === 0) return;
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+  }
+
+  private fountainAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): FountainInfo | undefined {
+    const candidates = this.loadedFountains[tileKey] ?? [];
+    let best: FountainInfo | undefined;
+    let bestSq = Infinity;
+    for (const info of candidates) {
+      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
+      const dx = m[0] - point.x;
+      const dy = m[1] - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = info;
+      }
+    }
+    return best;
+  }
+
+  private selectFountain(info: FountainInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    const radius = Math.max(1.5, info.size / 2 + 0.6);
+    const ring: THREE.Vector3[] = [];
+    for (let i = 0; i < 32; i++) {
+      const angle = (i / 32) * Math.PI * 2;
+      ring.push(
+        new THREE.Vector3(
+          x + Math.cos(angle) * radius,
+          y + Math.sin(angle) * radius,
+          0.15,
+        ),
+      );
+    }
+    const outline = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(ring),
+      new THREE.LineBasicMaterial({
+        color: 0xffcc00,
+        depthTest: false,
+        transparent: true,
+      }),
+    );
+    outline.renderOrder = 999;
+    this.customLayer.scene.add(outline);
+    this.highlight = outline;
+
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      "Fountain",
+      osmLink(info.id),
+    ].filter(Boolean);
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
       .setHTML(lines.join("<br>"))
@@ -1300,6 +1377,7 @@ class CoolMap {
         delete this.loadedBuildings[k];
         delete this.loadedWater[k];
         delete this.loadedFurniture[k];
+        delete this.loadedFountains[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1352,6 +1430,7 @@ class CoolMap {
         buildings,
         water,
         furniture,
+        fountains,
         traffic,
         crossings,
         signals,
@@ -1381,6 +1460,7 @@ class CoolMap {
       this.loadedBuildings[tileKey] = buildings;
       this.loadedWater[tileKey] = water;
       this.loadedFurniture[tileKey] = furniture;
+      this.loadedFountains[tileKey] = fountains;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

@@ -605,6 +605,21 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_to_fountain_sizes_a_mapped_basin():
+    point = shapely.Point(9.19, 45.46)
+    node = main.to_fountain(1, {"amenity": "fountain"}, point)
+    assert node is not None
+    assert node["properties"] == {"cmtype": "fountain", "size": 2.4}
+
+    basin = shapely.box(9.19, 45.46, 9.1902, 45.4602)
+    area = main.to_fountain(2, {"amenity": "fountain", "name": "Fontana"}, basin)
+    assert area is not None
+    assert area["properties"]["name"] == "Fontana"
+    assert 1.5 <= area["properties"]["size"] <= 12
+    assert area["geometry"]["type"] == "Point"
+    assert main.to_fountain(3, {"amenity": "bench"}, point) is None
+
+
 def test_to_green_clips_a_park_to_the_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

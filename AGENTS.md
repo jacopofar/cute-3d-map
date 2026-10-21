@@ -80,6 +80,11 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   kind; areas collapse to a centroid and a line keeps its bearing for a kerb-side
   rack. One Lambert mesh per tile (kind `furniture`), no shadows; benches stay
   their own layer because they carry a facing and a checkbox.
+- `src/elements3d/fountain.ts` — `amenity=fountain` as a low stone basin with a
+  still water disc and, for larger ones, a central pedestal, bowl and jet. tilegen
+  emits a point with the equivalent diameter of a mapped area (clamped) and the
+  frontend merges the parts into one Lambert mesh per tile (kind `fountain`).
+  Clicking rings the basin and shows the OSM link; the jet is not animated yet.
 - `src/elements3d/bridge.ts` — bridges and tunnels. A bridge way becomes a
   raised slab (deck + parapets, both ends ramped to the ground) and a
   `man_made=bridge` footprint a flat deck slab; a tunnel becomes a dark portal
@@ -167,8 +172,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row`, `water`, `cemetery`, `furniture`, `traffic_signal`, `crossing`
-  (the road/rail network is not emitted; routes come from `traffic`).
+  `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `traffic_signal`,
+  `crossing` (the road/rail network is not emitted; routes come from
+  `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -210,6 +216,9 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **fountain** — an `amenity=fountain` point with an equivalent basin diameter;
+  the frontend draws a stone basin, water disc and (for larger ones) a pedestal
+  and jet. Clickable like a building, with the OSM link.
 - **street furniture** — a bollard, bin, bike rack, post box, drinking
   fountain, info board or hydrant emitted as a point with a `furniture` kind;
   the frontend builds a few boxes and merges the tile into one mesh. Benches are
