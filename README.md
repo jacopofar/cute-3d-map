@@ -33,6 +33,9 @@ The project has two halves:
    - `cmtype: "cemetery"` — a `landuse=cemetery` or `amenity=grave_yard`
      polygon, **clipped to the tile** like a park; the frontend fills it with
      procedural rows of tombstones;
+   - `cmtype: "furniture"` (point) — a bollard, bin, bike rack, post box,
+     drinking fountain, info board or hydrant. The `furniture` property picks
+     the low-poly prop; the frontend merges a tile's props into one mesh;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -53,7 +56,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church, cemetery).
+   water, church, cemetery, furniture).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -178,6 +181,20 @@ are one geometry and one Lambert material per tile (kind `cemetery`), so a tile
 is one draw call and the stones darken at night with the rest of the scene. They
 are small enough not to cast shadows. Parking and street lamps skip ways whose
 midpoint is inside a cemetery, so the grave paths do not fill with parked cars.
+
+### Street furniture
+
+Bollards, bins, bike racks, post boxes, drinking fountains, info boards and
+hydrants are emitted as point features (`cmtype: "furniture"`, with a
+`furniture` kind) and drawn as simple low-poly boxes by
+`src/elements3d/furniture.ts`. Areas (a bike-parking lot) collapse to their
+centroid; a line (a rack mapped as a way) keeps its bearing so the rack lines up
+with the kerb. A whole tile merges into one Lambert mesh (kind `furniture`), so
+the density costs one draw call per tile, not one per object. The props do not
+cast shadows and darken at night with the benches and buildings.
+
+Benches remain their own layer (they carry a facing and have a checkbox); the
+street-furniture layer is always visible like trees and water.
 
 ### Bridges and tunnels
 

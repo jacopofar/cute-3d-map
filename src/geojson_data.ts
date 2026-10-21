@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
+import { furniture, furnitureMaterial } from "./elements3d/furniture";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
 import { green, greenMaterial } from "./elements3d/green";
@@ -92,6 +93,7 @@ export function geoJSONtoGeometries(
     | "water"
     | "green"
     | "cemetery"
+    | "furniture"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -156,6 +158,14 @@ export function geoJSONtoGeometries(
       {
         kind: "cemetery",
         geometries: cemetery(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "furniture") {
+    return [
+      {
+        kind: "furniture",
+        geometries: furniture(originMeters, scaleFactor, f),
       },
     ];
   }

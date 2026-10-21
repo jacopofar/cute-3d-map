@@ -74,6 +74,12 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   gaps, capped with wider spacing), unit-tested in `tombstone_rows.test.ts`.
   The stones are one merged Lambert mesh per tile (kind `cemetery`), and there
   is no 3D ground, so the basemap's cemetery paths stay visible.
+- `src/elements3d/furniture.ts` / `box_builder.ts` — street furniture
+  (bollards, bins, bike racks, post boxes, drinking fountains, info boards,
+  hydrants) as merged low-poly props. tilegen emits a point with a `furniture`
+  kind; areas collapse to a centroid and a line keeps its bearing for a kerb-side
+  rack. One Lambert mesh per tile (kind `furniture`), no shadows; benches stay
+  their own layer because they carry a facing and a checkbox.
 - `src/elements3d/bridge.ts` — bridges and tunnels. A bridge way becomes a
   raised slab (deck + parapets, both ends ramped to the ground) and a
   `man_made=bridge` footprint a flat deck slab; a tunnel becomes a dark portal
@@ -161,8 +167,8 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   tiles from it.
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
-  `tree_row`, `water`, `cemetery`, `traffic_signal`, `crossing` (the road/rail
-  network is not emitted; routes come from `traffic`).
+  `tree_row`, `water`, `cemetery`, `furniture`, `traffic_signal`, `crossing`
+  (the road/rail network is not emitted; routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -204,6 +210,10 @@ frontend change as done. `uv run pytest` in `tilegen/` reports coverage
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **street furniture** — a bollard, bin, bike rack, post box, drinking
+  fountain, info board or hydrant emitted as a point with a `furniture` kind;
+  the frontend builds a few boxes and merges the tile into one mesh. Benches are
+  separate (facing + checkbox).
 - **cemetery** — a `landuse=cemetery` or `amenity=grave_yard` polygon, clipped
   to the tile and filled with procedural rows of tombstones over the basemap
   ground. The rows are laid out frontend-side from the polygon (the graves

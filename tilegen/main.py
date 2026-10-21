@@ -661,6 +661,58 @@ def to_green(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
+# small street furniture: one point per object, so the frontend can build a
+# low-poly prop and merge the tile's props into one mesh. Bench is handled
+# separately (it carries a direction); these are the anonymous pieces.
+FURNITURE_KINDS = (
+    ("barrier", "bollard", "bollard"),
+    ("amenity", "waste_basket", "bin"),
+    ("amenity", "bicycle_parking", "bike_rack"),
+    ("amenity", "post_box", "post_box"),
+    ("amenity", "drinking_water", "drinking_water"),
+    ("tourism", "information", "info_board"),
+    ("emergency", "fire_hydrant", "hydrant"),
+)
+
+
+def furniture_kind(tags) -> str | None:
+    """The prop kind a street-furniture tag wants, or None."""
+    for key, value, kind in FURNITURE_KINDS:
+        if tags.get(key) == value:
+            return kind
+    return None
+
+
+def to_furniture(feature_id, tags, s) -> dict | None:
+    """A street-furniture point. Areas (bike parking) collapse to their
+    centroid; a line (a rack mapped as a way) keeps its bearing so the frontend
+    can line the rack up with the kerb."""
+    kind = furniture_kind(tags)
+    if kind is None:
+        return None
+    angle = None
+    if s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        angle = line_bearing(s)
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {"cmtype": "furniture", "furniture": kind}
+    if angle is not None:
+        properties["angle"] = round(angle, 4)
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": properties,
+    }
+
+
 # barriers drawn as a line the frontend can build a fence band along. `fence` is
 # the core; a guard rail or a railing is the same shape with a metal color, so
 # they come along for free (the frontend colors by the `barrier` sub-kind).
@@ -806,6 +858,8 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif furniture_kind(tags) is not None:
+            ret.append(to_furniture(feature_id, tags, s))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
         elif is_cemetery(tags):

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
+import { BoxBuilder } from "./box_builder";
 import { hashSeed } from "./random";
 import { tombstoneSpots } from "./tombstone_rows";
 
@@ -20,7 +21,6 @@ import { tombstoneSpots } from "./tombstone_rows";
  */
 
 type Point = [number, number];
-type Triple = [number, number, number];
 
 // mid-gray stone: the basemap cemetery is a pale beige, so white marble would
 // disappear into it; a few pale stones keep the rows from looking uniform
@@ -48,112 +48,6 @@ export const cemeteryMaterial = new THREE.MeshLambertMaterial({
 
 function hashPoint(point: Point): number {
   return hashSeed(`${point[0].toFixed(6)},${point[1].toFixed(6)}`);
-}
-
-interface Buffers {
-  position: number[];
-  normal: number[];
-  uv: number[];
-  color: number[];
-}
-
-function pushVertex(
-  buffers: Buffers,
-  p: Triple,
-  n: Triple,
-  uv: [number, number],
-  color: THREE.Color,
-): void {
-  buffers.position.push(p[0], p[1], p[2]);
-  buffers.normal.push(n[0], n[1], n[2]);
-  buffers.uv.push(uv[0], uv[1]);
-  buffers.color.push(color.r, color.g, color.b);
-}
-
-function pushQuad(
-  buffers: Buffers,
-  a: Triple,
-  b: Triple,
-  c: Triple,
-  d: Triple,
-  normal: Triple,
-  color: THREE.Color,
-): void {
-  const e1: Triple = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const e2: Triple = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const cross: Triple = [
-    e1[1] * e2[2] - e1[2] * e2[1],
-    e1[2] * e2[0] - e1[0] * e2[2],
-    e1[0] * e2[1] - e1[1] * e2[0],
-  ];
-  if (cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2] < 0) {
-    [b, d] = [d, b];
-  }
-  pushVertex(buffers, a, normal, [0, 0], color);
-  pushVertex(buffers, b, normal, [1, 0], color);
-  pushVertex(buffers, c, normal, [1, 1], color);
-  pushVertex(buffers, a, normal, [0, 0], color);
-  pushVertex(buffers, c, normal, [1, 1], color);
-  pushVertex(buffers, d, normal, [0, 1], color);
-}
-
-function pushBox(
-  buffers: Buffers,
-  cx: number,
-  cy: number,
-  baseZ: number,
-  width: number,
-  depth: number,
-  height: number,
-  angle: number,
-  color: THREE.Color,
-): void {
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  const hx = width / 2;
-  const hy = depth / 2;
-  const hz = height / 2;
-  const corner = (x: number, y: number, z: number): Triple => [
-    cx + x * c - y * s,
-    cy + x * s + y * c,
-    baseZ + hz + z,
-  ];
-  const p000 = corner(-hx, -hy, -hz);
-  const p100 = corner(hx, -hy, -hz);
-  const p110 = corner(hx, hy, -hz);
-  const p010 = corner(-hx, hy, -hz);
-  const p001 = corner(-hx, -hy, hz);
-  const p101 = corner(hx, -hy, hz);
-  const p111 = corner(hx, hy, hz);
-  const p011 = corner(-hx, hy, hz);
-  const nx = c;
-  const ny = s;
-  // normals rotate with the box; the top/bottom stay on z
-  pushQuad(buffers, p000, p010, p110, p100, [0, 0, -1], color);
-  pushQuad(buffers, p001, p011, p111, p101, [0, 0, 1], color);
-  pushQuad(buffers, p000, p001, p101, p100, [ny, -nx, 0], color);
-  pushQuad(buffers, p010, p110, p111, p011, [-ny, nx, 0], color);
-  pushQuad(buffers, p000, p010, p011, p001, [-nx, -ny, 0], color);
-  pushQuad(buffers, p100, p101, p111, p110, [nx, ny, 0], color);
-}
-
-function geometryFrom(buffers: Buffers): THREE.BufferGeometry | null {
-  if (buffers.position.length === 0) return null;
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(buffers.position, 3),
-  );
-  geometry.setAttribute(
-    "normal",
-    new THREE.Float32BufferAttribute(buffers.normal, 3),
-  );
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uv, 2));
-  geometry.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(buffers.color, 3),
-  );
-  return geometry;
 }
 
 function polygonOf(
@@ -188,7 +82,7 @@ export function cemetery(
     );
     if (rings.length === 0 || rings[0].length < 3) continue;
     const rng = (seed + hashPoint(rings[0][0])) >>> 0;
-    const buffers: Buffers = { position: [], normal: [], uv: [], color: [] };
+    const builder = new BoxBuilder();
 
     const spots =
       budget > 0
@@ -203,19 +97,8 @@ export function cemetery(
       );
       if (spot.kind === 0) {
         // a cross: a slim upright and a shorter bar, on a low plinth
-        pushBox(
-          buffers,
-          spot.x,
-          spot.y,
-          0.03,
-          0.78,
-          0.32,
-          0.18,
-          spot.angle,
-          stone,
-        );
-        pushBox(
-          buffers,
+        builder.box(spot.x, spot.y, 0.03, 0.78, 0.32, 0.18, spot.angle, stone);
+        builder.box(
           spot.x,
           spot.y,
           0.19,
@@ -225,8 +108,7 @@ export function cemetery(
           spot.angle,
           CROSS_COLOR,
         );
-        pushBox(
-          buffers,
+        builder.box(
           spot.x,
           spot.y,
           0.78,
@@ -238,8 +120,7 @@ export function cemetery(
         );
       } else {
         const height = SLAB_HEIGHT + ((spot.kind % 5) - 2) * 0.04;
-        pushBox(
-          buffers,
+        builder.box(
           spot.x,
           spot.y,
           0.03,
@@ -252,7 +133,7 @@ export function cemetery(
       }
     }
     budget -= spots.length;
-    const built = geometryFrom(buffers);
+    const built = builder.geometry();
     if (built) out.push(built);
   }
   return out;
