@@ -299,11 +299,33 @@ def road_width(tags) -> float:
 
 
 def way_bearing(line: LineString, point: Point) -> float:
-    """Compass bearing (degrees clockwise from north) of the line at the point."""
+    """Compass bearing (degrees clockwise from north) of the line at the point.
+
+    Use the segment that contains the projected point, not a 2 m chord across it:
+    a crossing often sits on a way vertex, and the chord across a bend gives a
+    diagonal bisector instead of either street's direction.
+    """
     distance = line.project(point)
-    before = line.interpolate(max(0.0, distance - 1.0))
-    after = line.interpolate(min(line.length, distance + 1.0))
-    return degrees(atan2(after.x - before.x, after.y - before.y)) % 360
+    coords = list(line.coords)
+    # The frontend rotates in model space, where x is scaled by cos(latitude).
+    # A raw lon/lat atan2 skews every diagonal road; project the segment first.
+    scale = cos(radians(point.y))
+    travelled = 0.0
+    for index in range(len(coords) - 1):
+        start, end = coords[index], coords[index + 1]
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if distance <= travelled + length + 1e-12:
+            return (
+                degrees(
+                    atan2(
+                        (end[0] - start[0]) * scale,
+                        end[1] - start[1],
+                    )
+                )
+                % 360
+            )
+        travelled += length
+    return 0.0
 
 
 def crossing_is_marked(tags) -> bool:
