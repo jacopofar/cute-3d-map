@@ -217,6 +217,62 @@ def test_to_stop_points_are_point_only():
     )
 
 
+def test_crosswalk_carries_the_road_bearing_and_width():
+    roads = {9: main.CrossingRoad(bearing=90.0, width=7.5)}
+    f = main.to_crosswalk(
+        9,
+        {"highway": "crossing", "crossing": "marked"},
+        geom("POINT (9.18 45.5)"),
+        roads,
+    )
+    assert f is not None
+    assert f["properties"]["cmtype"] == "crosswalk"
+    assert f["properties"]["bearing"] == 90.0
+    assert f["properties"]["width"] == 7.5
+    # no road match or an unmarked crossing means no zebra
+    assert (
+        main.to_crosswalk(
+            11,
+            {"highway": "crossing", "crossing": "marked"},
+            geom("POINT (9.18 45.5)"),
+            roads,
+        )
+        is None
+    )
+    assert (
+        main.to_crosswalk(
+            9,
+            {"highway": "crossing", "crossing": "unmarked"},
+            geom("POINT (9.18 45.5)"),
+            roads,
+        )
+        is None
+    )
+
+
+def test_crossing_markings_and_road_width():
+    assert main.crossing_is_marked({"crossing": "unmarked"}) is False
+    assert main.crossing_is_marked({"crossing": "informal"}) is False
+    assert main.crossing_is_marked({"crossing": "uncontrolled"}) is True
+    assert main.crossing_is_marked({"crossing:markings": "zebra"}) is True
+    assert main.crossing_is_marked({"crossing:markings": "dots"}) is False
+    assert (
+        main.crossing_is_marked({"crossing": "unmarked", "crossing:markings": "yes"})
+        is False
+    )
+    assert main.road_width({"highway": "residential"}) == 7.0
+    assert main.road_width({"highway": "residential", "width": "8.5 m"}) == 8.5
+    assert main.road_width({"highway": "primary", "lanes": "2"}) == 7.5
+    assert main.road_width({"highway": "primary", "lanes": "2;3"}) == 7.5
+
+
+def test_way_bearing_north_and_east():
+    north = shapely.LineString([(9.18, 45.5), (9.18, 45.51)])
+    east = shapely.LineString([(9.18, 45.5), (9.19, 45.5)])
+    assert main.way_bearing(north, shapely.Point(9.18, 45.505)) == 0.0
+    assert main.way_bearing(east, shapely.Point(9.185, 45.5)) == 90.0
+
+
 def test_bench_direction_maps_compass_and_degrees():
     for value, expected in (("N", 0.0), ("E", 90.0), ("S", 180.0), ("W", 270.0)):
         assert main.bench_direction({"direction": value}) == expected
