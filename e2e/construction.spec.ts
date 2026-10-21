@@ -44,19 +44,24 @@ test("construction sites load with cranes and open an OSM popup", async ({
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     let meshes = 0;
     let vertices = 0;
+    let maxHeight = 0;
     map.customLayer.scene.traverse((object: any) => {
       if (object.userData?.kind !== "construction") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;
+      object.geometry.computeBoundingBox();
+      maxHeight = Math.max(maxHeight, object.geometry.boundingBox.max.z);
     });
     return {
       meshes,
       vertices,
+      maxHeight,
       triangles: map.stats().byKind.construction?.triangles ?? 0,
     };
   });
   expect(state.meshes).toBeGreaterThan(0);
   expect(state.vertices).toBeGreaterThan(200);
+  expect(state.maxHeight).toBeGreaterThan(20);
   expect(state.triangles).toBeGreaterThan(100);
 
   const target = await page.evaluate(() => {
