@@ -49,12 +49,10 @@ export function metroSignMaterial(): THREE.MeshBasicMaterial {
   canvas.height = 160;
   const context = canvas.getContext("2d");
   if (context) {
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, 128, 160);
-    context.strokeStyle = "#c62828";
-    context.lineWidth = 8;
-    context.strokeRect(4, 4, 120, 152);
+    // the Milan sign is a red panel with a white M
     context.fillStyle = "#c62828";
+    context.fillRect(0, 0, 128, 160);
+    context.fillStyle = "#ffffff";
     context.font = "bold 104px Arial, sans-serif";
     context.textAlign = "center";
     context.textBaseline = "middle";
