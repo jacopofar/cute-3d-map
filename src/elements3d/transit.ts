@@ -27,7 +27,6 @@ const SIGN_DARK = new THREE.Color("#1e1f21");
 const GLASS = new THREE.Color("#a9c7d6");
 const ROOF = new THREE.Color("#3c4247");
 const WOOD = new THREE.Color("#8a5a33");
-const METRO_RED = new THREE.Color("#c62828");
 const STAIR = new THREE.Color("#1a1d20");
 
 export const transitStopMaterial = new THREE.MeshLambertMaterial({
@@ -105,8 +104,9 @@ function metroEntrance(b: BoxBuilder): void {
   b.box(0, 0, 0, 1.8, 2.6, 0.16, 0, STAIR);
   b.box(-0.95, 0, 0.16, 0.12, 2.6, 0.5, 0, METAL);
   b.box(0.95, 0, 0.16, 0.12, 2.6, 0.5, 0, METAL);
-  b.box(1.25, 0, 0, 0.62, 0.62, 0.22, 0, METRO_RED);
-  b.box(1.25, 0, 0.22, 0.12, 0.12, 3.1, 0, DARK);
+  // the pole comes straight out of the ground and stops at the panel's bottom
+  // edge (z = 1.7); no plinth, and it does not cross the sign
+  b.box(1.25, 0, 0, 0.12, 0.12, 1.7, 0, DARK);
 }
 
 function metroSign(): THREE.BufferGeometry {
