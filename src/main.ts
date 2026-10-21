@@ -23,6 +23,7 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
+  FurnitureInfo,
   LampSpot,
   ParkedCar,
   RunwayLine,
@@ -102,6 +103,16 @@ function escapeHtml(s: string): string {
 }
 
 // the OSM page for a feature id like "way/1234" (tilegen writes those ids as-is)
+const FURNITURE_LABELS: Record<string, string> = {
+  bollard: "Bollard",
+  bin: "Waste basket",
+  bike_rack: "Bicycle parking",
+  post_box: "Post box",
+  drinking_water: "Drinking fountain",
+  info_board: "Information board",
+  hydrant: "Fire hydrant",
+};
+
 function osmLink(id: string | undefined): string | null {
   if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
   const url = `https://www.openstreetmap.org/${id}`;
@@ -214,6 +225,8 @@ class CoolMap {
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   // water features per loaded tile, for click-picking
   private loadedWater: { [key: string]: WaterInfo[] } = {};
+  // street-furniture points per loaded tile, for click-picking
+  private loadedFurniture: { [key: string]: FurnitureInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -874,6 +887,7 @@ class CoolMap {
     this.loadedTraffic = {};
     this.loadedBuildings = {};
     this.loadedWater = {};
+    this.loadedFurniture = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -914,7 +928,11 @@ class CoolMap {
       for (const mesh of meshes) {
         const kind = mesh.userData.kind;
         // a hidden water layer is not pickable either
-        if (kind === "building" || (kind === "water" && mesh.visible)) {
+        if (
+          kind === "building" ||
+          (kind === "water" && mesh.visible) ||
+          kind === "furniture"
+        ) {
           pickable.push(mesh);
         }
       }
@@ -932,6 +950,12 @@ class CoolMap {
     if (hit.object.userData.kind === "water") {
       const info = this.waterAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectWater(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "furniture") {
+      const info = this.furnitureAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectFurniture(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -995,6 +1019,73 @@ class CoolMap {
       }
     }
     return best;
+  }
+
+  // the furniture point nearest a hit on the merged tile mesh
+  private furnitureAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): FurnitureInfo | undefined {
+    const candidates = this.loadedFurniture[tileKey] ?? [];
+    let best: FurnitureInfo | undefined;
+    let bestSq = 9;
+    for (const info of candidates) {
+      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
+      const dx = m[0] - point.x;
+      const dy = m[1] - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = info;
+      }
+    }
+    return best;
+  }
+
+  private selectFurniture(info: FurnitureInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    const ring: THREE.Vector3[] = [];
+    for (let i = 0; i < 24; i++) {
+      const angle = (i / 24) * Math.PI * 2;
+      ring.push(
+        new THREE.Vector3(
+          x + Math.cos(angle) * 1.3,
+          y + Math.sin(angle) * 1.3,
+          0.12,
+        ),
+      );
+    }
+    const outline = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(ring),
+      new THREE.LineBasicMaterial({
+        color: 0xffcc00,
+        depthTest: false,
+        transparent: true,
+      }),
+    );
+    outline.renderOrder = 999;
+    this.customLayer.scene.add(outline);
+    this.highlight = outline;
+
+    const label = FURNITURE_LABELS[info.kind] ?? info.kind.replace(/_/g, " ");
+    const lines = [
+      `<strong>${escapeHtml(label)}</strong>`,
+      osmLink(info.id),
+    ].filter(Boolean);
+    if (lines.length === 0) return;
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
   }
 
   private selectWater(info: WaterInfo, lngLat: LngLat) {
@@ -1111,7 +1202,10 @@ class CoolMap {
     if (this.highlight) {
       this.customLayer.scene.remove(this.highlight);
       // the outline's geometry and material are created per selection
-      if (this.highlight instanceof THREE.LineSegments) {
+      if (
+        this.highlight instanceof THREE.LineSegments ||
+        this.highlight instanceof THREE.LineLoop
+      ) {
         this.highlight.geometry.dispose();
         this.highlight.material.dispose();
       }
@@ -1205,6 +1299,7 @@ class CoolMap {
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
         delete this.loadedWater[k];
+        delete this.loadedFurniture[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1256,6 +1351,7 @@ class CoolMap {
         meshes,
         buildings,
         water,
+        furniture,
         traffic,
         crossings,
         signals,
@@ -1284,6 +1380,7 @@ class CoolMap {
       this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
       this.loadedWater[tileKey] = water;
+      this.loadedFurniture[tileKey] = furniture;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

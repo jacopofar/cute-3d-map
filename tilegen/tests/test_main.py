@@ -569,6 +569,42 @@ def test_to_cemetery_clips_and_keeps_the_name():
     assert main.to_cemetery(3, {"landuse": "cemetery"}, away, box) is None
 
 
+def test_furniture_kind_covers_the_street_props():
+    assert main.furniture_kind({"barrier": "bollard"}) == "bollard"
+    assert main.furniture_kind({"amenity": "waste_basket"}) == "bin"
+    assert main.furniture_kind({"amenity": "bicycle_parking"}) == "bike_rack"
+    assert main.furniture_kind({"amenity": "post_box"}) == "post_box"
+    assert main.furniture_kind({"amenity": "drinking_water"}) == "drinking_water"
+    assert main.furniture_kind({"tourism": "information"}) == "info_board"
+    assert main.furniture_kind({"emergency": "fire_hydrant"}) == "hydrant"
+    assert main.furniture_kind({"amenity": "bench"}) is None
+    assert main.furniture_kind({"building": "yes"}) is None
+
+
+def test_to_furniture_handles_points_lines_and_areas():
+    point = shapely.Point(9.19, 45.46)
+    bollard = main.to_furniture(1, {"barrier": "bollard"}, point)
+    assert bollard is not None
+    assert bollard["properties"] == {"cmtype": "furniture", "furniture": "bollard"}
+    assert bollard["geometry"]["type"] == "Point"
+
+    # a rack mapped as a line keeps its bearing and collapses to the midpoint
+    line = shapely.LineString([(9.19, 45.46), (9.1901, 45.46)])
+    rack = main.to_furniture(2, {"amenity": "bicycle_parking"}, line)
+    assert rack is not None
+    assert rack["properties"]["furniture"] == "bike_rack"
+    assert rack["properties"]["angle"] == 90.0
+    assert rack["geometry"]["type"] == "Point"
+
+    # and one mapped as an area collapses to the centroid
+    area = shapely.box(9.19, 45.46, 9.1901, 45.4601)
+    parking = main.to_furniture(3, {"amenity": "bicycle_parking"}, area)
+    assert parking is not None
+    assert parking["geometry"]["type"] == "Point"
+    assert "angle" not in parking["properties"]
+    assert main.to_furniture(4, {"amenity": "bench"}, point) is None
+
+
 def test_to_green_clips_a_park_to_the_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)
