@@ -39,7 +39,7 @@ describe("crosswalk", () => {
     // long along the road (y), repeated across it (x)
     expect(box.max.x - box.min.x).toBeGreaterThan(6.5);
     expect(box.max.y - box.min.y).toBeLessThan(4.5);
-    expect(box.max.z).toBeCloseTo(0.045, 5);
+    expect(box.max.z).toBeCloseTo(0.046, 5);
   });
 
   it("turns the bars with an east-west road", () => {
@@ -51,7 +51,7 @@ describe("crosswalk", () => {
   it("has position, normal, uv and color on every vertex", () => {
     const built = crosswalk(ORIGIN_METERS, SCALE, feature(20))[0];
     const count = built.getAttribute("position").count;
-    expect(count).toBe(7 * 6); // width 8 m gives seven bars, two triangles each
+    expect(count).toBe(7 * 12); // seven bars, a dark edge and a white face each
     for (const name of ["normal", "uv", "color"]) {
       expect(built.getAttribute(name).count).toBe(count);
     }

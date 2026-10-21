@@ -18,9 +18,12 @@ import { toModelCoords } from "../geojson_data";
 const STRIPE_WIDTH = 0.65;
 const STRIPE_GAP = 0.45;
 const CROSSING_DEPTH = 3.0;
-const LIFT = 0.045;
+const LIFT = 0.046;
+const OUTLINE_LIFT = 0.04;
+const OUTLINE = 0.07;
 const WHITE = new THREE.Color("#ffffff");
 const WORN = new THREE.Color("#f2f2f2");
+const OUTLINE_COLOR = new THREE.Color("#4c4c48");
 
 // Basic, not Lambert: road paint should read white rather than picking up the
 // warm/cool light of the scene. The bars are thin and retroreflective in reality.
@@ -84,8 +87,9 @@ export function crosswalk(
     u: number,
     w: number,
     c: THREE.Color,
+    z = LIFT,
   ) => {
-    position.push(px, py, LIFT);
+    position.push(px, py, z);
     normal.push(0, 0, 1);
     uv.push(u, w);
     color.push(c.r, c.g, c.b);
@@ -96,34 +100,50 @@ export function crosswalk(
     const cx = x + vx * offset;
     const cy = y + vy * offset;
     const c = i % 3 === 1 ? WORN : WHITE;
-    // a = -u,-v, b = +u,-v, c = +u,+v, d = -u,+v (counter-clockwise from +z)
-    const ax = cx - ux * halfDepth - vx * halfStripe;
-    const ay = cy - uy * halfDepth - vy * halfStripe;
-    const bx = cx + ux * halfDepth - vx * halfStripe;
-    const by = cy + uy * halfDepth - vy * halfStripe;
-    const cx2 = cx + ux * halfDepth + vx * halfStripe;
-    const cy2 = cy + uy * halfDepth + vy * halfStripe;
-    const dx = cx - ux * halfDepth + vx * halfStripe;
-    const dy = cy - uy * halfDepth + vy * halfStripe;
-    // The (u, v) frame is left-handed in world XY, so the corner order above
-    // can wind clockwise depending on the road bearing. Reverse it when needed;
-    // otherwise the whole zebra is backface-culled.
-    const cross = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax);
-    if (cross < 0) {
-      push(ax, ay, 0, 0, c);
-      push(cx2, cy2, 1, 1, c);
-      push(bx, by, 1, 0, c);
-      push(ax, ay, 0, 0, c);
-      push(dx, dy, 0, 1, c);
-      push(cx2, cy2, 1, 1, c);
-    } else {
-      push(ax, ay, 0, 0, c);
-      push(bx, by, 1, 0, c);
-      push(cx2, cy2, 1, 1, c);
-      push(ax, ay, 0, 0, c);
-      push(cx2, cy2, 1, 1, c);
-      push(dx, dy, 0, 1, c);
-    }
+    const addBar = (
+      depth: number,
+      stripe: number,
+      color: THREE.Color,
+      z: number,
+    ) => {
+      // a = -u,-v, b = +u,-v, c = +u,+v, d = -u,+v (counter-clockwise from +z)
+      const ax = cx - ux * depth - vx * stripe;
+      const ay = cy - uy * depth - vy * stripe;
+      const bx = cx + ux * depth - vx * stripe;
+      const by = cy + uy * depth - vy * stripe;
+      const cx2 = cx + ux * depth + vx * stripe;
+      const cy2 = cy + uy * depth + vy * stripe;
+      const dx = cx - ux * depth + vx * stripe;
+      const dy = cy - uy * depth + vy * stripe;
+      // The (u, v) frame is left-handed in world XY, so the corner order above
+      // can wind clockwise depending on the road bearing. Reverse it when
+      // needed; otherwise the whole zebra is backface-culled.
+      const cross = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax);
+      if (cross < 0) {
+        push(ax, ay, 0, 0, color, z);
+        push(cx2, cy2, 1, 1, color, z);
+        push(bx, by, 1, 0, color, z);
+        push(ax, ay, 0, 0, color, z);
+        push(dx, dy, 0, 1, color, z);
+        push(cx2, cy2, 1, 1, color, z);
+      } else {
+        push(ax, ay, 0, 0, color, z);
+        push(bx, by, 1, 0, color, z);
+        push(cx2, cy2, 1, 1, color, z);
+        push(ax, ay, 0, 0, color, z);
+        push(cx2, cy2, 1, 1, color, z);
+        push(dx, dy, 0, 1, color, z);
+      }
+    };
+    // A slightly larger dark edge keeps the white paint readable on the pale
+    // basemap roads, without tinting the bars themselves.
+    addBar(
+      halfDepth + OUTLINE,
+      halfStripe + OUTLINE,
+      OUTLINE_COLOR,
+      OUTLINE_LIFT,
+    );
+    addBar(halfDepth, halfStripe, c, LIFT);
   }
 
   const out = new THREE.BufferGeometry();
