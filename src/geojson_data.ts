@@ -18,10 +18,7 @@ import {
 } from "./elements3d/platform";
 export type { PlatformInfo } from "./elements3d/platform";
 import { rail, railMaterial } from "./elements3d/rail";
-import {
-  roadMarking,
-  roadMarkingMaterial,
-} from "./elements3d/road_marking";
+import { roadMarking, roadMarkingMaterial } from "./elements3d/road_marking";
 import {
   construction,
   constructionInfo,
@@ -374,6 +371,8 @@ export interface BuildingInfo {
   id?: string;
   rings: [number, number][][];
   height: number;
+  // the bottom of the volume; building parts can start above the ground
+  base?: number;
   color?: string;
   name?: string;
   street?: string;
@@ -707,16 +706,16 @@ export async function objectsAt(
                                             : kind === "rail"
                                               ? railMaterial
                                               : kind === "aeroway"
-                                      ? aerowayMaterial
-                                      : kind === "fence"
-                                        ? fenceMaterial
-                                        : kind === "bridge"
-                                          ? bridgeMaterial
-                                          : kind === "tunnel"
-                                            ? tunnelMaterial
-                                            : kind === "bench"
-                                              ? benchMaterial
-                                              : treeMaterial;
+                                                ? aerowayMaterial
+                                                : kind === "fence"
+                                                  ? fenceMaterial
+                                                  : kind === "bridge"
+                                                    ? bridgeMaterial
+                                                    : kind === "tunnel"
+                                                      ? tunnelMaterial
+                                                      : kind === "bench"
+                                                        ? benchMaterial
+                                                        : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
@@ -788,6 +787,7 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     id: typeof f.id === "string" ? f.id : undefined,
     rings,
     height: Number(props.height) > 0 ? Number(props.height) : 10,
+    base: Number(props.base) > 0 ? Number(props.base) : 0,
     color: props.color as string | undefined,
     name: props.name as string | undefined,
     street: props.street as string | undefined,

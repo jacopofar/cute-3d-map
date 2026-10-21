@@ -18,7 +18,8 @@ The project has two halves:
    then uses [DuckDB](https://duckdb.org) with the `spatial` extension to slice
    the data into static JSON tiles at Web-Mercator zoom 15 (`public/tiles/{x}/{y}.json`).
    Each tile is a GeoJSON FeatureCollection with properties used for rendering:
-   - `cmtype: "building"` (with `height`, `color`, `roof_shape`, `roof_color`):
+   - `cmtype: "building"` (with `height`, `base`, `color`, `roof_shape`,
+     `roof_color`):
      extruded polygon; height falls back to `building:levels * 3` or 10 m, and
      the color and roof tags are **imputed** from the dataset's own
      distribution when OSM has none (see "Imputed tags" below);
@@ -271,6 +272,16 @@ Lambert mesh per tile and clickable.
 frontend (`src/elements3d/monument.ts`) picks a pedestal/statue, bust, obelisk,
 war memorial, stele, plaque or Stolperstein from those tags, merges the pieces
 per tile and makes each one clickable with its name and OSM link.
+
+### Building parts
+
+`building:part=*` footprints are emitted as ordinary buildings. A part's bottom
+comes from `min_height`, or `min_level` × 3 m when that is missing; its top from
+`height`, else `max_level` × 3 m, else the level count added to the base. The
+walls therefore start on the podium and the roof sits at the part's real top
+(the Bicocca University example is a 10–15 m volume). Facade windows and
+balconies are offset by the same base and a part starting above the street gets
+no ground door.
 
 ### Construction sites
 

@@ -45,6 +45,11 @@ function geoJSONtoHeight(f: BuildingFeature): number {
   return Number.isFinite(h) && h > 0 ? h : 10;
 }
 
+function geoJSONtoBase(f: BuildingFeature): number {
+  const base = Number(f.properties.base);
+  return Number.isFinite(base) && base > 0 ? base : 0;
+}
+
 const DEFAULT_BUILDING_COLOR = "#aaaaaa";
 
 // bake the per-feature color into a vertex color attribute, so many buildings
@@ -56,6 +61,8 @@ export type BuildingFeature = {
     // tilegen writes a number; allow a string here so hand-written GeoJSON
     // like "12 m" doesn't slip through as NaN
     height?: number | string;
+    // the bottom of the volume (building parts on a podium, usually)
+    base?: number | string;
     // real (or tilegen-imputed) roof data, and which fields were imputed
     roof_shape?: string;
     roof_color?: string;
@@ -107,8 +114,10 @@ export function building(
 ): BuildingGeometry[] {
   const f = fin as unknown as BuildingFeature;
   const height = geoJSONtoHeight(f);
+  const base = geoJSONtoBase(f);
   const extrudeSettings = {
-    depth: height,
+    // a building part on a podium starts at its min_height, not at the street
+    depth: Math.max(0.1, height - base),
     bevelEnabled: false,
   };
   const church = isChurch(f.properties);
@@ -171,6 +180,7 @@ export function building(
         featureBaseShape,
         extrudeSettings,
       );
+      if (base > 0) geometry.translate(0, 0, base);
       applyVertexColor(geometry, color);
       return withRoof(polygon, geometry);
     });
@@ -185,6 +195,7 @@ export function building(
       featureBaseShape,
       extrudeSettings,
     );
+    if (base > 0) geometry.translate(0, 0, base);
     applyVertexColor(geometry, color);
     return [withRoof(f.geometry.coordinates, geometry)];
   }

@@ -370,7 +370,12 @@ export function tileFacadeDetail(
     // does not disturb the window layout
     const lightRng = makeRng(hashSeed(`${seed}:light`));
     const buildingDark = lightRng() < DARK_BUILDING_FRACTION;
-    const bands = floorBands(info.height, rng);
+    const base = info.base ?? 0;
+    const usableHeight = Math.max(0.1, info.height - base);
+    const bands = floorBands(usableHeight, rng).map((band) => ({
+      ...band,
+      start: band.start + base,
+    }));
     const balconyFloors = balconyBands(bands);
     // one glass tone for the whole building
     const windowColor = new THREE.Color(
@@ -416,7 +421,7 @@ export function tileFacadeDetail(
 
     // one door, on the longest ground-floor facade. A door is never lit.
     const door =
-      longest && info.height > DOOR_HEIGHT + 0.1
+      base < 0.5 && longest && usableHeight > DOOR_HEIGHT + 0.1
         ? doorSpan(longest.length)
         : null;
     if (longest && door) {

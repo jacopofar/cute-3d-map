@@ -220,7 +220,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
   `road_marking`, `platform`, `rail`, `traffic_signal`, `crossing` (the
-  road/rail network is not emitted; routes come from `traffic`).
+  road/rail network is not emitted; routes come from `traffic`). A
+  `building:part` is still `cmtype: "building"`, with a `base` elevation.
+- **building part** — a `building:part=*` footprint drawn like a building but
+  starting at its `min_height`/`min_level` instead of the street. `height` is
+  the top elevation; without it, `max_level` or `building:levels` gives the
+  height. Its facade detail is offset by the same base.
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
