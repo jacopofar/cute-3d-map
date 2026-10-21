@@ -605,6 +605,55 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_is_terrace_accepts_food_places_but_not_off():
+    assert main.is_terrace({"amenity": "cafe", "outdoor_seating": "yes"})
+    assert main.is_terrace({"amenity": "restaurant", "outdoor_seating": "sidewalk"})
+    assert not main.is_terrace({"amenity": "cafe", "outdoor_seating": "no"})
+    assert not main.is_terrace({"amenity": "pharmacy", "outdoor_seating": "yes"})
+    assert not main.is_terrace({"amenity": "cafe"})
+
+
+def test_terrace_place_moves_to_the_kerb_outside_buildings():
+    road = shapely.LineString([(0, 0), (10, 0)])
+    # the cafe is 10 m north of the road; a building starts 3 m in
+    building = shapely.box(0, 3, 10, 10)
+    tree = shapely.STRtree([building])
+    placed = main.terrace_place(shapely.Point(5, 10), road, tree, [building])
+    assert placed.x == 5
+    assert placed.y <= 3.0001
+    # a wide-open cafe keeps the far offset
+    open_placed = main.terrace_place(
+        shapely.Point(5, 10), road, shapely.STRtree([]), []
+    )
+    assert open_placed.x == 5
+    assert open_placed.y == 8
+
+
+def test_to_terrace_keeps_name_and_amenity():
+    point = shapely.Point(9.19, 45.46)
+    cafe = main.to_terrace(
+        1, {"amenity": "cafe", "outdoor_seating": "yes", "name": "Bar"}, point
+    )
+    assert cafe is not None
+    assert cafe["properties"] == {
+        "cmtype": "terrace",
+        "terrace": "cafe",
+        "name": "Bar",
+    }
+    plain = main.to_terrace(2, {"amenity": "bar", "outdoor_seating": "yes"}, point)
+    assert plain is not None
+    assert "name" not in plain["properties"]
+    assert main.to_terrace(3, {"amenity": "cafe"}, point) is None
+    placed = main.to_terrace(
+        4,
+        {"amenity": "cafe", "outdoor_seating": "yes"},
+        point,
+        (9.2, 45.47),
+    )
+    assert placed is not None
+    assert placed["geometry"]["coordinates"] == [9.2, 45.47]
+
+
 def test_transit_kind_prefers_metro_and_separates_tram():
     assert main.transit_kind({"railway": "subway_entrance"}) == "metro"
     assert (

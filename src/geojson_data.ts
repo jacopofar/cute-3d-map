@@ -14,6 +14,7 @@ import {
   transitStopMaterial,
 } from "./elements3d/transit";
 import { furniture, furnitureMaterial } from "./elements3d/furniture";
+import { terrace, terraceMaterial } from "./elements3d/terrace";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
 import { green, greenMaterial } from "./elements3d/green";
@@ -108,6 +109,7 @@ export function geoJSONtoGeometries(
     | "fountain_water"
     | "transit_stop"
     | "metro_sign"
+    | "terrace"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -193,6 +195,14 @@ export function geoJSONtoGeometries(
       groups.push({ kind: "fountain_water", geometries: water });
     }
     return groups;
+  }
+  if (f.properties.cmtype === "terrace") {
+    return [
+      {
+        kind: "terrace",
+        geometries: terrace(originMeters, scaleFactor, f),
+      },
+    ];
   }
   if (f.properties.cmtype === "transit_stop") {
     const { body, sign } = transitStop(originMeters, scaleFactor, f);
@@ -297,6 +307,14 @@ export interface BuildingInfo {
 }
 
 // a street-furniture point, for click-picking + the OSM link
+export interface TerraceInfo {
+  id?: string;
+  name?: string;
+  kind: string;
+  lon: number;
+  lat: number;
+}
+
 export interface TransitInfo {
   id?: string;
   name?: string;
@@ -365,6 +383,7 @@ export interface TileObjects {
   furniture: FurnitureInfo[];
   fountains: FountainInfo[];
   transit: TransitInfo[];
+  terraces: TerraceInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -403,6 +422,7 @@ export async function objectsAt(
       furniture: [],
       fountains: [],
       transit: [],
+      terraces: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -425,6 +445,7 @@ export async function objectsAt(
       furniture: [],
       fountains: [],
       transit: [],
+      terraces: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -453,6 +474,7 @@ export async function objectsAt(
   const furniture: FurnitureInfo[] = [];
   const fountains: FountainInfo[] = [];
   const transit: TransitInfo[] = [];
+  const terraces: TerraceInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -487,6 +509,9 @@ export async function objectsAt(
     } else if (cmtype === "transit_stop") {
       const info = transitInfo(f);
       if (info) transit.push(info);
+    } else if (cmtype === "terrace") {
+      const info = terraceInfo(f);
+      if (info) terraces.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -528,7 +553,9 @@ export async function objectsAt(
                             ? transitStopMaterial
                             : kind === "metro_sign"
                               ? metroSignMaterial()
-                              : kind === "aeroway"
+                              : kind === "terrace"
+                                ? terraceMaterial
+                                : kind === "aeroway"
                                 ? aerowayMaterial
                                 : kind === "fence"
                                   ? fenceMaterial
@@ -579,6 +606,7 @@ export async function objectsAt(
     furniture,
     fountains,
     transit,
+    terraces,
     traffic,
     crossings,
     signals,
@@ -615,6 +643,22 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+  };
+}
+
+// an outdoor terrace for click-picking + the OSM link
+export function terraceInfo(f: Geojson.Feature): TerraceInfo | null {
+  const props = f.properties ?? {};
+  const kind = props.terrace;
+  if (typeof kind !== "string") return null;
+  const geom = f.geometry;
+  if (geom.type !== "Point") return null;
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    kind,
+    lon: geom.coordinates[0],
+    lat: geom.coordinates[1],
   };
 }
 
