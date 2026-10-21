@@ -605,6 +605,24 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_construction_is_clipped_and_marks_the_crane_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    site = shapely.box(min_lon - 1, min_lat - 1, max_lon + 1, max_lat + 1)
+    f = main.to_construction(
+        1, {"landuse": "construction", "construction": "commercial"}, site, box
+    )
+    assert f is not None
+    assert f["properties"]["cmtype"] == "construction"
+    assert f["properties"]["construction"] == "commercial"
+    assert f["properties"]["crane"] is True
+    clipped = shapely.from_geojson(json.dumps(f["geometry"]))
+    assert clipped.equals(box)
+    away = shapely.box(max_lon + 0.01, max_lat + 0.01, max_lon + 0.02, max_lat + 0.02)
+    part = main.to_construction(2, {"landuse": "construction"}, away, box)
+    assert part is None
+
+
 def test_playgrounds_and_monuments_carry_kind_and_name():
     point = shapely.Point(9.19, 45.46)
     playground = main.to_playground(

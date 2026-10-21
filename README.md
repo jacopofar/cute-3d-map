@@ -47,6 +47,8 @@ The project has two halves:
      size (equivalent diameter) for the equipment spread;
    - `cmtype: "monument"` (point) — a `historic=monument`/`memorial` or
      `man_made=obelisk`, with the kind and `memorial` sub-kind for the look;
+   - `cmtype: "construction"` — a clipped `landuse=construction` area; the tile
+     holding the site centroid also carries `crane` and `site_area`;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -68,7 +70,7 @@ The project has two halves:
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
-   playground, monument).
+   playground, monument, construction).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -258,6 +260,16 @@ Lambert mesh per tile and clickable.
 frontend (`src/elements3d/monument.ts`) picks a pedestal/statue, bust, obelisk,
 war memorial, stele, plaque or Stolperstein from those tags, merges the pieces
 per tile and makes each one clickable with its name and OSM link.
+
+### Construction sites
+
+`landuse=construction` areas are clipped to the tile like a park. The frontend
+(`src/elements3d/construction.ts`) draws the dirt/gravel ground, containers and a
+material stack, plus one to three tower cranes on the tile that holds the site
+centroid (so a site spanning tiles does not sprout a crane in every one). Cranes
+are simplified solid masts and jibs; at map zoom the silhouette is the point.
+Clicking a site rings it and shows its name, kind and OSM link. `building=construction`
+footprints still go through the ordinary building layer.
 
 ### Bridges and tunnels
 

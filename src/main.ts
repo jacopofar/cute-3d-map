@@ -23,6 +23,7 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
+  ConstructionInfo,
   FountainInfo,
   FurnitureInfo,
   MonumentInfo,
@@ -242,6 +243,8 @@ class CoolMap {
   // playgrounds and monuments per loaded tile, for click-picking
   private loadedPlaygrounds: { [key: string]: PlaygroundInfo[] } = {};
   private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
+  // construction sites per loaded tile, for click-picking
+  private loadedConstruction: { [key: string]: ConstructionInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -909,6 +912,7 @@ class CoolMap {
     this.loadedTerraces = {};
     this.loadedPlaygrounds = {};
     this.loadedMonuments = {};
+    this.loadedConstruction = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -957,6 +961,7 @@ class CoolMap {
           kind === "fountain_water" ||
           kind === "playground" ||
           kind === "monument" ||
+          kind === "construction" ||
           kind === "transit_stop" ||
           kind === "metro_sign" ||
           kind === "terrace"
@@ -1020,6 +1025,17 @@ class CoolMap {
     if (hit.object.userData.kind === "monument") {
       const info = this.monumentAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectMonument(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "construction") {
+      const info = this.constructionAt(
+        tileKey,
+        point,
+        originMeters,
+        scaleFactor,
+      );
+      if (info) this.selectConstruction(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1260,6 +1276,61 @@ class CoolMap {
       }
     }
     return best;
+  }
+
+  private constructionAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): ConstructionInfo | undefined {
+    const candidates = this.loadedConstruction[tileKey] ?? [];
+    const inside = candidates.find((info) =>
+      info.rings.some((ring) =>
+        ringContains(ring, point, originMeters, scaleFactor),
+      ),
+    );
+    if (inside) return inside;
+    return this.nearestPoint(
+      candidates,
+      point,
+      originMeters,
+      scaleFactor,
+      30,
+    );
+  }
+
+  private selectConstruction(info: ConstructionInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 8);
+
+    const labels: Record<string, string> = {
+      residential: "Residential construction",
+      apartments: "Apartment construction",
+      commercial: "Commercial construction",
+      industrial: "Industrial construction",
+      office: "Office construction",
+      parking: "Parking construction",
+      building: "Construction site",
+    };
+    const label =
+      (info.kind && labels[info.kind]) ?? "Construction site";
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      label,
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
   }
 
   private playgroundAt(
@@ -1673,6 +1744,7 @@ class CoolMap {
         delete this.loadedTerraces[k];
         delete this.loadedPlaygrounds[k];
         delete this.loadedMonuments[k];
+        delete this.loadedConstruction[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1730,6 +1802,7 @@ class CoolMap {
         terraces,
         playgrounds,
         monuments,
+        construction,
         traffic,
         crossings,
         signals,
@@ -1764,6 +1837,7 @@ class CoolMap {
       this.loadedTerraces[tileKey] = terraces;
       this.loadedPlaygrounds[tileKey] = playgrounds;
       this.loadedMonuments[tileKey] = monuments;
+      this.loadedConstruction[tileKey] = construction;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

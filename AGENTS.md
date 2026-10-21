@@ -92,6 +92,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   into one Lambert mesh per tile (kind `transit_stop`); the signs are the
   separate `metro_sign` kind. Clickable with the OSM link. Platforms and rails
   are not in this pass.
+- `src/elements3d/construction.ts` — clipped `landuse=construction` sites as
+  dirt/gravel ground with containers, a material stack and one to three
+  procedural tower cranes on the centroid tile; merged per tile (kind
+  `construction`), clickable. No shadows; `building=construction` stays a normal
+  building.
 - `src/elements3d/playground.ts` — `leisure=playground` as a sand/rubber patch
   with a swing, slide, spring rider and (for wider patches) a climbing frame,
   merged per tile (kind `playground`), clickable. No shadows.
@@ -197,8 +202,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **render margin** — how many tiles beyond the center tile stay loaded (3).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
-  `terrace`, `playground`, `monument`, `traffic_signal`, `crossing` (the
-  road/rail network is not emitted; routes come from `traffic`).
+  `terrace`, `playground`, `monument`, `construction`, `traffic_signal`,
+  `crossing` (the road/rail network is not emitted; routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -240,6 +245,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   buffers lines into ribbons.
 - **water shader** — the animated `ShaderMaterial` in `src/elements3d/water.ts`;
   the ripples are procedural (nothing is simulated), anchored to model space.
+- **construction** — a clipped `landuse=construction` area with dirt, containers
+  and procedural tower cranes (only on the centroid tile). Clickable.
 - **playground** — a `leisure=playground` point with a size; the frontend draws
   sand, swings, a slide, a spring rider and a climbing frame. Clickable.
 - **monument** — a `historic=monument`/`memorial` or `man_made=obelisk` point;
