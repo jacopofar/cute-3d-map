@@ -11,6 +11,14 @@ import {
 } from "./elements3d/crosswalk";
 export type { CrosswalkInfo } from "./elements3d/crosswalk";
 import {
+  platform,
+  platformInfo,
+  platformMaterial,
+  type PlatformInfo,
+} from "./elements3d/platform";
+export type { PlatformInfo } from "./elements3d/platform";
+import { rail, railMaterial } from "./elements3d/rail";
+import {
   roadMarking,
   roadMarkingMaterial,
 } from "./elements3d/road_marking";
@@ -135,6 +143,8 @@ export function geoJSONtoGeometries(
     | "construction"
     | "crosswalk"
     | "road_marking"
+    | "platform"
+    | "rail"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -268,6 +278,17 @@ export function geoJSONtoGeometries(
         geometries: roadMarking(originMeters, scaleFactor, f),
       },
     ];
+  }
+  if (f.properties.cmtype === "platform") {
+    return [
+      {
+        kind: "platform",
+        geometries: platform(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "rail") {
+    return [{ kind: "rail", geometries: rail(originMeters, scaleFactor, f) }];
   }
   if (f.properties.cmtype === "transit_stop") {
     const { body, sign } = transitStop(originMeters, scaleFactor, f);
@@ -469,6 +490,7 @@ export interface TileObjects {
   monuments: MonumentInfo[];
   construction: ConstructionInfo[];
   crosswalks: CrosswalkInfo[];
+  platforms: PlatformInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -512,6 +534,7 @@ export async function objectsAt(
       monuments: [],
       construction: [],
       crosswalks: [],
+      platforms: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -539,6 +562,7 @@ export async function objectsAt(
       monuments: [],
       construction: [],
       crosswalks: [],
+      platforms: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -572,6 +596,7 @@ export async function objectsAt(
   const monuments: MonumentInfo[] = [];
   const construction: ConstructionInfo[] = [];
   const crosswalks: CrosswalkInfo[] = [];
+  const platforms: PlatformInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -588,9 +613,9 @@ export async function objectsAt(
       }
       return;
     }
-    if (cmtype === "road" || cmtype === "rail" || cmtype === "tram_stop") {
-      // the traffic routes are precomputed into `traffic`; the network
-      // features are not rendered (older tiles still carry them)
+    if (cmtype === "road" || cmtype === "tram_stop") {
+      // the traffic routes are precomputed into `traffic`; older network
+      // features are not rendered (the new `rail` cmtype is rendered below)
       return;
     }
     if (cmtype === "building") {
@@ -621,6 +646,9 @@ export async function objectsAt(
     } else if (cmtype === "crosswalk") {
       const info = crosswalkInfo(f);
       if (info) crosswalks.push(info);
+    } else if (cmtype === "platform") {
+      const info = platformInfo(f);
+      if (info) platforms.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -674,7 +702,11 @@ export async function objectsAt(
                                         ? crosswalkMaterial
                                         : kind === "road_marking"
                                           ? roadMarkingMaterial
-                                          : kind === "aeroway"
+                                          : kind === "platform"
+                                            ? platformMaterial
+                                            : kind === "rail"
+                                              ? railMaterial
+                                              : kind === "aeroway"
                                       ? aerowayMaterial
                                       : kind === "fence"
                                         ? fenceMaterial
@@ -730,6 +762,7 @@ export async function objectsAt(
     monuments,
     construction,
     crosswalks,
+    platforms,
     traffic,
     crossings,
     signals,

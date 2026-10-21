@@ -54,6 +54,10 @@ The project has two halves:
    - `cmtype: "road_marking"` (point) — a `highway=stop`, `give_way` or
      `traffic_signals` node, with `directions`, `width`, `lanes`, `oneway` and
      `turn_lanes` for stop lines and lane arrows;
+   - `cmtype: "platform"` — a clipped rail/tram platform polygon (line
+     platforms are buffered to a 4 m ribbon), with a name and ref;
+   - `cmtype: "rail"` (LineString/MultiLineString) — an above-ground rail or
+     tram way, clipped to the tile, with `kind` rail/tram;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. The plain `crossing`
      is data-only: the frontend does not draw it, but it slows vehicles as they
@@ -76,7 +80,8 @@ The project has two halves:
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
-   playground, monument, construction, crosswalk, road_marking).
+   playground, monument, construction, crosswalk, road_marking, platform,
+   rail).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -303,6 +308,18 @@ or a dashed give-way line, plus one white lane arrow per approach lane where
 there are at least two lanes; `turn:lanes` turns the arrow. One merged mesh per
 tile (kind `road_marking`), with a thin dark edge for contrast. These are
 painted markings, so there is no popup and no toggle.
+
+### Platforms and rails
+
+Rail and tram platforms are clipped to the tile; a platform mapped as an edge
+line is buffered to a 4 m ribbon. The frontend (`src/elements3d/platform.ts`)
+raises them into a concrete slab with a white edge and makes them clickable.
+Above-ground `railway=rail`/`tram` ways become `cmtype: "rail"` features; the
+frontend (`src/elements3d/rail.ts`) lays a ballast ribbon, two rails and sleepers
+for heavy rail, two embedded rails for trams, and catenary poles and a wire for
+both. Tunnels, covered sections and bridge decks are skipped. The `transit &`
+`rails` checkbox hides platforms, rails, stops and metro signs together. One
+merged mesh per tile each; no shadows.
 
 ### Bridges and tunnels
 

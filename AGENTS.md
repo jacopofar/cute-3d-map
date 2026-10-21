@@ -101,6 +101,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   directions, width, lanes and `turn:lanes`; merged per tile (kind
   `road_marking`), no popup. A two-way road gets the line on the right half,
   a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/platform.ts` — clipped rail/tram platforms raised into a
+  concrete slab with a white edge, one Lambert mesh per tile; line platforms
+  are buffered to a 4 m ribbon by tilegen. Clickable with the name and OSM link.
+- `src/elements3d/rail.ts` — above-ground rail and tram ways: ballast, two
+  rails, sleepers and catenary poles/wires for heavy rail; two embedded rails
+  for trams. One merged mesh per tile (kind `rail`); tunnels, covered sections
+  and bridges are skipped by tilegen.
 - `src/elements3d/construction.ts` — clipped `landuse=construction` sites as
   dirt/gravel ground with containers, a material stack and one to three
   procedural tower cranes on the centroid tile; merged per tile (kind
@@ -212,8 +219,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
-  `road_marking`, `traffic_signal`, `crossing` (the road/rail network is not
-  emitted; routes come from `traffic`).
+  `road_marking`, `platform`, `rail`, `traffic_signal`, `crossing` (the
+  road/rail network is not emitted; routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -268,6 +275,14 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   road, the full width on a one-way one.
 - **lane arrow** — one white arrow per multi-lane approach, turned by
   `turn:lanes`; a single-lane approach gets no arrow.
+- **platform** — a clipped rail/tram platform area, raised by 0.28 m with a
+  white edge and clickable. A platform mapped as an edge line is buffered to a
+  4 m ribbon by tilegen.
+- **rail** — an above-ground rail or tram way with ballast/rails/sleepers (rail)
+  or embedded rails (tram), plus catenary poles and a wire. Tunnels, covered
+  sections and bridge decks are skipped.
+- **transit toggle** — `#transit-toggle` hides platforms, rails, stops and metro
+  signs together.
 - **playground** — a `leisure=playground` point with a size; the frontend draws
   sand, swings, a slide, a spring rider and a climbing frame. Clickable.
 - **monument** — a `historic=monument`/`memorial` or `man_made=obelisk` point;
@@ -342,7 +357,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
   `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
-  `#lampposts-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
+  `#lampposts-toggle`, `#transit-toggle`, `#bloom-toggle`,
+  `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars and lamp posts are their own meshes, so those
   are plain visibility switches; imputed colors are baked into the geometry, so

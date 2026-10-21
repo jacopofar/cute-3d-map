@@ -71,6 +71,7 @@ const rules = [
   [/elements3d\/construction\.ts$/, () => ["e2e/construction.spec.ts"]],
   [/elements3d\/crosswalk\.ts$/, () => ["e2e/crosswalk.spec.ts"]],
   [/elements3d\/road_marking\.ts$/, () => ["e2e/road_markings.spec.ts"]],
+  [/elements3d\/(platform|rail)\.ts$/, () => ["e2e/transit_platforms.spec.ts"]],
   [
     /elements3d\/(facade|facade_layout|building|glass|roof|roof_layout)\.ts$/,
     () => ["e2e/facade.spec.ts"],
