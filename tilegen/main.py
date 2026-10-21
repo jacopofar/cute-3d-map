@@ -749,6 +749,36 @@ def to_terrace(feature_id, tags, s, position=None) -> dict | None:
     }
 
 
+def is_construction(tags) -> bool:
+    return tags.get("landuse") == "construction"
+
+
+def to_construction(feature_id, tags, s, tile_box) -> dict | None:
+    """A construction site clipped to the tile like a park. The tile that holds
+    the site centroid also carries the crane flag and the full site area, so a
+    site spanning several tiles builds its cranes only once."""
+    if s.geom_type not in ("Polygon", "MultiPolygon"):
+        return None
+    clipped = _flatten(s.intersection(tile_box), "Polygon")
+    if clipped is None or area_square_meters(clipped) < 80:
+        return None
+    properties = {
+        "cmtype": "construction",
+        "construction": tags.get("construction"),
+        "name": tags.get("name"),
+    }
+    centroid = s.centroid
+    if centroid.within(tile_box):
+        properties["crane"] = True
+        properties["site_area"] = round(area_square_meters(s))
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def is_playground(tags) -> bool:
     return tags.get("leisure") == "playground"
 
@@ -1153,6 +1183,8 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif is_construction(tags):
+            ret.append(to_construction(feature_id, tags, s, tile_box))
         elif is_playground(tags):
             ret.append(to_playground(feature_id, tags, s))
         elif is_monument(tags):

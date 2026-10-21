@@ -4,6 +4,13 @@ import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
 import {
+  construction,
+  constructionInfo,
+  constructionMaterial,
+  type ConstructionInfo,
+} from "./elements3d/construction";
+export type { ConstructionInfo } from "./elements3d/construction";
+import {
   fountain,
   fountainMaterial,
   fountainWaterMaterial,
@@ -114,6 +121,7 @@ export function geoJSONtoGeometries(
     | "terrace"
     | "playground"
     | "monument"
+    | "construction"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -221,6 +229,14 @@ export function geoJSONtoGeometries(
       {
         kind: "monument",
         geometries: monument(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "construction") {
+    return [
+      {
+        kind: "construction",
+        geometries: construction(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -422,6 +438,7 @@ export interface TileObjects {
   terraces: TerraceInfo[];
   playgrounds: PlaygroundInfo[];
   monuments: MonumentInfo[];
+  construction: ConstructionInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -463,6 +480,7 @@ export async function objectsAt(
       terraces: [],
       playgrounds: [],
       monuments: [],
+      construction: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -488,6 +506,7 @@ export async function objectsAt(
       terraces: [],
       playgrounds: [],
       monuments: [],
+      construction: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -519,6 +538,7 @@ export async function objectsAt(
   const terraces: TerraceInfo[] = [];
   const playgrounds: PlaygroundInfo[] = [];
   const monuments: MonumentInfo[] = [];
+  const construction: ConstructionInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -562,6 +582,9 @@ export async function objectsAt(
     } else if (cmtype === "monument") {
       const info = monumentInfo(f);
       if (info) monuments.push(info);
+    } else if (cmtype === "construction") {
+      const info = constructionInfo(f);
+      if (info) construction.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -609,7 +632,9 @@ export async function objectsAt(
                                   ? playgroundMaterial
                                   : kind === "monument"
                                     ? monumentMaterial
-                                    : kind === "aeroway"
+                                    : kind === "construction"
+                                      ? constructionMaterial
+                                      : kind === "aeroway"
                                       ? aerowayMaterial
                                       : kind === "fence"
                                         ? fenceMaterial
@@ -663,6 +688,7 @@ export async function objectsAt(
     terraces,
     playgrounds,
     monuments,
+    construction,
     traffic,
     crossings,
     signals,
