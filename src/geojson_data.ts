@@ -262,6 +262,14 @@ export interface BuildingInfo {
   glass?: boolean;
 }
 
+// a street-furniture point, for click-picking + the OSM link
+export interface FurnitureInfo {
+  id?: string;
+  kind: string;
+  lon: number;
+  lat: number;
+}
+
 // a water feature for click-picking + info. Areas carry their (clipped) outer
 // rings; waterways carry their centrelines, in lon/lat.
 export interface WaterInfo {
@@ -304,6 +312,7 @@ export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
   water: WaterInfo[];
+  furniture: FurnitureInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -339,6 +348,7 @@ export async function objectsAt(
       meshes: [],
       buildings: [],
       water: [],
+      furniture: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -358,6 +368,7 @@ export async function objectsAt(
       meshes: [],
       buildings: [],
       water: [],
+      furniture: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -383,6 +394,7 @@ export async function objectsAt(
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
   const water: WaterInfo[] = [];
+  const furniture: FurnitureInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -408,6 +420,9 @@ export async function objectsAt(
       buildings.push(buildingInfo(f));
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
+    } else if (cmtype === "furniture") {
+      const info = furnitureInfo(f);
+      if (info) furniture.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -487,6 +502,7 @@ export async function objectsAt(
     meshes,
     buildings,
     water,
+    furniture,
     traffic,
     crossings,
     signals,
@@ -523,6 +539,29 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+  };
+}
+
+// the point a furniture feature is picked at; tilegen emits Point, with a
+// line/area fallback for older tiles
+export function furnitureInfo(f: Geojson.Feature): FurnitureInfo | null {
+  const props = f.properties ?? {};
+  const kind = props.furniture;
+  if (typeof kind !== "string") return null;
+  const geom = f.geometry;
+  let coord: [number, number] | null = null;
+  if (geom.type === "Point") {
+    coord = [geom.coordinates[0], geom.coordinates[1]];
+  } else if (geom.type === "LineString" && geom.coordinates.length > 0) {
+    const mid = geom.coordinates[Math.floor(geom.coordinates.length / 2)];
+    coord = [mid[0], mid[1]];
+  }
+  if (!coord) return null;
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    kind,
+    lon: coord[0],
+    lat: coord[1],
   };
 }
 
