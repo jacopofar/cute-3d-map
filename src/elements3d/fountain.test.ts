@@ -18,30 +18,34 @@ function feature(size: number, id = "way/1"): Geojson.Feature {
 }
 
 describe("fountain", () => {
-  it("builds a basin with a water surface and a jet", () => {
-    const built = fountain(ORIGIN_METERS, SCALE, feature(3));
-    expect(built).toHaveLength(1);
-    const geometry = built[0];
-    const position = geometry.getAttribute("position");
-    expect(position.count).toBeGreaterThan(0);
-    for (const name of ["normal", "uv", "color"]) {
-      expect(geometry.getAttribute(name)?.count).toBe(position.count);
+  it("splits the basin into a stone mesh and an animated water mesh", () => {
+    const { stone, water } = fountain(ORIGIN_METERS, SCALE, feature(3));
+    expect(stone).toHaveLength(1);
+    expect(water).toHaveLength(1);
+    for (const geometry of [...stone, ...water]) {
+      const position = geometry.getAttribute("position");
+      expect(position.count).toBeGreaterThan(0);
+      for (const name of ["normal", "uv", "color"]) {
+        expect(geometry.getAttribute(name)?.count).toBe(position.count);
+      }
     }
-    geometry.computeBoundingBox();
-    const box = geometry.boundingBox!;
-    // a 3 m basin, with the pedestal and jet above the water
-    expect(box.max.x - box.min.x).toBeCloseTo(3, 0);
-    expect(box.max.z).toBeGreaterThan(1);
-    expect(box.min.z).toBeGreaterThanOrEqual(0);
+    stone[0].computeBoundingBox();
+    const stoneBox = stone[0].boundingBox!;
+    expect(stoneBox.max.x - stoneBox.min.x).toBeCloseTo(3, 0);
+    water[0].computeBoundingBox();
+    const waterBox = water[0].boundingBox!;
+    // the bowl and jet rise above the basin
+    expect(waterBox.max.z).toBeGreaterThan(1);
+    expect(waterBox.min.z).toBeGreaterThanOrEqual(0);
   });
 
   it("clamps an oversized mapped area and a tiny node", () => {
-    const huge = fountain(ORIGIN_METERS, SCALE, feature(100))[0];
+    const huge = fountain(ORIGIN_METERS, SCALE, feature(100)).stone[0];
     huge.computeBoundingBox();
     const hugeBox = huge.boundingBox!;
     expect(hugeBox.max.x - hugeBox.min.x).toBeCloseTo(FOUNTAIN_MAX_SIZE, 0);
 
-    const tiny = fountain(ORIGIN_METERS, SCALE, feature(0.1))[0];
+    const tiny = fountain(ORIGIN_METERS, SCALE, feature(0.1)).stone[0];
     tiny.computeBoundingBox();
     const tinyBox = tiny.boundingBox!;
     expect(tinyBox.max.x - tinyBox.min.x).toBeCloseTo(FOUNTAIN_MIN_SIZE, 0);

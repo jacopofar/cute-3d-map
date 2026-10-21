@@ -3,7 +3,11 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
-import { fountain, fountainMaterial } from "./elements3d/fountain";
+import {
+  fountain,
+  fountainMaterial,
+  fountainWaterMaterial,
+} from "./elements3d/fountain";
 import {
   metroSignMaterial,
   transitStop,
@@ -101,6 +105,7 @@ export function geoJSONtoGeometries(
     | "cemetery"
     | "furniture"
     | "fountain"
+    | "fountain_water"
     | "transit_stop"
     | "metro_sign"
     | "aeroway"
@@ -179,12 +184,15 @@ export function geoJSONtoGeometries(
     ];
   }
   if (f.properties.cmtype === "fountain") {
-    return [
-      {
-        kind: "fountain",
-        geometries: fountain(originMeters, scaleFactor, f),
-      },
-    ];
+    const { stone, water } = fountain(originMeters, scaleFactor, f);
+    const groups: {
+      kind: "fountain" | "fountain_water";
+      geometries: THREE.BufferGeometry[];
+    }[] = [{ kind: "fountain", geometries: stone }];
+    if (water.length > 0) {
+      groups.push({ kind: "fountain_water", geometries: water });
+    }
+    return groups;
   }
   if (f.properties.cmtype === "transit_stop") {
     const { body, sign } = transitStop(originMeters, scaleFactor, f);
@@ -514,21 +522,23 @@ export async function objectsAt(
                       ? furnitureMaterial
                       : kind === "fountain"
                         ? fountainMaterial
-                        : kind === "transit_stop"
-                          ? transitStopMaterial
-                          : kind === "metro_sign"
-                            ? metroSignMaterial()
-                            : kind === "aeroway"
-                              ? aerowayMaterial
-                              : kind === "fence"
-                                ? fenceMaterial
-                                : kind === "bridge"
-                                  ? bridgeMaterial
-                                  : kind === "tunnel"
-                                    ? tunnelMaterial
-                                    : kind === "bench"
-                                      ? benchMaterial
-                                      : treeMaterial;
+                        : kind === "fountain_water"
+                          ? fountainWaterMaterial
+                          : kind === "transit_stop"
+                            ? transitStopMaterial
+                            : kind === "metro_sign"
+                              ? metroSignMaterial()
+                              : kind === "aeroway"
+                                ? aerowayMaterial
+                                : kind === "fence"
+                                  ? fenceMaterial
+                                  : kind === "bridge"
+                                    ? bridgeMaterial
+                                    : kind === "tunnel"
+                                      ? tunnelMaterial
+                                      : kind === "bench"
+                                        ? benchMaterial
+                                        : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
