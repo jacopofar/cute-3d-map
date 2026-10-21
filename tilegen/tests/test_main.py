@@ -715,6 +715,50 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_rail_clips_and_skips_tunnels_and_bridges():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    line = shapely.LineString(
+        [(min_lon - 0.001, min_lat + 0.001), (max_lon + 0.001, max_lat - 0.001)]
+    )
+    f = main.to_rail(1, {"railway": "rail"}, line, box)
+    assert f is not None
+    assert f["properties"]["cmtype"] == "rail"
+    assert f["properties"]["kind"] == "rail"
+    assert main.to_rail(2, {"railway": "rail", "tunnel": "yes"}, line, box) is None
+    assert main.to_rail(3, {"railway": "rail", "bridge": "yes"}, line, box) is None
+    assert main.to_rail(4, {"railway": "rail", "layer": "1"}, line, box) is None
+
+
+def test_platform_polygons_and_line_platforms():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    polygon = shapely.box(
+        min_lon + 0.0001, min_lat + 0.0001, min_lon + 0.0003, min_lat + 0.0005
+    )
+    platform = main.to_platform(
+        5,
+        {"public_transport": "platform", "train": "yes", "name": "Binario 1"},
+        polygon,
+        box,
+    )
+    assert platform is not None
+    assert platform["properties"]["cmtype"] == "platform"
+    assert platform["properties"]["name"] == "Binario 1"
+    line = shapely.LineString(
+        [(min_lon + 0.0001, min_lat + 0.0001), (min_lon + 0.0003, min_lat + 0.0003)]
+    )
+    buffered = main.to_platform(6, {"railway": "platform", "tram": "yes"}, line, box)
+    assert buffered is not None
+    assert buffered["geometry"]["type"] in ("Polygon", "MultiPolygon")
+    assert (
+        main.to_platform(
+            7, {"public_transport": "platform", "bus": "yes"}, polygon, box
+        )
+        is None
+    )
+
+
 def test_construction_is_clipped_and_marks_the_crane_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

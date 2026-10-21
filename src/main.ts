@@ -28,6 +28,7 @@ import type {
   FountainInfo,
   FurnitureInfo,
   MonumentInfo,
+  PlatformInfo,
   PlaygroundInfo,
   TerraceInfo,
   TransitInfo,
@@ -246,6 +247,8 @@ class CoolMap {
   // playgrounds and monuments per loaded tile, for click-picking
   private loadedPlaygrounds: { [key: string]: PlaygroundInfo[] } = {};
   private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
+  // rail platforms per loaded tile, for click-picking
+  private loadedPlatforms: { [key: string]: PlatformInfo[] } = {};
   // construction sites per loaded tile, for click-picking
   private loadedConstruction: { [key: string]: ConstructionInfo[] } = {};
   // marked crossings per loaded tile, for click-picking
@@ -298,6 +301,8 @@ class CoolMap {
   // bridges and tunnels are their own per-tile meshes too, so this is a plain
   // visibility switch covering both kinds
   private bridgesEnabled = true;
+  // transit stops, platforms and rails share one checkbox
+  private transitEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -858,6 +863,10 @@ class CoolMap {
       this.bridgesEnabled = on;
       this.applyBridgeVisibility();
     });
+    wireToggle("#transit-toggle", (on) => {
+      this.transitEnabled = on;
+      this.applyTransitVisibility();
+    });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
       // the color is baked into the geometry, so the loaded tiles have to be
@@ -917,6 +926,7 @@ class CoolMap {
     this.loadedTerraces = {};
     this.loadedPlaygrounds = {};
     this.loadedMonuments = {};
+    this.loadedPlatforms = {};
     this.loadedConstruction = {};
     this.loadedCrosswalks = {};
     this.loadedCrossings = {};
@@ -969,8 +979,10 @@ class CoolMap {
           kind === "monument" ||
           kind === "construction" ||
           kind === "crosswalk" ||
-          kind === "transit_stop" ||
-          kind === "metro_sign" ||
+          ((kind === "platform" ||
+            kind === "transit_stop" ||
+            kind === "metro_sign") &&
+            mesh.visible) ||
           kind === "terrace"
         ) {
           pickable.push(mesh);
@@ -1049,6 +1061,12 @@ class CoolMap {
     if (hit.object.userData.kind === "crosswalk") {
       const info = this.crosswalkAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectCrosswalk(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "platform") {
+      const info = this.platformAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectPlatform(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1323,6 +1341,45 @@ class CoolMap {
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
       .setHTML([label, osmLink(info.id)].join("<br>"))
+      .addTo(this.map);
+  }
+
+  private platformAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): PlatformInfo | undefined {
+    const candidates = this.loadedPlatforms[tileKey] ?? [];
+    const inside = candidates.find((info) =>
+      info.rings.some((ring) =>
+        ringContains(ring, point, originMeters, scaleFactor),
+      ),
+    );
+    return (
+      inside ??
+      this.nearestPoint(candidates, point, originMeters, scaleFactor, 6)
+    );
+  }
+
+  private selectPlatform(info: PlatformInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 6);
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      "Rail platform",
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
       .addTo(this.map);
   }
 
@@ -1792,6 +1849,7 @@ class CoolMap {
         delete this.loadedTerraces[k];
         delete this.loadedPlaygrounds[k];
         delete this.loadedMonuments[k];
+        delete this.loadedPlatforms[k];
         delete this.loadedConstruction[k];
         delete this.loadedCrosswalks[k];
         delete this.loadedCrossings[k];
@@ -1851,6 +1909,7 @@ class CoolMap {
         terraces,
         playgrounds,
         monuments,
+        platforms,
         construction,
         crosswalks,
         traffic,
@@ -1887,6 +1946,7 @@ class CoolMap {
       this.loadedTerraces[tileKey] = terraces;
       this.loadedPlaygrounds[tileKey] = playgrounds;
       this.loadedMonuments[tileKey] = monuments;
+      this.loadedPlatforms[tileKey] = platforms;
       this.loadedConstruction[tileKey] = construction;
       this.loadedCrosswalks[tileKey] = crosswalks;
       this.loadedCrossings[tileKey] = crossings;
@@ -2019,6 +2079,22 @@ class CoolMap {
 
   // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
   // tunnels) drives both kinds
+  private applyTransitVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        const kind = mesh.userData.kind;
+        if (
+          kind === "transit_stop" ||
+          kind === "metro_sign" ||
+          kind === "platform" ||
+          kind === "rail"
+        ) {
+          mesh.visible = this.transitEnabled;
+        }
+      }
+    }
+  }
+
   private applyBridgeVisibility() {
     for (const meshes of Object.values(this.loadedTiles)) {
       for (const mesh of meshes) {
@@ -2088,6 +2164,7 @@ class CoolMap {
     this.applyAirplaneVisibility();
     this.applyFenceVisibility();
     this.applyBridgeVisibility();
+    this.applyTransitVisibility();
   }
 
   private disposeDetail(key: string) {

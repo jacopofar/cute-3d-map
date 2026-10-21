@@ -19,7 +19,7 @@ test("zebra crossings load and open an OSM popup", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
-  await page.goto("/#map=19/45.4640265/9.1886552");
+  await page.goto("/#map=19.79/45.4927129/9.1929893/0/0");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
