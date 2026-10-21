@@ -605,6 +605,44 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_playgrounds_and_monuments_carry_kind_and_name():
+    point = shapely.Point(9.19, 45.46)
+    playground = main.to_playground(
+        1, {"leisure": "playground", "name": "Giochi"}, point
+    )
+    assert playground is not None
+    assert playground["properties"] == {
+        "cmtype": "playground",
+        "size": 10.0,
+        "name": "Giochi",
+    }
+
+    statue = main.to_monument(
+        2,
+        {"historic": "memorial", "memorial": "statue", "name": "Eroe"},
+        point,
+    )
+    assert statue is not None
+    assert statue["properties"] == {
+        "cmtype": "monument",
+        "kind": "memorial",
+        "memorial": "statue",
+        "name": "Eroe",
+    }
+    obelisk = main.to_monument(3, {"man_made": "obelisk"}, point)
+    assert obelisk is not None
+    assert obelisk["properties"]["kind"] == "obelisk"
+    assert main.to_monument(4, {"historic": "castle"}, point) is None
+
+
+def test_to_playground_sizes_a_mapped_area():
+    area = shapely.box(9.19, 45.46, 9.1902, 45.4602)
+    playground = main.to_playground(5, {"leisure": "playground"}, area)
+    assert playground is not None
+    assert 6 <= playground["properties"]["size"] <= 18
+    assert playground["geometry"]["type"] == "Point"
+
+
 def test_is_terrace_accepts_food_places_but_not_off():
     assert main.is_terrace({"amenity": "cafe", "outdoor_seating": "yes"})
     assert main.is_terrace({"amenity": "restaurant", "outdoor_seating": "sidewalk"})

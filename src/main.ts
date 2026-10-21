@@ -25,6 +25,8 @@ import type {
   BuildingInfo,
   FountainInfo,
   FurnitureInfo,
+  MonumentInfo,
+  PlaygroundInfo,
   TerraceInfo,
   TransitInfo,
   LampSpot,
@@ -237,6 +239,9 @@ class CoolMap {
   private loadedTransit: { [key: string]: TransitInfo[] } = {};
   // outdoor terraces per loaded tile, for click-picking
   private loadedTerraces: { [key: string]: TerraceInfo[] } = {};
+  // playgrounds and monuments per loaded tile, for click-picking
+  private loadedPlaygrounds: { [key: string]: PlaygroundInfo[] } = {};
+  private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -902,6 +907,8 @@ class CoolMap {
     this.loadedFountains = {};
     this.loadedTransit = {};
     this.loadedTerraces = {};
+    this.loadedPlaygrounds = {};
+    this.loadedMonuments = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -948,6 +955,8 @@ class CoolMap {
           kind === "furniture" ||
           kind === "fountain" ||
           kind === "fountain_water" ||
+          kind === "playground" ||
+          kind === "monument" ||
           kind === "transit_stop" ||
           kind === "metro_sign" ||
           kind === "terrace"
@@ -999,6 +1008,18 @@ class CoolMap {
     if (hit.object.userData.kind === "terrace") {
       const info = this.terraceAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectTerrace(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "playground") {
+      const info = this.playgroundAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectPlayground(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "monument") {
+      const info = this.monumentAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectMonument(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1217,6 +1238,115 @@ class CoolMap {
       }
     }
     return best;
+  }
+
+  private nearestPoint<T extends { lon: number; lat: number }>(
+    candidates: T[],
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+    limit: number,
+  ): T | undefined {
+    let best: T | undefined;
+    let bestSq = limit * limit;
+    for (const info of candidates) {
+      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
+      const dx = m[0] - point.x;
+      const dy = m[1] - point.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = info;
+      }
+    }
+    return best;
+  }
+
+  private playgroundAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): PlaygroundInfo | undefined {
+    return this.nearestPoint(
+      this.loadedPlaygrounds[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      12,
+    );
+  }
+
+  private monumentAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): MonumentInfo | undefined {
+    return this.nearestPoint(
+      this.loadedMonuments[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      5,
+    );
+  }
+
+  private selectPlayground(info: PlaygroundInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 7);
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      "Playground",
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+  }
+
+  private selectMonument(info: MonumentInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 3);
+    const labels: Record<string, string> = {
+      statue: "Statue",
+      bust: "Bust",
+      plaque: "Plaque",
+      stolperstein: "Stolperstein",
+      war_memorial: "War memorial",
+      sculpture: "Sculpture",
+      stone: "Memorial stone",
+      stele: "Stele",
+      ghost_bike: "Ghost bike",
+      obelisk: "Obelisk",
+    };
+    const label =
+      (info.memorial && labels[info.memorial]) ??
+      (info.kind === "monument" ? "Monument" : "Memorial");
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      label,
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
   }
 
   private terraceAt(
@@ -1541,6 +1671,8 @@ class CoolMap {
         delete this.loadedFountains[k];
         delete this.loadedTransit[k];
         delete this.loadedTerraces[k];
+        delete this.loadedPlaygrounds[k];
+        delete this.loadedMonuments[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1596,6 +1728,8 @@ class CoolMap {
         fountains,
         transit,
         terraces,
+        playgrounds,
+        monuments,
         traffic,
         crossings,
         signals,
@@ -1628,6 +1762,8 @@ class CoolMap {
       this.loadedFountains[tileKey] = fountains;
       this.loadedTransit[tileKey] = transit;
       this.loadedTerraces[tileKey] = terraces;
+      this.loadedPlaygrounds[tileKey] = playgrounds;
+      this.loadedMonuments[tileKey] = monuments;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;
