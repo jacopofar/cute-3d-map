@@ -26,19 +26,24 @@ decorative volumetric cloud layer.
 ## Build, test, verify
 
 - `npm run dev` — Vite dev server (needs `VITE_MAPTILER_KEY` in `.env`).
-- `npx tsc --noEmit` / `npm run build` — type check / production build.
-- `npm run test:unit` — vitest for the pure traffic math (`src/traffic_math.ts`),
-  with coverage.
-- `npm run test:e2e` — Playwright smoke tests (boots the app, loads tiles).
+- `npm run test:check` — type check plus the unit suite without coverage, the
+  default per-change loop (~5 s).
+- `npm run build` — type check plus production build.
+- `npm run test:unit` — vitest for the pure modules, with coverage (~4 s).
+- `npm run test:e2e:changed` — Playwright specs selected from the diff against
+  `main`; the default per-change e2e (~30-90 s). `--list` previews the selection.
+- `npm run test:e2e:smoke` — boot and permalink specs only.
+- `npm run test:e2e` — full Playwright suite (~5 min; the merge gate).
 - `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
 - `npm run bench:gpu` — the same app in headed Chrome on the real GPU (needs a
-  display), panning/tilting/zooming; writes `perf-results/latest-gpu.json`.
+  display), panning/tilting/zooming (~80 s); writes
+  `perf-results/latest-gpu.json`. Run it only for render/perf changes.
 - `npm run prettify` — Prettier over `src/**.ts`. It also reformats unrelated
   lines, so prefer formatting only the files you touched.
 
-Run `tsc`, `npm run test:unit` and `npm run test:e2e` before reporting a
-frontend change as done. `uv run pytest` in `tilegen/` reports coverage
-(`--cov`, floor 80%).
+Per change, run `npm run test:check` and `npm run test:e2e:changed`. Run the full
+`npm run test:e2e` before merging, and after a tilegen change (it can affect every
+layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 
 ## Architecture
 
