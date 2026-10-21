@@ -90,9 +90,12 @@ const FENCE_MIN_ZOOM = 18;
 
 // MapTiler basemap styles. The map opens on the day style and swaps to the dark
 // one at night, so the bright basemap does not clash with the dark 3D scene.
+// this is beautiful but covers 3D feature by hovering or something
+// const BASEMAP_DAY = "aquarelle-v4";
 const BASEMAP_DAY = "basic-v2";
 const BASEMAP_NIGHT = "basic-v2-dark";
 const basemapStyleUrl = (name: string): string =>
+
   `https://api.maptiler.com/maps/${name}/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`;
 // the night/day boundary that decides which basemap to show (the lighting model
 // fades smoothly, but a style can only be one or the other)
