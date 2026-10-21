@@ -8,7 +8,7 @@ import { toModelCoords } from "../geojson_data";
  * matches the node to its road way and carries the approach bearings, road
  * width and lane/turn tags; the frontend only lays the markings.
  *
- * One merged mesh per tile (kind `road_marking`), Basic white paint with a thin
+ * One merged mesh per tile (kind `road_marking`), lit white paint with a thin
  * dark edge so it reads on the pale basemap. No shadows, no toggle, no popup:
  * these are street surface markings rather than props.
  */
@@ -21,7 +21,7 @@ const ARROW_OFFSET = 7.5;
 const WHITE = new THREE.Color("#ffffff");
 const OUTLINE_COLOR = new THREE.Color("#4c4c48");
 
-export const roadMarkingMaterial = new THREE.MeshBasicMaterial({
+export const roadMarkingMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
 });
 
@@ -136,14 +136,7 @@ function arrow(
     color,
     z,
   );
-  triangle(
-    buffers,
-    at(0.25, -0.45),
-    at(0.25, 0.45),
-    at(1.25, 0),
-    color,
-    z,
-  );
+  triangle(buffers, at(0.25, -0.45), at(0.25, 0.45), at(1.25, 0), color, z);
 }
 
 function turnAngle(turn: string): number {
@@ -281,12 +274,13 @@ export function roadMarking(
     // a single-lane stop sign does not need a painted arrow.
     if (approachLanes < 2) continue;
     const turns =
-      d === 0 ? props.turn_lanes : (props.turn_lanes_backward ?? props.turn_lanes);
+      d === 0
+        ? props.turn_lanes
+        : (props.turn_lanes_backward ?? props.turn_lanes);
     const arrowCenter = front(ARROW_OFFSET);
     for (let lane = 0; lane < approachLanes; lane++) {
       const rightOffset =
-        (oneWay ? 0 : width / 4) +
-        (lane - (approachLanes - 1) / 2) * laneWidth;
+        (oneWay ? 0 : width / 4) + (lane - (approachLanes - 1) / 2) * laneWidth;
       const center: Point = [
         arrowCenter[0] + rx * rightOffset,
         arrowCenter[1] + ry * rightOffset,
@@ -304,7 +298,10 @@ export function roadMarking(
     "position",
     new THREE.Float32BufferAttribute(buffers.position, 3),
   );
-  out.setAttribute("normal", new THREE.Float32BufferAttribute(buffers.normal, 3));
+  out.setAttribute(
+    "normal",
+    new THREE.Float32BufferAttribute(buffers.normal, 3),
+  );
   out.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uv, 2));
   out.setAttribute("color", new THREE.Float32BufferAttribute(buffers.color, 3));
   return [out];
