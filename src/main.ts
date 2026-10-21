@@ -43,6 +43,7 @@ import {
   tileFacadeDetail,
   windowMaterial,
 } from "./elements3d/facade.ts";
+import { fountainWaterMaterial } from "./elements3d/fountain.ts";
 import { glassMaterial } from "./elements3d/glass.ts";
 import { greenMaterial } from "./elements3d/green.ts";
 import {
@@ -633,6 +634,7 @@ class CoolMap {
         // drive the water ripples from wall-clock time (the render loop runs
         // every frame via triggerRepaint)
         waterMaterial.uniforms.uTime.value = performance.now() / 1000;
+        fountainWaterMaterial.uniforms.uTime.value = performance.now() / 1000;
         // MapLibre bakes the view into the projection, so recover the eye from
         // it each frame: the glitter path needs a view direction that follows
         // a pan or a tilt
@@ -941,6 +943,7 @@ class CoolMap {
           (kind === "water" && mesh.visible) ||
           kind === "furniture" ||
           kind === "fountain" ||
+          kind === "fountain_water" ||
           kind === "transit_stop" ||
           kind === "metro_sign"
         ) {
@@ -970,7 +973,10 @@ class CoolMap {
       else this.clearSelection();
       return;
     }
-    if (hit.object.userData.kind === "fountain") {
+    if (
+      hit.object.userData.kind === "fountain" ||
+      hit.object.userData.kind === "fountain_water"
+    ) {
       const info = this.fountainAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectFountain(info, event.lngLat);
       else this.clearSelection();
@@ -1838,6 +1844,7 @@ class CoolMap {
     glassMaterial.uniforms.uAmbientIntensity.value =
       lighting.hemisphereIntensity;
     waterMaterial.uniforms.uNight.value = lighting.night;
+    fountainWaterMaterial.uniforms.uNight.value = lighting.night;
     // the glitter on the water is the same key light the windows get: its
     // color warms at the horizon and its direction is the real sun, so the
     // reflection sits under the sun instead of wherever the bands happen to be

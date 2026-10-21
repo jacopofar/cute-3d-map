@@ -55,11 +55,16 @@ test("the Piazza Castello fountain loads and opens its OSM popup", async ({
       meshes,
       vertices,
       triangles: map.stats().byKind.fountain?.triangles ?? 0,
+      waterMeshes: map.stats().byKind.fountain_water?.meshes ?? 0,
+      waterTriangles: map.stats().byKind.fountain_water?.triangles ?? 0,
     };
   });
   expect(state.meshes).toBeGreaterThan(0);
   expect(state.vertices).toBeGreaterThan(1000);
   expect(state.triangles).toBeGreaterThan(300);
+  // the animated water is its own mesh, so the click can still find the fountain
+  expect(state.waterMeshes).toBeGreaterThan(0);
+  expect(state.waterTriangles).toBeGreaterThan(0);
 
   const target = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
