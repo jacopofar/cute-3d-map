@@ -683,6 +683,38 @@ def furniture_kind(tags) -> str | None:
     return None
 
 
+def to_fountain(feature_id, tags, s) -> dict | None:
+    """A fountain as a point render feature. A mapped area collapses to its
+    centroid and its equivalent diameter (clamped, so a whole square mapped as
+    one fountain does not become a lake); a node keeps a small default size."""
+    if tags.get("amenity") != "fountain":
+        return None
+    size = 2.4
+    if s.geom_type == "Point":
+        point = s
+    elif s.geom_type == "LineString":
+        point = s.interpolate(0.5, normalized=True)
+    elif s.geom_type in ("Polygon", "MultiPolygon"):
+        point = s.centroid
+        area = area_square_meters(s)
+        size = max(1.5, min(12.0, 2.0 * math.sqrt(area / math.pi)))
+    else:
+        return None
+    if point.is_empty:
+        return None
+    properties = {
+        "cmtype": "fountain",
+        "size": round(size, 2),
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(point)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def to_furniture(feature_id, tags, s) -> dict | None:
     """A street-furniture point. Areas (bike parking) collapse to their
     centroid; a line (a rack mapped as a way) keeps its bearing so the frontend
@@ -858,6 +890,8 @@ def tile_to_geojson(
             ret.append(to_crossing(feature_id, tags, s))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
+        elif tags.get("amenity") == "fountain":
+            ret.append(to_fountain(feature_id, tags, s))
         elif furniture_kind(tags) is not None:
             ret.append(to_furniture(feature_id, tags, s))
         elif is_water(tags):

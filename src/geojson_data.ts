@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
+import { fountain, fountainMaterial } from "./elements3d/fountain";
 import { furniture, furnitureMaterial } from "./elements3d/furniture";
 import { church, isChurch } from "./elements3d/church";
 import { glassMaterial, isGlass } from "./elements3d/glass";
@@ -94,6 +95,7 @@ export function geoJSONtoGeometries(
     | "green"
     | "cemetery"
     | "furniture"
+    | "fountain"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -166,6 +168,14 @@ export function geoJSONtoGeometries(
       {
         kind: "furniture",
         geometries: furniture(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "fountain") {
+    return [
+      {
+        kind: "fountain",
+        geometries: fountain(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -263,6 +273,14 @@ export interface BuildingInfo {
 }
 
 // a street-furniture point, for click-picking + the OSM link
+export interface FountainInfo {
+  id?: string;
+  name?: string;
+  lon: number;
+  lat: number;
+  size: number;
+}
+
 export interface FurnitureInfo {
   id?: string;
   kind: string;
@@ -313,6 +331,7 @@ export interface TileObjects {
   buildings: BuildingInfo[];
   water: WaterInfo[];
   furniture: FurnitureInfo[];
+  fountains: FountainInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -349,6 +368,7 @@ export async function objectsAt(
       buildings: [],
       water: [],
       furniture: [],
+      fountains: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -369,6 +389,7 @@ export async function objectsAt(
       buildings: [],
       water: [],
       furniture: [],
+      fountains: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -395,6 +416,7 @@ export async function objectsAt(
   const buildings: BuildingInfo[] = [];
   const water: WaterInfo[] = [];
   const furniture: FurnitureInfo[] = [];
+  const fountains: FountainInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -423,6 +445,9 @@ export async function objectsAt(
     } else if (cmtype === "furniture") {
       const info = furnitureInfo(f);
       if (info) furniture.push(info);
+    } else if (cmtype === "fountain") {
+      const info = fountainInfo(f);
+      if (info) fountains.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -503,6 +528,7 @@ export async function objectsAt(
     buildings,
     water,
     furniture,
+    fountains,
     traffic,
     crossings,
     signals,
@@ -539,6 +565,22 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+  };
+}
+
+// a fountain point for click-picking + the OSM link; size is the basin's
+// equivalent diameter in meters (the click ring uses it)
+export function fountainInfo(f: Geojson.Feature): FountainInfo | null {
+  const props = f.properties ?? {};
+  const geom = f.geometry;
+  if (geom.type !== "Point") return null;
+  const size = Number(props.size);
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    lon: geom.coordinates[0],
+    lat: geom.coordinates[1],
+    size: Number.isFinite(size) ? size : 2.4,
   };
 }
 
