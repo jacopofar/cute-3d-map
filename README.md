@@ -49,10 +49,13 @@ The project has two halves:
      `man_made=obelisk`, with the kind and `memorial` sub-kind for the look;
    - `cmtype: "construction"` — a clipped `landuse=construction` area; the tile
      holding the site centroid also carries `crane` and `site_area`;
+   - `cmtype: "crosswalk"` (point) — a marked `highway=crossing`, with the road
+     `bearing` and full `width` so the frontend can lay the zebra stripes;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
-     `highway=traffic_signals` or `highway=crossing` node. Data-only: the
-     frontend does not draw them, but it slows vehicles as they pass over them
-     (see below) and they show up in the debug GeoJSON.
+     `highway=traffic_signals` or `highway=crossing` node. The plain `crossing`
+     is data-only: the frontend does not draw it, but it slows vehicles as they
+     pass over it (see below) and it shows up in the debug GeoJSON; a marked
+     crossing also gets the separate `crosswalk` feature.
 
    A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
    the precomputed vehicle routes that fall inside the tile. See below. A
@@ -70,7 +73,7 @@ The project has two halves:
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
-   playground, monument, construction).
+   playground, monument, construction, crosswalk).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -270,6 +273,19 @@ centroid (so a site spanning tiles does not sprout a crane in every one). Cranes
 are simplified solid masts and jibs; at map zoom the silhouette is the point.
 Clicking a site rings it and shows its name, kind and OSM link. `building=construction`
 footprints still go through the ordinary building layer.
+
+### Crosswalks
+
+Marked `highway=crossing` nodes become `cmtype: "crosswalk"` points. tilegen
+matches each node to its road way and carries the local `bearing` and the full
+road `width` (from `width`, then `lanes`, then the highway class); unmarked and
+informal crossings, tunnel/bridge decks and nodes with no matching road are
+skipped. The frontend (`src/elements3d/crosswalk.ts`) lays five white bars
+across the carriageway, turns them with the road and merges them into one mesh
+per tile. They sit a few centimetres above the ground so they do not z-fight the
+basemap, and are clickable with a "Zebra crossing" popup and OSM link. The plain
+`crossing` point still drives the cosmetic vehicle slowdown; the two features
+share an id.
 
 ### Bridges and tunnels
 

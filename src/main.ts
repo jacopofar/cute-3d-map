@@ -24,6 +24,7 @@ import type {
   ApronRing,
   BuildingInfo,
   ConstructionInfo,
+  CrosswalkInfo,
   FountainInfo,
   FurnitureInfo,
   MonumentInfo,
@@ -245,6 +246,8 @@ class CoolMap {
   private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
   // construction sites per loaded tile, for click-picking
   private loadedConstruction: { [key: string]: ConstructionInfo[] } = {};
+  // marked crossings per loaded tile, for click-picking
+  private loadedCrosswalks: { [key: string]: CrosswalkInfo[] } = {};
   // runway centrelines per loaded tile, for the airplane layer
   private loadedRunways: { [key: string]: RunwayLine[] } = {};
   private loadedAprons: { [key: string]: ApronRing[] } = {};
@@ -913,6 +916,7 @@ class CoolMap {
     this.loadedPlaygrounds = {};
     this.loadedMonuments = {};
     this.loadedConstruction = {};
+    this.loadedCrosswalks = {};
     this.loadedCrossings = {};
     this.loadedSignals = {};
     this.loadedLamps = {};
@@ -962,6 +966,7 @@ class CoolMap {
           kind === "playground" ||
           kind === "monument" ||
           kind === "construction" ||
+          kind === "crosswalk" ||
           kind === "transit_stop" ||
           kind === "metro_sign" ||
           kind === "terrace"
@@ -1036,6 +1041,12 @@ class CoolMap {
         scaleFactor,
       );
       if (info) this.selectConstruction(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "crosswalk") {
+      const info = this.crosswalkAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectCrosswalk(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -1276,6 +1287,41 @@ class CoolMap {
       }
     }
     return best;
+  }
+
+  private crosswalkAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): CrosswalkInfo | undefined {
+    return this.nearestPoint(
+      this.loadedCrosswalks[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      12,
+    );
+  }
+
+  private selectCrosswalk(info: CrosswalkInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 4);
+
+    const label = info.crossing?.includes("traffic_signals")
+      ? "Zebra crossing at traffic lights"
+      : "Zebra crossing";
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML([label, osmLink(info.id)].join("<br>"))
+      .addTo(this.map);
   }
 
   private constructionAt(
@@ -1745,6 +1791,7 @@ class CoolMap {
         delete this.loadedPlaygrounds[k];
         delete this.loadedMonuments[k];
         delete this.loadedConstruction[k];
+        delete this.loadedCrosswalks[k];
         delete this.loadedCrossings[k];
         delete this.loadedSignals[k];
         delete this.loadedLamps[k];
@@ -1803,6 +1850,7 @@ class CoolMap {
         playgrounds,
         monuments,
         construction,
+        crosswalks,
         traffic,
         crossings,
         signals,
@@ -1838,6 +1886,7 @@ class CoolMap {
       this.loadedPlaygrounds[tileKey] = playgrounds;
       this.loadedMonuments[tileKey] = monuments;
       this.loadedConstruction[tileKey] = construction;
+      this.loadedCrosswalks[tileKey] = crosswalks;
       this.loadedCrossings[tileKey] = crossings;
       this.loadedSignals[tileKey] = signals;
       this.loadedLamps[tileKey] = lamps;

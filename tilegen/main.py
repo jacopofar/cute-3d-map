@@ -4,6 +4,7 @@ import math
 import re
 import zlib
 from collections import defaultdict
+from dataclasses import dataclass
 from math import atan2, cos, degrees, radians
 from pathlib import Path
 
@@ -249,6 +250,98 @@ def to_traffic_signal(feature_id, tags, s) -> dict | None:
 
 def to_crossing(feature_id, tags, s) -> dict | None:
     return to_stop_point(feature_id, tags, s, "crossing")
+
+
+@dataclass(frozen=True)
+class CrossingRoad:
+    """The road under a crossing: its local bearing and full width, both needed
+    to lay the zebra stripes across the carriageway."""
+
+    bearing: float
+    width: float
+
+
+# full carriageway width by highway class, used when OSM gives neither width
+# nor lanes. Deliberately generous: a short zebra under a wide road is worse
+# than a stripe that reaches a little onto the kerb.
+ROAD_WIDTHS = {
+    "motorway": 14.0,
+    "motorway_link": 9.0,
+    "trunk": 14.0,
+    "trunk_link": 9.0,
+    "primary": 12.0,
+    "primary_link": 8.0,
+    "secondary": 10.0,
+    "secondary_link": 7.0,
+    "tertiary": 9.0,
+    "tertiary_link": 6.5,
+    "unclassified": 7.0,
+    "residential": 7.0,
+    "living_street": 6.0,
+    "service": 5.0,
+    "road": 7.0,
+}
+
+ROAD_PRIORITY = {name: rank for rank, name in enumerate(ROAD_WIDTHS)}
+
+
+def road_width(tags) -> float:
+    """Estimate the full road width from `width`, then `lanes`, then the class."""
+    width = parse_length(tags.get("width"))
+    if width:
+        return min(max(width, 3.0), 20.0)
+    lanes = tags.get("lanes")
+    if lanes:
+        match = re.search(r"\d+", str(lanes))
+        if match:
+            return min(max(3.25 * int(match.group()) + 1.0, 3.5), 20.0)
+    return ROAD_WIDTHS.get(tags.get("highway"), 7.0)
+
+
+def way_bearing(line: LineString, point: Point) -> float:
+    """Compass bearing (degrees clockwise from north) of the line at the point."""
+    distance = line.project(point)
+    before = line.interpolate(max(0.0, distance - 1.0))
+    after = line.interpolate(min(line.length, distance + 1.0))
+    return degrees(atan2(after.x - before.x, after.y - before.y)) % 360
+
+
+def crossing_is_marked(tags) -> bool:
+    """Whether a crossing node should get zebra stripes. OSM's marking tags are
+    inconsistent: `crossing:markings` wins when present, while a bare
+    `highway=crossing` is usually marked in Italy."""
+    crossing = (tags.get("crossing") or "").strip().lower()
+    if crossing in ("unmarked", "informal", "no"):
+        return False
+    markings = (tags.get("crossing:markings") or "").strip().lower()
+    if markings:
+        return "zebra" in markings or markings == "yes"
+    return True
+
+
+def to_crosswalk(
+    feature_id, tags, s, crossing_roads: dict[int, CrossingRoad] | None
+) -> dict | None:
+    """A marked crossing as its own Point, with the road bearing and width.
+    The plain `crossing` Point stays data-only for the traffic slowdown."""
+    if s.geom_type != "Point" or not crossing_is_marked(tags):
+        return None
+    road = (crossing_roads or {}).get(feature_id)
+    if road is None:
+        return None
+    properties = {
+        "cmtype": "crosswalk",
+        "bearing": round(road.bearing, 1),
+        "width": round(road.width, 1),
+        "crossing": tags.get("crossing"),
+        "markings": tags.get("crossing:markings"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
 
 
 # compass letters to degrees clockwise from north, the way the frontend rotates
@@ -1141,6 +1234,7 @@ def tile_to_geojson(
     zoom: int,
     distributions: dict[str, Distribution] | None = None,
     terrace_positions: dict[str, tuple[float, float]] | None = None,
+    crossing_roads: dict[int, CrossingRoad] | None = None,
 ) -> tuple[list, list]:
     """Build the render features (buildings, trees, water) and the raw-tag
     features.
@@ -1181,6 +1275,7 @@ def tile_to_geojson(
             ret.append(to_traffic_signal(feature_id, tags, s))
         elif tags.get("highway") == "crossing":
             ret.append(to_crossing(feature_id, tags, s))
+            ret.append(to_crosswalk(feature_id, tags, s, crossing_roads))
         elif tags.get("amenity") == "bench":
             ret.append(to_bench(feature_id, tags, s))
         elif is_construction(tags):
@@ -1355,6 +1450,65 @@ def load_crossing_points(input_parquet: Path) -> list[CrossingPoint]:
         {"input_path": str(input_parquet)},
     ).fetchall()
     return crossing_points_from_rows(rows)
+
+
+def load_crossing_roads(input_parquet: Path) -> dict[int, CrossingRoad]:
+    """Match every crossing node to its road way and keep the local bearing and
+    width. A spatial index over the drivable ways is enough: the nodes sit on
+    the way geometry, so the nearest segment is the crossing's road."""
+    classes = ",".join(f"'{name}'" for name in ROAD_WIDTHS)
+    rows = duckdb.execute(
+        f"""
+        select tags, ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['highway'] in ({classes})
+          and ST_GeometryType(geometry) = 'LINESTRING'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    ways: list[LineString] = []
+    tags_by_way: list[dict] = []
+    for tags, wkb in rows:
+        ways.append(shapely.from_wkb(wkb))
+        tags_by_way.append(tags)
+    tree = shapely.STRtree(ways)
+    crossings = duckdb.execute(
+        """
+        select feature_id, ST_X(geometry), ST_Y(geometry)
+        from read_parquet($input_path)
+        where tags['highway'] = 'crossing'
+          and ST_GeometryType(geometry) = 'POINT'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    roads: dict[int, CrossingRoad] = {}
+    for feature_id, lon, lat in crossings:
+        point = Point(lon, lat)
+        candidates = tree.query(point.buffer(0.00008))
+        best: tuple[tuple[float, int], int] | None = None
+        for index in candidates:
+            distance = ways[index].distance(point)
+            if distance > 0.00004:
+                continue
+            tags = tags_by_way[index]
+            if tags.get("tunnel") in ("yes", "building_passage", "culvert"):
+                continue
+            if tags.get("bridge") not in (None, "no"):
+                continue
+            layer = parse_length(tags.get("layer"))
+            if layer not in (None, 0):
+                continue
+            key = (distance, ROAD_PRIORITY.get(tags.get("highway"), 99))
+            if best is None or key < best[0]:
+                best = (key, index)
+        if best is None:
+            continue
+        line = ways[best[1]]
+        roads[feature_id] = CrossingRoad(
+            bearing=way_bearing(line, point),
+            width=road_width(tags_by_way[best[1]]),
+        )
+    return roads
 
 
 def write_loop_report(
@@ -1687,6 +1841,8 @@ def parquet_to_tiles(
     # query costs a full scan)
     features_by_tile = parquet_features_by_tile(input_parquet, zoom_level)
     logger.info(f"features fall in {len(features_by_tile)} tiles")
+    crossing_roads = load_crossing_roads(input_parquet)
+    logger.info(f"crossing road data for {len(crossing_roads)} crossings")
     # a tile that holds traffic, parking or lamps but no OSM feature still gets
     # a file
     for x, y in sorted(
@@ -1709,6 +1865,7 @@ def parquet_to_tiles(
             zoom_level,
             distributions,
             terrace_positions,
+            crossing_roads,
         )
         traffic_loops = traffic_by_tile.get((x, y))
         parking_here = parking_by_tile.get((x, y))
