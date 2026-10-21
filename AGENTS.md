@@ -94,8 +94,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   are not in this pass.
 - `src/elements3d/crosswalk.ts` — marked `highway=crossing` nodes as white zebra
   bars along the road, repeated across it, using the tile's `bearing` and
-  `width`; merged per tile (kind `crosswalk`), clickable. The plain `crossing` point stays data-only
-  for the cosmetic traffic slowdown.
+  `width`; merged per tile (kind `crosswalk`), clickable. The plain `crossing`
+  point stays data-only for the cosmetic traffic slowdown.
+- `src/elements3d/road_marking.ts` — stop lines and lane arrows for
+  `highway=stop`/`give_way`/`traffic_signals` nodes, using the tile's approach
+  directions, width, lanes and `turn:lanes`; merged per tile (kind
+  `road_marking`), no popup. A two-way road gets the line on the right half,
+  a one-way road the full width; arrows appear only on multi-lane approaches.
 - `src/elements3d/construction.ts` — clipped `landuse=construction` sites as
   dirt/gravel ground with containers, a material stack and one to three
   procedural tower cranes on the centroid tile; merged per tile (kind
@@ -207,8 +212,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
-  `traffic_signal`, `crossing` (the road/rail network is not emitted; routes
-  come from `traffic`).
+  `road_marking`, `traffic_signal`, `crossing` (the road/rail network is not
+  emitted; routes come from `traffic`).
 - **church** — a building whose tile tags make `isChurch` true (`building` is
   church/chapel/cathedral/..., or a place of worship with a Christian religion).
   It is also the name of the per-tile kind holding just its cross, so the
@@ -255,6 +260,14 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **crosswalk** — a marked `highway=crossing` with the road bearing and width;
   the frontend draws zebra bars along the road, repeated across it; clickable.
   The plain `crossing` point is kept only for the traffic slowdown.
+- **road marking** — a stop, give-way or signal node with approach directions,
+  width, lanes and turn tags; the frontend draws a stop/give-way line and lane
+  arrows. It is paint, not a clickable object.
+- **stop line** — the solid white bar 3.2 m before a stop/signal node; a
+  give-way node gets a dashed line. It spans the approach half on a two-way
+  road, the full width on a one-way one.
+- **lane arrow** — one white arrow per multi-lane approach, turned by
+  `turn:lanes`; a single-lane approach gets no arrow.
 - **playground** — a `leisure=playground` point with a size; the frontend draws
   sand, swings, a slide, a spring rider and a climbing frame. Clickable.
 - **monument** — a `historic=monument`/`memorial` or `man_made=obelisk` point;

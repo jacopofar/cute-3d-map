@@ -218,7 +218,7 @@ def test_to_stop_points_are_point_only():
 
 
 def test_crosswalk_carries_the_road_bearing_and_width():
-    roads = {9: main.CrossingRoad(bearing=90.0, width=7.5)}
+    roads = {9: main.RoadData(bearing=90.0, width=7.5)}
     f = main.to_crosswalk(
         9,
         {"highway": "crossing", "crossing": "marked"},
@@ -248,6 +248,51 @@ def test_crosswalk_carries_the_road_bearing_and_width():
         )
         is None
     )
+
+
+def test_road_markings_carry_directions_and_lanes():
+    roads = {
+        20: main.RoadData(
+            bearing=90.0, width=12.0, lanes=4, oneway="yes", turn_lanes="left|through"
+        ),
+        21: main.RoadData(bearing=90.0, width=8.0, lanes=1, oneway=None),
+    }
+    signal = main.to_road_marking(
+        20, {"highway": "traffic_signals"}, geom("POINT (9.18 45.5)"), roads
+    )
+    assert signal is not None
+    assert signal["properties"]["cmtype"] == "road_marking"
+    assert signal["properties"]["kind"] == "signal"
+    assert signal["properties"]["directions"] == [90.0]
+    assert signal["properties"]["lanes"] == 4
+    assert signal["properties"]["turn_lanes"] == "left|through"
+
+    two_way = main.to_road_marking(
+        21, {"highway": "traffic_signals"}, geom("POINT (9.18 45.5)"), roads
+    )
+    assert two_way is not None
+    assert two_way["properties"]["directions"] == [90.0, 270.0]
+
+    backward = main.to_road_marking(
+        21,
+        {"highway": "stop", "direction": "backward"},
+        geom("POINT (9.18 45.5)"),
+        roads,
+    )
+    assert backward is not None
+    assert backward["properties"]["directions"] == [270.0]
+    assert backward["properties"]["kind"] == "stop"
+
+    assert (
+        main.to_road_marking(99, {"highway": "stop"}, geom("POINT (9.18 45.5)"), roads)
+        is None
+    )
+
+
+def test_parse_lane_count_falls_back_to_width():
+    assert main.parse_lane_count({"lanes": "3"}, 7.0) == 3
+    assert main.parse_lane_count({}, 7.0) == 2
+    assert main.parse_lane_count({}, 2.0) == 1
 
 
 def test_crossing_markings_and_road_width():
