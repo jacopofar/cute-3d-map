@@ -39,6 +39,8 @@ The project has two halves:
    - `cmtype: "fountain"` (point) — an `amenity=fountain`, with an equivalent
      diameter (`size`) so a mapped basin gets a sensible circle; the frontend
      builds a stone basin, water surface and jet;
+   - `cmtype: "transit_stop"` (point) — a metro entrance, tram stop or bus stop
+     (`stop`), with `name` and `shelter` when OSM has them;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
      `highway=traffic_signals` or `highway=crossing` node. Data-only: the
      frontend does not draw them, but it slows vehicles as they pass over them
@@ -59,7 +61,7 @@ The project has two halves:
    tiles within a 3-tile margin of the center (`loadUnloadCoord` in
    `src/main.ts`), converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
-   water, church, cemetery, furniture, fountain).
+   water, church, cemetery, furniture, fountain, transit).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -208,6 +210,22 @@ and, for the larger ones, a central pedestal, bowl and jet, merged into one
 Lambert mesh per fountain. The water is a still disc rather than the canal
 shader; animating the jet is the next step. Clicking one rings the basin and
 opens a popup with its name (when OSM has one) and the OSM link.
+
+### Transit stops
+
+Metro entrances, tram stops and bus stops are point features
+(`cmtype: "transit_stop"`, with `stop: metro|tram|bus`, `name` and `shelter`).
+The frontend (`src/elements3d/transit.ts`) gives them the Milan look: a metro
+entrance has a dark stair opening and an "M" totem — a white panel with the red
+M, crossed so it reads from every side, drawn on a small canvas texture and kept
+as its own per-tile mesh; a bus or tram stop has the yellow palina, with a
+shelter (posts, roof, glass back and a bench) when OSM says it is covered. The
+poles and shelters merge into one Lambert mesh per tile; the sign planes are the
+only textured part. Clicking one rings the stop and opens a popup with the stop
+name, its kind and the OSM link.
+
+Platforms and the rail tracks themselves are not part of this pass yet; the
+precomputed trains still float over the basemap.
 
 ### Bridges and tunnels
 

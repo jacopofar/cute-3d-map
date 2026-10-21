@@ -605,6 +605,44 @@ def test_to_furniture_handles_points_lines_and_areas():
     assert main.to_furniture(4, {"amenity": "bench"}, point) is None
 
 
+def test_transit_kind_prefers_metro_and_separates_tram():
+    assert main.transit_kind({"railway": "subway_entrance"}) == "metro"
+    assert (
+        main.transit_kind({"railway": "subway_entrance", "highway": "bus_stop"})
+        == "metro"
+    )
+    assert main.transit_kind({"railway": "tram_stop"}) == "tram"
+    assert main.transit_kind({"highway": "bus_stop"}) == "bus"
+    assert main.transit_kind({"highway": "crossing"}) is None
+
+
+def test_to_transit_stop_carries_name_and_shelter():
+    point = shapely.Point(9.19, 45.46)
+    metro = main.to_transit_stop(
+        1, {"railway": "subway_entrance", "name": "Duomo"}, point
+    )
+    assert metro is not None
+    assert metro["properties"] == {
+        "cmtype": "transit_stop",
+        "stop": "metro",
+        "name": "Duomo",
+    }
+    bus = main.to_transit_stop(
+        2, {"highway": "bus_stop", "name": "Via Roma", "shelter": "yes"}, point
+    )
+    assert bus is not None
+    assert bus["properties"] == {
+        "cmtype": "transit_stop",
+        "stop": "bus",
+        "name": "Via Roma",
+        "shelter": True,
+    }
+    plain = main.to_transit_stop(3, {"highway": "bus_stop"}, point)
+    assert plain is not None
+    assert "shelter" not in plain["properties"]
+    assert main.to_transit_stop(4, {"highway": "crossing"}, point) is None
+
+
 def test_to_fountain_sizes_a_mapped_basin():
     point = shapely.Point(9.19, 45.46)
     node = main.to_fountain(1, {"amenity": "fountain"}, point)
