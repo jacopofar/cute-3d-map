@@ -4,9 +4,10 @@ import type Geojson from "geojson";
 import { toModelCoords } from "../geojson_data";
 
 /*
- * Zebra crossings: flat white bars on the carriageway, oriented across the road.
- * tilegen matches each `highway=crossing` node to its road way and carries the
- * local bearing and the full road width; the frontend only lays the stripes.
+ * Zebra crossings: flat white bars on the carriageway, long along the traffic
+ * direction and repeated across the road. tilegen matches each
+ * `highway=crossing` node to its road way and carries the local bearing and the
+ * full road width; the frontend only lays the stripes.
  *
  * The marking is part of the street surface, not an object: one merged mesh per
  * tile, no shadows and no toggle. The stripes are two triangles each, so a dense
@@ -15,12 +16,12 @@ import { toModelCoords } from "../geojson_data";
  * rest).
  */
 
-const STRIPES = 5;
-const STRIPE_WIDTH = 0.5;
-const STRIPE_GAP = 0.55;
+const STRIPE_WIDTH = 0.65;
+const STRIPE_GAP = 0.45;
+const CROSSING_DEPTH = 3.0;
 const LIFT = 0.045;
-const WHITE = new THREE.Color("#e9e5da");
-const WORN = new THREE.Color("#d9d5c9");
+const WHITE = new THREE.Color("#f7f4ec");
+const WORN = new THREE.Color("#ece8de");
 
 export const crosswalkMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
@@ -53,11 +54,19 @@ export function crosswalk(
     scaleFactor,
   );
   const width = Math.min(Math.max(Number(props.width) || 7, 3.5), 20);
-  const depth = STRIPES * STRIPE_WIDTH + (STRIPES - 1) * STRIPE_GAP;
-  const half = width / 2;
+  const pitch = STRIPE_WIDTH + STRIPE_GAP;
+  // an odd count puts one bar on the crossing node, so the whole zebra is
+  // clickable from its centre
+  let count = Math.max(3, Math.round(width / pitch));
+  if (count % 2 === 0) count += 1;
+  count = Math.min(count, 15);
+  const halfDepth = CROSSING_DEPTH / 2;
+  const halfStripe = STRIPE_WIDTH / 2;
 
   const radians = (bearing * Math.PI) / 180;
-  // u runs along the road, v across it; the bars are long in v and repeat in u
+  // u runs along the road; v crosses it. The bars are long in u (the traffic
+  // direction) and repeat in v, across the carriageway. That is a zebra: a
+  // pedestrian walking across the road steps over the bars.
   const ux = Math.sin(radians);
   const uy = Math.cos(radians);
   const vx = Math.cos(radians);
@@ -81,27 +90,39 @@ export function crosswalk(
     color.push(c.r, c.g, c.b);
   };
 
-  for (let i = 0; i < STRIPES; i++) {
-    const offset =
-      -depth / 2 + STRIPE_WIDTH / 2 + i * (STRIPE_WIDTH + STRIPE_GAP);
-    const cx = x + ux * offset;
-    const cy = y + uy * offset;
+  for (let i = 0; i < count; i++) {
+    const offset = (i - (count - 1) / 2) * pitch;
+    const cx = x + vx * offset;
+    const cy = y + vy * offset;
     const c = i % 3 === 1 ? WORN : WHITE;
-    // a = -v,-u, b = +v,-u, c = +v,+u, d = -v,+u (counter-clockwise from +z)
-    const ax = cx - vx * half - ux * (STRIPE_WIDTH / 2);
-    const ay = cy - vy * half - uy * (STRIPE_WIDTH / 2);
-    const bx = cx + vx * half - ux * (STRIPE_WIDTH / 2);
-    const by = cy + vy * half - uy * (STRIPE_WIDTH / 2);
-    const cx2 = cx + vx * half + ux * (STRIPE_WIDTH / 2);
-    const cy2 = cy + vy * half + uy * (STRIPE_WIDTH / 2);
-    const dx = cx - vx * half + ux * (STRIPE_WIDTH / 2);
-    const dy = cy - vy * half + uy * (STRIPE_WIDTH / 2);
-    push(ax, ay, 0, 0, c);
-    push(bx, by, 1, 0, c);
-    push(cx2, cy2, 1, 1, c);
-    push(ax, ay, 0, 0, c);
-    push(cx2, cy2, 1, 1, c);
-    push(dx, dy, 0, 1, c);
+    // a = -u,-v, b = +u,-v, c = +u,+v, d = -u,+v (counter-clockwise from +z)
+    const ax = cx - ux * halfDepth - vx * halfStripe;
+    const ay = cy - uy * halfDepth - vy * halfStripe;
+    const bx = cx + ux * halfDepth - vx * halfStripe;
+    const by = cy + uy * halfDepth - vy * halfStripe;
+    const cx2 = cx + ux * halfDepth + vx * halfStripe;
+    const cy2 = cy + uy * halfDepth + vy * halfStripe;
+    const dx = cx - ux * halfDepth + vx * halfStripe;
+    const dy = cy - uy * halfDepth + vy * halfStripe;
+    // The (u, v) frame is left-handed in world XY, so the corner order above
+    // can wind clockwise depending on the road bearing. Reverse it when needed;
+    // otherwise the whole zebra is backface-culled.
+    const cross = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax);
+    if (cross < 0) {
+      push(ax, ay, 0, 0, c);
+      push(cx2, cy2, 1, 1, c);
+      push(bx, by, 1, 0, c);
+      push(ax, ay, 0, 0, c);
+      push(dx, dy, 0, 1, c);
+      push(cx2, cy2, 1, 1, c);
+    } else {
+      push(ax, ay, 0, 0, c);
+      push(bx, by, 1, 0, c);
+      push(cx2, cy2, 1, 1, c);
+      push(ax, ay, 0, 0, c);
+      push(cx2, cy2, 1, 1, c);
+      push(dx, dy, 0, 1, c);
+    }
   }
 
   const out = new THREE.BufferGeometry();
