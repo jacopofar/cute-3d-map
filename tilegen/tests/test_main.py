@@ -271,6 +271,15 @@ def test_way_bearing_north_and_east():
     east = shapely.LineString([(9.18, 45.5), (9.19, 45.5)])
     assert main.way_bearing(north, shapely.Point(9.18, 45.505)) == 0.0
     assert main.way_bearing(east, shapely.Point(9.185, 45.5)) == 90.0
+    # a 45-degree line in raw lon/lat is only ~35 degrees in model meters
+    diagonal = shapely.LineString([(9.18, 45.5), (9.19, 45.51)])
+    assert abs(main.way_bearing(diagonal, shapely.Point(9.185, 45.505)) - 35.0) < 0.5
+
+
+def test_way_bearing_uses_the_segment_at_a_vertex():
+    bent = shapely.LineString([(9.18, 45.5), (9.18, 45.51), (9.19, 45.51)])
+    # the chord across the bend would be 45 degrees; the segment is north or east
+    assert main.way_bearing(bent, shapely.Point(9.18, 45.51)) in (0.0, 90.0)
 
 
 def test_bench_direction_maps_compass_and_degrees():

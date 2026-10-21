@@ -12,18 +12,19 @@ import { toModelCoords } from "../geojson_data";
  * The marking is part of the street surface, not an object: one merged mesh per
  * tile, no shadows and no toggle. The stripes are two triangles each, so a dense
  * centre still stays cheap. They sit a few centimetres above the basemap to
- * avoid z-fighting, and are unlit enough to read at dusk (Lambert, like the
- * rest).
+ * avoid z-fighting, and stay white in any light.
  */
 
 const STRIPE_WIDTH = 0.65;
 const STRIPE_GAP = 0.45;
 const CROSSING_DEPTH = 3.0;
 const LIFT = 0.045;
-const WHITE = new THREE.Color("#f7f4ec");
-const WORN = new THREE.Color("#ece8de");
+const WHITE = new THREE.Color("#ffffff");
+const WORN = new THREE.Color("#f2f2f2");
 
-export const crosswalkMaterial = new THREE.MeshLambertMaterial({
+// Basic, not Lambert: road paint should read white rather than picking up the
+// warm/cool light of the scene. The bars are thin and retroreflective in reality.
+export const crosswalkMaterial = new THREE.MeshBasicMaterial({
   vertexColors: true,
 });
 
