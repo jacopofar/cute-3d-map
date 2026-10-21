@@ -971,6 +971,7 @@ class CoolMap {
         // a hidden water layer is not pickable either
         if (
           kind === "building" ||
+          kind === "glass" ||
           (kind === "water" && mesh.visible) ||
           kind === "furniture" ||
           kind === "fountain" ||
@@ -1396,13 +1397,7 @@ class CoolMap {
       ),
     );
     if (inside) return inside;
-    return this.nearestPoint(
-      candidates,
-      point,
-      originMeters,
-      scaleFactor,
-      30,
-    );
+    return this.nearestPoint(candidates, point, originMeters, scaleFactor, 30);
   }
 
   private selectConstruction(info: ConstructionInfo, lngLat: LngLat) {
@@ -1425,8 +1420,7 @@ class CoolMap {
       parking: "Parking construction",
       building: "Construction site",
     };
-    const label =
-      (info.kind && labels[info.kind]) ?? "Construction site";
+    const label = (info.kind && labels[info.kind]) ?? "Construction site";
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       label,

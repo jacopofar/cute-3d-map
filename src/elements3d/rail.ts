@@ -22,6 +22,10 @@ const WIRE = new THREE.Color("#8a8a86");
 
 export const railMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
+  // keep the thin rails and sleepers ahead of the ballast and the basemap
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1,
 });
 
 type Point = [number, number];
@@ -132,7 +136,7 @@ export function rail(
           ribbon(buffers, start, end, 2.6, SLEEPER, 0.065);
         }
       }
-      const railZ = isRail ? 0.12 : 0.03;
+      const railZ = isRail ? 0.18 : 0.03;
       ribbon(
         buffers,
         at(0, GAUGE / 2),

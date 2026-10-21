@@ -11,7 +11,10 @@ export interface GlassTags {
   "building:facade:material"?: string;
 }
 
-const MATERIAL_TAGS = ["building:material", "building:facade:material"] as const;
+const MATERIAL_TAGS = [
+  "building:material",
+  "building:facade:material",
+] as const;
 
 // the words tilegen keys on, kept in one place so the two ends cannot drift
 const GLASS_WORDS = ["glass", "mirror"];
@@ -102,31 +105,42 @@ export const glassMaterial = new THREE.ShaderMaterial({
       // tagged blue) is pulled toward a deep blue-gray before the grid darkens
       // the mullions. Without this the lambert-plus-sky sum came out near
       // white after tone mapping.
-      vec3 tint = mix(vColor, vec3(0.05, 0.10, 0.16), 0.75);
-      vec3 pane = tint * mix(0.35, 0.75, grid);
+      vec3 tint = mix(vColor, vec3(0.05, 0.10, 0.16), 0.78);
+      vec3 pane = tint * mix(0.25, 0.55, grid);
 
       // fresnel towards the sky: at grazing angles the wall picks up the
       // hemisphere color, which is what separates glass from painted concrete
       vec3 view = normalize(cameraPosition - vPosition);
       float fresnel = pow(1.0 - max(dot(n, view), 0.0), 4.0);
 
+      // A procedural sky reflection, since the scene has no environment map:
+      // reflect the view around the normal, then blend a warm horizon into the
+      // sky colour and add a sharp sun glint. This varies down the tower and
+      // with the viewing angle, so the glass reads as a mirror instead of a
+      // flat dark slab.
+      vec3 reflected = reflect(-view, n);
+      float up = clamp(reflected.z * 0.5 + 0.5, 0.0, 1.0);
+      vec3 horizon = vec3(0.44, 0.47, 0.49);
+      vec3 skyReflection = mix(horizon, uAmbientColor * 1.35, pow(up, 0.6));
+      float sun = pow(max(dot(reflected, uKeyDirection), 0.0), 48.0);
+      vec3 reflection =
+        skyReflection * (0.10 + 0.55 * fresnel) * mix(0.55, 1.0, grid) +
+        uKeyColor * sun * 0.30;
+
       // much less light than a masonry wall: the base is dark and the sun
       // mostly shows up as a reflection, otherwise the tower blows out
       vec3 light =
-        uAmbientColor * uAmbientIntensity * 0.35 +
-        uKeyColor * uKeyIntensity * ndl * 0.20;
-      vec3 day = pane * light * INV_PI;
-      // the reflected sky is a shade of the ambient, brightened at grazing
-      // angles; a low sun on the upper floors makes it read as mirror, but it
-      // is kept low so the wall stays glass rather than a white slab
-      day += uAmbientColor * (0.015 + 0.10 * fresnel);
-      // a tight highlight: pow 64 keeps it a glint on the panes facing the sun
-      // rather than a wash over the whole facade
-      day += uKeyColor * pow(ndl, 64.0) * 0.25;
+        uAmbientColor * uAmbientIntensity * 0.25 +
+        uKeyColor * uKeyIntensity * ndl * 0.12;
+      vec3 day = pane * light * INV_PI + reflection;
 
-      // night: an unlit curtain wall goes near-black with a faint cool sky
-      // reflection, so it does not disappear into the night
-      vec3 night = pane * 0.08 + uAmbientColor * 0.05 * fresnel;
+      // night: a curtain wall loses its blue sky but keeps a city/sky sheen, so
+      // it stays a dark reflective volume rather than turning matte black
+      vec3 night =
+        pane * 0.30 +
+        reflection * 0.28 +
+        uAmbientColor * (0.015 + 0.10 * fresnel) +
+        vec3(0.018, 0.026, 0.038);
       gl_FragColor = vec4(mix(day, night, uNight), 1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>

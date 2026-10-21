@@ -31,13 +31,14 @@ export const FENCE_RAILS: [number, number][] = [
   [0.95, 0.045],
 ];
 
-// a wooden fence, and a metal guard rail / railing (the OSM sub-kind decides)
+// grey fences and galvanized guard rails; the OSM sub-kind only changes the
+// coolness a little, not the material story
 export const FENCE_COLORS: Record<string, string> = {
-  fence: "#8a6a45",
-  guard_rail: "#98a1a8",
-  railing: "#98a1a8",
+  fence: "#8b9296",
+  guard_rail: "#9aa2a8",
+  railing: "#9aa2a8",
 };
-export const DEFAULT_FENCE_COLOR = "#8a6a45";
+export const DEFAULT_FENCE_COLOR = "#8b9296";
 
 export function fenceColor(barrier: string): THREE.Color {
   return new THREE.Color(FENCE_COLORS[barrier] ?? DEFAULT_FENCE_COLOR);
