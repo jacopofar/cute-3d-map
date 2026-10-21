@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../geojson_data";
@@ -110,22 +109,15 @@ function metroEntrance(b: BoxBuilder): void {
   b.box(1.25, 0, 0.22, 0.12, 0.12, 3.1, 0, DARK);
 }
 
-function metroSign(): THREE.BufferGeometry | null {
-  const parts: THREE.BufferGeometry[] = [];
-  for (const rotation of [0, Math.PI / 2]) {
-    const plane = new THREE.PlaneGeometry(1.3, 1.7);
-    // a PlaneGeometry is horizontal by default; stand it up first, then turn
-    // the second copy a quarter turn so the two crossed panels read from all
-    // sides
-    plane.rotateX(Math.PI / 2);
-    plane.rotateZ(rotation);
-    // the totem pole is at x = 1.25; the panel starts just above head height
-    plane.translate(1.25, 0, 2.55);
-    parts.push(plane);
-  }
-  const merged = BufferGeometryUtils.mergeGeometries(parts);
-  for (const part of parts) part.dispose();
-  return merged;
+function metroSign(): THREE.BufferGeometry {
+  const plane = new THREE.PlaneGeometry(1.3, 1.7);
+  // one panel, not a cross: the material is double-sided, so the M reads from
+  // both faces (and the letter is horizontally symmetric, so the back is not a
+  // mirrored oddity)
+  plane.rotateX(Math.PI / 2);
+  // the totem pole is at x = 1.25; the panel starts just above head height
+  plane.translate(1.25, 0, 2.55);
+  return plane;
 }
 
 /**

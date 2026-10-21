@@ -32,8 +32,8 @@ describe("transitStop", () => {
       expect(geometry.getAttribute("normal")?.count).toBe(position.count);
       expect(geometry.getAttribute("uv")?.count).toBe(position.count);
     }
-    // the sign is two double-sided planes, so two sets of 4 corners
-    expect(sign[0].getAttribute("position").count).toBe(8);
+    // one double-sided panel: four corners
+    expect(sign[0].getAttribute("position").count).toBe(4);
   });
 
   it("adds the shelter and its bench when the stop is covered", () => {
