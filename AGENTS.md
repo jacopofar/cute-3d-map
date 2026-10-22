@@ -360,13 +360,14 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
   are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
-  `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
+  `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
   `#lampposts-toggle`, `#transit-toggle`, `#bloom-toggle`,
   `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars and lamp posts are their own meshes, so those
-  are plain visibility switches; imputed colors are baked into the geometry, so
-  changing that one reloads the loaded tiles.
+  are plain visibility switches; the basemap checkbox swaps the MapTiler style
+  for an empty style while keeping the 3D layer; imputed colors are baked into
+  the geometry, so changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

@@ -95,8 +95,10 @@ const FENCE_MIN_ZOOM = 18;
 const BASEMAP_DAY = "basic-v2";
 const BASEMAP_NIGHT = "basic-v2-dark";
 const basemapStyleUrl = (name: string): string =>
-
   `https://api.maptiler.com/maps/${name}/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`;
+// An empty style keeps the 3D custom layer without the MapTiler canvas. The
+// page background shows through where the basemap used to be.
+const EMPTY_BASEMAP_STYLE = { version: 8 as const, sources: {}, layers: [] };
 // the night/day boundary that decides which basemap to show (the lighting model
 // fades smoothly, but a style can only be one or the other)
 const BASEMAP_NIGHT_AT = 0.5;
@@ -331,6 +333,9 @@ class CoolMap {
   private lighting: Lighting = lightingAt(this.timeOfDay);
   // which basemap is mounted, so a night/day flip only swaps the style once
   private darkBasemap = false;
+  // the basemap checkbox; while off the map keeps an empty style and only the
+  // 3D custom layer is drawn
+  private basemapEnabled = true;
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
   // whether clicking a building inspects it
@@ -830,6 +835,9 @@ class CoolMap {
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
       this.applyWaterVisibility();
+    });
+    wireToggle("#basemap-toggle", (on) => {
+      this.setBasemapEnabled(on);
     });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
@@ -2345,7 +2353,22 @@ class CoolMap {
   // handler and onAdd are both written to tolerate a re-add just in case.
   // Remembering the mounted style keeps the swap to once per crossing, not on
   // every lighting update.
+  private setBasemapEnabled(on: boolean) {
+    if (on === this.basemapEnabled) return;
+    this.basemapEnabled = on;
+    const fade = document.querySelector<HTMLElement>("#basemap-fade");
+    if (fade) fade.style.opacity = "0";
+    if (on) {
+      const night = this.lighting.night > BASEMAP_NIGHT_AT;
+      this.darkBasemap = night;
+      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
+    } else {
+      this.map.setStyle(EMPTY_BASEMAP_STYLE);
+    }
+  }
+
   private applyBasemap(night: boolean) {
+    if (!this.basemapEnabled) return;
     if (night === this.darkBasemap) return;
     this.darkBasemap = night;
     const fade = document.querySelector<HTMLElement>("#basemap-fade");
