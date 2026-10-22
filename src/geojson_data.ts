@@ -18,6 +18,7 @@ import {
 } from "./elements3d/platform";
 export type { PlatformInfo } from "./elements3d/platform";
 import { rail, railMaterial } from "./elements3d/rail";
+import { parkedCarsFromRows, type ParkingRow } from "./parking_layout";
 import { roadMarking, roadMarkingMaterial } from "./elements3d/road_marking";
 import {
   construction,
@@ -983,13 +984,23 @@ interface RawTrafficLoop {
   vehicles: { phase: number; color: string }[];
 }
 
-// the parking block written by tilegen: [lon, lat, heading] per occupied bay
+// the parking block written by tilegen: authored rows, each with the kerb line,
+// style and pitch. Older tiles still carry [lon, lat, heading] spots; keep
+// reading them until a full regeneration has landed.
 function parkingIn(document: {
-  parking?: [number, number, number][];
+  parking?: [number, number, number][] | ParkingRow[];
 }): ParkedCar[] {
-  const spots = document.parking;
-  if (!Array.isArray(spots)) return [];
-  return spots.map(([lon, lat, heading]) => ({ lon, lat, heading }));
+  const rows = document.parking;
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  if (Array.isArray(rows[0])) {
+    return (rows as [number, number, number][]).map(([lon, lat, heading]) => ({
+      lon,
+      lat,
+      heading,
+    }));
+  }
+  const cars = parkedCarsFromRows(rows as ParkingRow[]);
+  return cars.map(({ lon, lat, heading }) => ({ lon, lat, heading }));
 }
 
 // the lamp block written by tilegen: [lon, lat] per street lamp

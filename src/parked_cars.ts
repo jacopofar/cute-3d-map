@@ -6,8 +6,8 @@ import { CAR_TRAFFIC, simpleVehicleGeometry, vehicleGeometry } from "./traffic";
 /*
  * Static parked cars along the roads, drawn with the moving cars' body.
  *
- * tilegen places the bays (parallel, perpendicular or fishbone) and emits the
- * occupied ones as [lon, lat, heading] in the tile's `parking` block. This layer
+ * tilegen authors parking rows (the kerb line, parallel/perpendicular/fishbone,
+ * pitch and side); `parking_layout.ts` places the occupied cars. This layer
  * keeps one InstancedMesh per tile and distance bucket, so panning one tile over
  * only builds the tile that entered the 3x3 center window and drops the one that
  * left. It has no per-frame work at all: the cars never move, so the matrices are

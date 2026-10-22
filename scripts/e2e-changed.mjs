@@ -76,7 +76,7 @@ const rules = [
     /elements3d\/(facade|facade_layout|building|glass|roof|roof_layout)\.ts$/,
     () => ["e2e/facade.spec.ts"],
   ],
-  [/parked_cars\.ts$|traffic\.ts$/, () => ["e2e/parked_cars.spec.ts"]],
+  [/parked_cars\.ts$|parking_layout\.ts$|traffic\.ts$/, () => ["e2e/parked_cars.spec.ts"]],
   [/elements3d\/water\.ts$/, () => ["e2e/water.spec.ts"]],
   [/elements3d\/green\.ts$/, () => ["e2e/green.spec.ts"]],
   [/elements3d\/bench\.ts$/, () => ["e2e/benches.spec.ts"]],

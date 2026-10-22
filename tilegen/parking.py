@@ -21,7 +21,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from itertools import pairwise
 
+import shapely
 from geo import TILE_ZOOM, coord_to_tile
+from shapely.ops import substring
 
 # The parked cars use the moving cars' body; keep these in sync with
 # CAR_TRAFFIC in src/traffic.ts.
@@ -74,6 +76,14 @@ OCCUPANCY = 95
 # not eat legitimate neighbours.
 MIN_SPOT_SPACING = 2.0
 
+# A parking row stops short of a junction: if its end is this close to another
+# car road (and that road crosses it rather than running alongside), trim this
+# many meters from the row. Only car roads are checked; pedestrian areas keep
+# their Italian parking anarchy.
+JUNCTION_DISTANCE = 8.0
+JUNCTION_TRIM = 8.0
+JUNCTION_MIN_LENGTH = 12.0
+
 # which way wins when two ways overlap: the bigger road keeps its parking
 HIGHWAY_RANK = {
     "primary": 0,
@@ -98,6 +108,23 @@ class ParkingWay:
     coords: list[tuple[float, float]]
     highway: str
     roundabout: bool = False
+
+
+@dataclass(frozen=True)
+class ParkingRow:
+    """A kerb-side parking lane, authored by tilegen and filled by the frontend.
+
+    `coords` is the line the car centres sit on; `side` keeps the orientation
+    (left/right of the way) so the renderer can turn perpendicular and fishbone
+    cars. The tile carries only these rows, never the individual car positions.
+    """
+
+    id: str
+    coords: list[tuple[float, float]]
+    style: str
+    pitch: float
+    side: int
+    occupancy: int = OCCUPANCY
 
 
 def _hash(text: str) -> int:
@@ -193,6 +220,31 @@ def walk_way(
     return spots
 
 
+def parking_offset(style: str, highway: str) -> float:
+    """Distance from the road centreline to the car centre for this style."""
+    half_road = ROAD_HALF_WIDTH.get(highway, DEFAULT_HALF_WIDTH)
+    if style == PARALLEL:
+        return half_road + CAR_WIDTH / 2 + 0.25
+    if style == PERPENDICULAR:
+        return half_road + CAR_LENGTH / 2 + 0.25
+    # a 45-degree herringbone bay; the car's extent normal to the road is the
+    # projection of its length and width
+    return (
+        half_road
+        + (CAR_LENGTH / 2) * math.sin(math.pi / 4)
+        + (CAR_WIDTH / 2) * math.cos(math.pi / 4)
+        + 0.25
+    )
+
+
+def parking_heading(road_heading: float, side: int, style: str) -> float:
+    if style == PARALLEL:
+        return road_heading + (math.pi if side > 0 else 0.0)
+    if style == PERPENDICULAR:
+        return road_heading + side * math.pi / 2
+    return road_heading + side * (math.pi / 2 - math.pi / 4)
+
+
 def _car_at(
     lon: float,
     lat: float,
@@ -204,23 +256,8 @@ def _car_at(
     """The car's position and heading for one bay. `side` is +1 for the left of
     the way and -1 for the right; the car sits just beyond the carriageway and
     faces the direction a car parked there would."""
-    half_road = ROAD_HALF_WIDTH.get(highway, DEFAULT_HALF_WIDTH)
-    if style == PARALLEL:
-        offset = half_road + CAR_WIDTH / 2 + 0.25
-        heading = road_heading + (math.pi if side > 0 else 0.0)
-    elif style == PERPENDICULAR:
-        offset = half_road + CAR_LENGTH / 2 + 0.25
-        heading = road_heading + side * math.pi / 2
-    else:
-        # a 45-degree herringbone bay; the car's extent normal to the road is
-        # the projection of its length and width
-        offset = (
-            half_road
-            + (CAR_LENGTH / 2) * math.sin(math.pi / 4)
-            + (CAR_WIDTH / 2) * math.cos(math.pi / 4)
-            + 0.25
-        )
-        heading = road_heading + side * (math.pi / 2 - math.pi / 4)
+    offset = parking_offset(style, highway)
+    heading = parking_heading(road_heading, side, style)
     # outward normal for this side, in meters
     normal_east = -math.sin(road_heading) * side
     normal_north = math.cos(road_heading) * side
@@ -230,6 +267,264 @@ def _car_at(
         lat + normal_north * offset / METERS_PER_DEG_LAT,
         heading,
     )
+
+
+def offset_polyline(
+    coords: list[tuple[float, float]], offset: float, side: int
+) -> list[tuple[float, float]]:
+    """Offset a lon/lat polyline to one side by `offset` meters.
+
+    Each vertex uses the average of its adjacent segment normals, so a corner
+    gets one miter point instead of a double vertex. The result is the line the
+    car centres will be placed on, not another copy of the road.
+    """
+    if len(coords) < 2:
+        return []
+    segments: list[tuple[tuple[float, float], tuple[float, float], float, float]] = []
+    for a, b in pairwise(coords):
+        east, north = _segment(a, b)
+        length = math.hypot(east, north)
+        if length < 1e-6:
+            continue
+        segments.append((a, b, east / length, north / length))
+    if not segments:
+        return []
+    out: list[tuple[float, float]] = []
+    for index, point in enumerate(coords):
+        normals: list[tuple[float, float]] = []
+        if index > 0 and index <= len(segments):
+            _, _, east, north = segments[index - 1]
+            normals.append((-north * side, east * side))
+        if index < len(segments):
+            _, _, east, north = segments[index]
+            normals.append((-north * side, east * side))
+        if not normals:
+            continue
+        east = sum(normal[0] for normal in normals)
+        north = sum(normal[1] for normal in normals)
+        length = math.hypot(east, north)
+        if length < 1e-9:
+            continue
+        cos_lat = math.cos(math.radians(point[1]))
+        out.append(
+            (
+                point[0] + (east / length) * offset / (METERS_PER_DEG_LON * cos_lat),
+                point[1] + (north / length) * offset / METERS_PER_DEG_LAT,
+            )
+        )
+    return out
+
+
+def _way_at(
+    way: ParkingWay, point: tuple[float, float]
+) -> tuple[float, tuple[float, float]]:
+    """Distance (m) and direction of the nearest segment of a way."""
+    best_distance = math.inf
+    best_direction = (1.0, 0.0)
+    for a, b in pairwise(way.coords):
+        east, north = _segment(a, b)
+        length = math.hypot(east, north)
+        if length < 1e-9:
+            continue
+        px, py = _segment(a, point)
+        t = max(0.0, min(1.0, (px * east + py * north) / (length * length)))
+        distance = math.hypot(px - east * t, py - north * t)
+        if distance < best_distance:
+            best_distance = distance
+            best_direction = (east / length, north / length)
+    return best_distance, best_direction
+
+
+def _nearest_other_road(
+    point: tuple[float, float],
+    way_id: str,
+    ways: list[ParkingWay],
+    tree: shapely.STRtree,
+) -> float:
+    delta = 0.00012
+    candidates = tree.query(
+        shapely.box(
+            point[0] - delta,
+            point[1] - delta,
+            point[0] + delta,
+            point[1] + delta,
+        )
+    )
+    nearest = math.inf
+    for index in candidates:
+        way = ways[index]
+        if way.id == way_id:
+            continue
+        distance, _direction = _way_at(way, point)
+        nearest = min(nearest, distance)
+    return nearest
+
+
+def _clear_pieces(
+    line: shapely.LineString,
+    coords: list[tuple[float, float]],
+    way_id: str,
+    ways: list[ParkingWay],
+    tree: shapely.STRtree,
+    pitch: float,
+) -> list[list[tuple[float, float]]]:
+    """Split a parking row around every crossing road and trim its ends.
+
+    A row can cross a road in the middle even when neither endpoint is near one;
+    those crossings used to leave cars parked across the junction. Subtract an
+    8 m window around every intersection (and endpoint), then keep only pieces
+    long enough to hold at least one bay.
+    """
+    total = way_length(coords)
+    if total <= 0:
+        return []
+    intervals: list[tuple[float, float]] = []
+
+    for index in tree.query(line):
+        way = ways[index]
+        if way.id == way_id:
+            continue
+        other = shapely.LineString(way.coords)
+        if not line.intersects(other):
+            continue
+        intersection = line.intersection(other)
+        for part in shapely.get_parts(intersection):
+            if part.is_empty:
+                continue
+            if part.geom_type == "Point":
+                distance = line.project(part) / line.length * total
+                intervals.append(
+                    (
+                        max(0.0, distance - JUNCTION_TRIM),
+                        min(total, distance + JUNCTION_TRIM),
+                    )
+                )
+            elif part.geom_type in ("LineString", "MultiLineString"):
+                for segment in shapely.get_parts(part):
+                    if segment.geom_type != "LineString" or segment.is_empty:
+                        continue
+                    start = (
+                        line.project(shapely.Point(segment.coords[0]))
+                        / line.length
+                        * total
+                    )
+                    end = (
+                        line.project(shapely.Point(segment.coords[-1]))
+                        / line.length
+                        * total
+                    )
+                    low, high = sorted((start, end))
+                    intervals.append(
+                        (
+                            max(0.0, low - JUNCTION_TRIM),
+                            min(total, high + JUNCTION_TRIM),
+                        )
+                    )
+
+    if _nearest_other_road(coords[0], way_id, ways, tree) <= JUNCTION_DISTANCE:
+        intervals.append((0.0, min(total, JUNCTION_TRIM)))
+    if _nearest_other_road(coords[-1], way_id, ways, tree) <= JUNCTION_DISTANCE:
+        intervals.append((max(0.0, total - JUNCTION_TRIM), total))
+
+    if not intervals:
+        return [coords]
+    intervals.sort()
+    merged: list[tuple[float, float]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+
+    min_length = max(4.0, pitch)
+    pieces: list[list[tuple[float, float]]] = []
+    cursor = 0.0
+    for start, end in merged + [(total, total)]:
+        if start - cursor >= min_length:
+            piece = substring(
+                line,
+                cursor / total,
+                start / total,
+                normalized=True,
+            )
+            if piece.geom_type == "LineString" and not piece.is_empty:
+                pieces.append([(lon, lat) for lon, lat in piece.coords])
+        cursor = max(cursor, end)
+    return pieces
+
+
+def parking_rows(ways: list[ParkingWay]) -> list[ParkingRow]:
+    """Author kerb-side parking as rows, in priority order and deduped.
+
+    A row is one side of one way at the style's car-centre offset. Overlapping
+    rows (a service way beside a main road, dual carriageways) are dropped when
+    most of their sample bays land on an already-kept row; the frontend then
+    only has to walk the rows, not reproduce the road overlap logic.
+    """
+    rows: list[ParkingRow] = []
+    tree = shapely.STRtree([shapely.LineString(way.coords) for way in ways])
+    ordered = sorted(
+        ways,
+        key=lambda way: (HIGHWAY_RANK.get(way.highway, len(HIGHWAY_RANK)), way.id),
+    )
+    cell = MIN_SPOT_SPACING
+    reference_lat = sum(lat for way in ordered for _, lat in way.coords) / max(
+        1, sum(len(way.coords) for way in ordered)
+    )
+    cos_ref = math.cos(math.radians(reference_lat))
+    grid: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
+
+    for way in ordered:
+        if way.roundabout or way.highway not in PARKING_HIGHWAYS:
+            continue
+        if way_length(way.coords) < MIN_WAY_LENGTH:
+            continue
+        seed = _hash(way.id)
+        style = parking_style(seed, way.highway)
+        pitch = bay_pitch(style)
+        offset = parking_offset(style, way.highway)
+        for side in (1, -1):
+            coords = offset_polyline(way.coords, offset, side)
+            if len(coords) < 2:
+                continue
+            pieces = _clear_pieces(
+                shapely.LineString(coords), coords, way.id, ways, tree, pitch
+            )
+            for piece in pieces:
+                samples = [(lon, lat) for lon, lat, _ in walk_way(piece, pitch)]
+                clashes = 0
+                for lon, lat in samples:
+                    x = lon * METERS_PER_DEG_LON * cos_ref
+                    y = lat * METERS_PER_DEG_LAT
+                    cx = math.floor(x / cell)
+                    cy = math.floor(y / cell)
+                    for ix in (cx - 1, cx, cx + 1):
+                        for iy in (cy - 1, cy, cy + 1):
+                            if any(
+                                math.hypot(x - ox, y - oy) < MIN_SPOT_SPACING
+                                for ox, oy in grid[(ix, iy)]
+                            ):
+                                clashes += 1
+                                break
+                        else:
+                            continue
+                        break
+                if samples and clashes / len(samples) > 0.5:
+                    continue
+                for lon, lat in samples:
+                    x = lon * METERS_PER_DEG_LON * cos_ref
+                    y = lat * METERS_PER_DEG_LAT
+                    grid[(math.floor(x / cell), math.floor(y / cell))].append((x, y))
+                rows.append(
+                    ParkingRow(
+                        id=f"{way.id}:{'+' if side > 0 else '-'}",
+                        coords=piece,
+                        style=style,
+                        pitch=pitch,
+                        side=side,
+                    )
+                )
+    return rows
 
 
 def _dedupe(

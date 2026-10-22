@@ -785,6 +785,26 @@ def test_platform_polygons_and_line_platforms():
     )
 
 
+def test_parking_rows_are_clipped_to_each_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    row = main.ParkingRow(
+        id="way/1:+",
+        coords=[(min_lon - 0.001, min_lat + 0.001), (max_lon + 0.001, max_lat - 0.001)],
+        style="parallel",
+        pitch=5.0,
+        side=1,
+    )
+    by_tile = main.parking_rows_by_tile([row], 15)
+    assert by_tile
+    for rows in by_tile.values():
+        for part in rows:
+            assert part["id"] == "way/1:+"
+            assert part["style"] == "parallel"
+            assert part["pitch"] == 5.0
+            assert part["side"] == 1
+            assert len(part["coords"]) >= 2
+
+
 def test_construction_is_clipped_and_marks_the_crane_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

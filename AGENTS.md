@@ -157,9 +157,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   routes; the only fleet renderer. It places a slice of vehicles per update at
   ~30 Hz (spread over frames) and culls runs outside the map bounds, so the CPU
   only samples what is on screen; positions stay a pure function of time.
-- `src/parked_cars.ts` — static parked cars. The tile's `parking` block
-  (`[lon, lat, heading]` per occupied bay) becomes one InstancedMesh per tile,
-  sized to that tile's spots and bounded so it culls when off screen. The layer
+- `src/parking_layout.ts` — walks the tile's authored parking rows (kerb line,
+  style, pitch, side, occupancy) and places the occupied cars in model space.
+  Pure and unit-tested; `geojson_data` turns the result into `ParkedCar`s.
+- `src/parked_cars.ts` — static parked cars. The placed cars become one
+  InstancedMesh per tile, sized to that tile's spots and bounded so it culls
+  when off screen. The layer
   diffs the 3x3 center window (`diffParkedTiles`): a tile that enters is built, a
   tile that leaves is disposed (instance buffers only; the geometry and material
   stay shared), and a tile that stays with the same spot array is untouched. An
@@ -194,15 +197,17 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
-- `tilegen/parking.py` — places static parked cars: both sides of every
-  parking-eligible highway, bays at a pitch set by a seeded style (`parallel`,
-  `perpendicular`, `fishbone`), 95% occupied. Skips motorways/trunks/links,
-  roundabouts and ways under `MIN_WAY_LENGTH`; spots are grouped per tile.
-  Overlapping ways (a service way along a road, dual carriageways) are deduped
-  at `MIN_SPOT_SPACING`, the higher road class winning. Pure
-  (plain `ParkingWay` inputs; `main.load_parking_ways` reads the parquet), so it
-  is unit-tested like `traffic.py`. `main.outside_cemeteries` drops ways whose
-  midpoint is inside a cemetery, so the grave paths do not fill with cars.
+- `tilegen/parking.py` — authors static parking: one kerb row per side of every
+  parking-eligible highway, at a pitch set by a seeded style (`parallel`,
+  `perpendicular`, `fishbone`), 95% occupancy. Skips motorways/trunks/links,
+  roundabouts and ways under `MIN_WAY_LENGTH`; rows are clipped per tile by
+  `main.parking_rows_by_tile`. Overlapping rows are deduped at
+  `MIN_SPOT_SPACING`, the higher road class winning. A row end within
+  `JUNCTION_DISTANCE` of another car road is trimmed by `JUNCTION_TRIM`, so
+  parking stops before junctions; pedestrian areas are not included. Pure (plain `ParkingWay`
+  inputs; `main.load_parking_ways` reads the parquet), so it is unit-tested like
+  `traffic.py`. `main.outside_cemeteries` drops ways whose midpoint is inside a
+  cemetery, so the grave paths do not fill with cars.
 - `tilegen/lamps.py` — street lamps for the night glow: one every `LAMP_SPACING`
   (55 m) on both sides of every parking-eligible road, just beyond the kerb,
   grouped per tile. Pure and unit-tested; uses the same `ParkingWay` inputs.
@@ -337,10 +342,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   path and timing are unchanged — nothing waits.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
-- **parking bay / parked car** — a potential kerbside space at a style pitch
-  (parallel, perpendicular or fishbone), and an occupied one, stored as
-  `[lon, lat, heading]` in a tile's top-level `parking` block. 95% of bays are
-  occupied; the layer is static and gated like the facade detail.
+- **parking row / parked car** — a kerb line authored by tilegen with a style
+  (parallel, perpendicular, fishbone), pitch, side and occupancy; clipped to the
+  tile. The frontend places the occupied cars along it. The layer is static and
+  gated like the facade detail; lamps are deliberately not part of this
+  authoring pass.
 - **street lamp / signal head** — the night light sources. Lamps are
   `[lon, lat]` in a tile's top-level `lamps` block; a signal head is a
   `traffic_signal` Point. Both are additive sprites on a thin instanced post,
