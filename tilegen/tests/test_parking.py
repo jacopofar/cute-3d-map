@@ -2,6 +2,7 @@ import math
 
 import parking
 import pytest
+import shapely
 
 
 def test_way_length_is_measured_in_meters():
@@ -91,6 +92,83 @@ def test_parking_spots_fills_both_sides_and_keeps_95_percent():
     # and every spot is in a tile
     assert by_tile
     assert all(len(spot) == 3 for spot in spots)
+
+
+def test_offset_polyline_moves_to_the_requested_side():
+    coords = [(9.0, 45.0), (9.0, 45.001)]
+    left = parking.offset_polyline(coords, 4.0, 1)
+    right = parking.offset_polyline(coords, 4.0, -1)
+    assert left[0][0] < 9.0 < right[0][0]
+    # the north-running way is offset east/west by four meters
+    assert abs(
+        (left[0][0] - 9.0) * parking.METERS_PER_DEG_LON * math.cos(math.radians(45.0))
+    ) == pytest.approx(4.0, rel=0.02)
+
+
+def test_parking_rows_stop_short_of_a_junction():
+    main_way = parking.ParkingWay(
+        id="way/1", coords=[(9.0, 45.0), (9.0, 45.001)], highway="residential"
+    )
+    cross = parking.ParkingWay(
+        id="way/2", coords=[(9.0, 45.001), (9.001, 45.001)], highway="residential"
+    )
+    alone = [
+        row for row in parking.parking_rows([main_way]) if row.id.startswith("way/1")
+    ]
+    at_junction = [
+        row
+        for row in parking.parking_rows([main_way, cross])
+        if row.id.startswith("way/1")
+    ]
+    assert alone and at_junction
+    assert max(parking.way_length(row.coords) for row in at_junction) < max(
+        parking.way_length(row.coords) for row in alone
+    )
+    # the trimmed end is no longer on the crossing road
+    for row in at_junction:
+        for endpoint in (row.coords[0], row.coords[-1]):
+            assert (
+                min(
+                    parking._way_at(cross, endpoint)[0],
+                    parking._way_at(main_way, endpoint)[0],
+                )
+                < 50.0
+            )
+
+
+def test_parking_row_is_split_at_a_mid_path_crossing():
+    coords = [(9.0, 45.0), (9.0, 45.002)]
+    way = parking.ParkingWay(id="way/1", coords=coords, highway="residential")
+    cross = parking.ParkingWay(
+        id="way/2",
+        coords=[(8.999, 45.001), (9.001, 45.001)],
+        highway="residential",
+    )
+    ways = [way, cross]
+    tree = shapely.STRtree([shapely.LineString(w.coords) for w in ways])
+    pieces = parking._clear_pieces(
+        shapely.LineString(coords), coords, way.id, ways, tree, 4.0
+    )
+    assert len(pieces) == 2
+    assert all(parking.way_length(piece) >= 4.0 for piece in pieces)
+    assert all(
+        min(parking._way_at(cross, piece[0])[0], parking._way_at(cross, piece[-1])[0])
+        > 7.0
+        for piece in pieces
+    )
+
+
+def test_parking_rows_carry_style_pitch_and_both_sides():
+    way = parking.ParkingWay(
+        id="way/7", coords=[(9.0, 45.0), (9.0, 45.002)], highway="tertiary"
+    )
+    rows = parking.parking_rows([way])
+    assert len(rows) == 2
+    assert {row.side for row in rows} == {1, -1}
+    assert all(row.id.startswith("way/7:") for row in rows)
+    assert all(row.pitch == parking.bay_pitch(row.style) for row in rows)
+    assert all(row.occupancy == parking.OCCUPANCY for row in rows)
+    assert all(len(row.coords) >= 2 for row in rows)
 
 
 def test_parking_spots_is_stable_across_rebuilds():

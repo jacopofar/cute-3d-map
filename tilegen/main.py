@@ -15,7 +15,7 @@ import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
 from lamps import lamp_spots
-from parking import PARKING_HIGHWAYS, ParkingWay, parking_spots
+from parking import PARKING_HIGHWAYS, ParkingRow, ParkingWay, parking_rows
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.prepared import prep
@@ -1657,6 +1657,44 @@ def load_crossing_points(input_parquet: Path) -> list[CrossingPoint]:
     return crossing_points_from_rows(rows)
 
 
+def parking_rows_by_tile(
+    rows: list[ParkingRow], zoom: int
+) -> dict[tuple[int, int], list[dict]]:
+    """Clip authored parking rows to the tile that will carry them. The row
+    metadata stays intact; only the line is split at tile seams."""
+    by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    for row in rows:
+        line = shapely.LineString(row.coords)
+        min_lon, min_lat, max_lon, max_lat = line.bounds
+        min_tx, max_ty = coord_to_tile(min_lon, max_lat, zoom)
+        max_tx, min_ty = coord_to_tile(max_lon, min_lat, zoom)
+        for tx in range(min_tx, max_tx + 1):
+            for ty in range(min_ty, max_ty + 1):
+                box = shapely.box(*tile_lonlat_bounds(tx, ty, zoom))
+                clipped = line.intersection(box)
+                if clipped.is_empty:
+                    continue
+                for part in shapely.get_parts(clipped):
+                    if part.geom_type != "LineString":
+                        continue
+                    coords = [
+                        [round(lon, 7), round(lat, 7)] for lon, lat in part.coords
+                    ]
+                    if len(coords) < 2:
+                        continue
+                    by_tile[(tx, ty)].append(
+                        {
+                            "id": row.id,
+                            "coords": coords,
+                            "style": row.style,
+                            "pitch": round(row.pitch, 2),
+                            "side": row.side,
+                            "occupancy": row.occupancy,
+                        }
+                    )
+    return dict(by_tile)
+
+
 def load_road_data(input_parquet: Path) -> dict[int, RoadData]:
     """Match every crossing/stop/signal node to its road way and keep the local
     bearing, width and lane tags. A spatial index over the drivable ways is
@@ -2019,7 +2057,7 @@ def parquet_to_tiles(
     # parked cars and street lamps: static, along both sides of the
     # parking-eligible roads. Pure geometry, so they do not depend on (or need)
     # the traffic loop build.
-    parking_by_tile: dict[tuple[int, int], list[list[float]]] = {}
+    parking_by_tile: dict[tuple[int, int], list[dict]] = {}
     lamp_by_tile: dict[tuple[int, int], list[list[float]]] = {}
     if parking or lamps:
         logger.info("Building parked cars and street lamps")
@@ -2033,11 +2071,12 @@ def parquet_to_tiles(
             )
         parking_ways = kept
         if parking:
-            parking_by_tile = parking_spots(parking_ways, zoom_level)
+            parking_data = parking_rows(parking_ways)
+            parking_by_tile = parking_rows_by_tile(parking_data, zoom_level)
             logger.info(
-                "parking: %d ways -> %d spots in %d tiles",
+                "parking: %d ways -> %d rows in %d tiles",
                 len(parking_ways),
-                sum(len(spots) for spots in parking_by_tile.values()),
+                sum(len(rows) for rows in parking_by_tile.values()),
                 len(parking_by_tile),
             )
         if lamps:

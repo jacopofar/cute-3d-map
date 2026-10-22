@@ -67,8 +67,9 @@ The project has two halves:
 
    A tile may also carry a top-level `traffic` array (not a GeoJSON feature):
    the precomputed vehicle routes that fall inside the tile. See below. A
-   `parking` array holds the static parked cars assigned to the tile, each
-   `[lon, lat, heading]` (heading in model-space radians); see "Parked cars". A
+   `parking` array holds the authored parking rows assigned to the tile: each
+   has `coords` (the kerb line), `style` (parallel/perpendicular/fishbone),
+   `pitch`, `side` and `occupancy`; the frontend places the cars along it. A
    `lamps` array holds the street lamps as `[lon, lat]`; see "Light and
    atmosphere".
 
@@ -399,22 +400,23 @@ is a stateless renderer that samples it. There is no runtime simulation.
 
 ### Parked cars
 
-The kerbs are filled too, statically. `tilegen/parking.py` walks both sides of
-every parking-eligible road (no motorways/trunks, no `*_link` connectors, no
-roundabouts, nothing under 30 m), lays out bays at a pitch set by a seeded
-style — parallel, perpendicular or fishbone — and occupies 95% of them. The mix
-depends on the road class: narrow streets are mostly parallel, wider roads turn
-to bays.
+The kerbs are filled too, statically. `tilegen/parking.py` authors parking as
+one line per side of every parking-eligible road (no motorways/trunks, no
+`*_link` connectors, no roundabouts, nothing under 30 m), at a pitch set by a
+seeded style — parallel, perpendicular or fishbone. Rows that share a kerb (a
+service way beside a road, the two carriageways of a dual carriageway) are
+deduped before they reach the tile. A row end within 8 m of another car road is
+trimmed back by 8 m, so cars do not park in the mouth of a junction; pedestrian
+areas are intentionally not part of this check.
 
-Each occupied bay belongs to exactly one tile (no clipping), stored in that
-tile's `parking` block, and the frontend draws them with the moving cars' body
-as one static `InstancedMesh`. Ways that share a kerb (a service way beside a
-road, the two carriageways of a dual carriageway) are deduped, with the bigger
-road winning, so two styles never stack on one spot. Parked cars are lit like
-the buildings, so they darken at night, unlike the unlit moving fleet. Like the
-window detail the layer only exists above zoom 17 and only for the 3x3 tiles
-around the centre: the fully loaded 7x7 window would be ~370k cars, almost all
-off-screen. The **parked cars** checkbox is a plain visibility switch.
+The tile carries only the authored rows, clipped at tile seams: `coords`, style,
+pitch, side and occupancy. `src/parking_layout.ts` walks each row and places 95%
+of the bays in model space; `src/parked_cars.ts` draws the result with the moving
+cars' body as one static `InstancedMesh`. Parked cars are lit like the buildings,
+so they darken at night, unlike the unlit moving fleet. Like the window detail
+the layer only exists above zoom 17 and only for the 3x3 tiles around the
+centre: the fully loaded 7x7 window would be ~370k cars, almost all off-screen.
+The **parked cars** checkbox is a plain visibility switch.
 
 ### Loop report
 
