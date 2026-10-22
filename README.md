@@ -133,7 +133,10 @@ and walls. Sky/fog colors, ambient warmth
 and a whole-canvas warm multiply (`#grade`) follow the same model, so golden hour
 is warm with long shadows while noon is neutral.
 
-At night the basemap swaps to the dark style (with a short fade through black),
+The **basemap** checkbox swaps the MapTiler style for an empty one, leaving the
+3D scene on its own; unchecking it is useful for screenshots and for checking
+the generated city against the real map. At night the basemap swaps to the dark
+style (with a short fade through black),
 the scene lights and parked cars dim, and the street lamps and traffic signals
 glow: `tilegen/lamps.py` puts a lamp every 55 m on both sides of every
 parking-eligible road, and the signal heads blink red/green on the same global

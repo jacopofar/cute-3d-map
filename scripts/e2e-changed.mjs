@@ -89,7 +89,12 @@ const rules = [
   ],
   [
     /^src\/(main|geojson_data)\.ts$|^index\.html$|map_style\.css$/,
-    () => ["e2e/smoke.spec.ts", "e2e/layers.spec.ts", "e2e/permalink.spec.ts"],
+    () => [
+      "e2e/smoke.spec.ts",
+      "e2e/layers.spec.ts",
+      "e2e/permalink.spec.ts",
+      "e2e/basemap.spec.ts",
+    ],
   ],
 ];
 
