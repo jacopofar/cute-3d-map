@@ -101,6 +101,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   directions, width, lanes and `turn:lanes`; merged per tile (kind
   `road_marking`), no popup. A two-way road gets the line on the right half,
   a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/sidewalk.ts` — sidewalk polygons authored by tilegen
+  (`sidewalk` kind): a 0.14 m slab with darker kerb faces, one mesh per tile,
+  `#sidewalks-toggle`, gated at zoom 16. Mapped `footway=sidewalk` ways and
+  procedural road-side strips are unioned in tilegen.
 - `src/elements3d/platform.ts` — clipped rail/tram platforms raised into a
   concrete slab with a white edge, one Lambert mesh per tile; line platforms
   are buffered to a 4 m ribbon by tilegen. Clickable with the name and OSM link.
@@ -197,6 +201,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
+- `tilegen/sidewalks.py` — authors sidewalk centre lines from car roads
+  (default both sides; explicit `sidewalk:left/right`, `sidewalk` and
+  `sidewalk=separate` honoured) and feeds mapped `footway=sidewalk` ways into
+  the same polygon union. Width from `sidewalk:side:width`/`sidewalk:width`,
+  default 2 m (1.5 m service). `main.sidewalk_polygons_by_tile` buffers, unions,
+  subtracts road surfaces and closes corner gaps.
 - `tilegen/parking.py` — authors static parking: one kerb row per side of every
   parking-eligible highway, at a pitch set by a seeded style (`parallel`,
   `perpendicular`, `fishbone`), 95% occupancy. Skips motorways/trunks/links,
@@ -368,7 +378,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
   `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
-  `#lampposts-toggle`, `#transit-toggle`, `#bloom-toggle`,
+  `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#bloom-toggle`,
   `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars and lamp posts are their own meshes, so those

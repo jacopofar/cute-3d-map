@@ -108,6 +108,13 @@ class ParkingWay:
     coords: list[tuple[float, float]]
     highway: str
     roundabout: bool = False
+    # sidewalk generation reads these; parking ignores them
+    sidewalk_left: bool = True
+    sidewalk_right: bool = True
+    sidewalk_width_left: float = 2.0
+    sidewalk_width_right: float = 2.0
+    # full OSM road width where it can be estimated; sidewalks sit outside this
+    width: float | None = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +225,17 @@ def walk_way(
         )
         distance += pitch
     return spots
+
+
+def sidewalk_side(tags, side: str) -> bool:
+    """Whether a road carries a generated sidewalk on `left` or `right`.
+    `separate` means the footway is mapped on its own, so we leave it alone."""
+    value = str(tags.get(f"sidewalk:{side}") or tags.get("sidewalk") or "").lower()
+    if value in ("no", "none", "separate"):
+        return False
+    if value in ("left", "right"):
+        return value == side
+    return True
 
 
 def parking_offset(style: str, highway: str) -> float:
@@ -360,13 +378,16 @@ def _nearest_other_road(
     return nearest
 
 
-def _clear_pieces(
+def clear_pieces(
     line: shapely.LineString,
     coords: list[tuple[float, float]],
     way_id: str,
     ways: list[ParkingWay],
     tree: shapely.STRtree,
     pitch: float,
+    clearance: float = JUNCTION_TRIM,
+    endpoint_distance: float = JUNCTION_DISTANCE,
+    min_length: float | None = None,
 ) -> list[list[tuple[float, float]]]:
     """Split a parking row around every crossing road and trim its ends.
 
@@ -395,8 +416,8 @@ def _clear_pieces(
                 distance = line.project(part) / line.length * total
                 intervals.append(
                     (
-                        max(0.0, distance - JUNCTION_TRIM),
-                        min(total, distance + JUNCTION_TRIM),
+                        max(0.0, distance - clearance),
+                        min(total, distance + clearance),
                     )
                 )
             elif part.geom_type in ("LineString", "MultiLineString"):
@@ -416,15 +437,15 @@ def _clear_pieces(
                     low, high = sorted((start, end))
                     intervals.append(
                         (
-                            max(0.0, low - JUNCTION_TRIM),
-                            min(total, high + JUNCTION_TRIM),
+                            max(0.0, low - clearance),
+                            min(total, high + clearance),
                         )
                     )
 
-    if _nearest_other_road(coords[0], way_id, ways, tree) <= JUNCTION_DISTANCE:
-        intervals.append((0.0, min(total, JUNCTION_TRIM)))
-    if _nearest_other_road(coords[-1], way_id, ways, tree) <= JUNCTION_DISTANCE:
-        intervals.append((max(0.0, total - JUNCTION_TRIM), total))
+    if _nearest_other_road(coords[0], way_id, ways, tree) <= endpoint_distance:
+        intervals.append((0.0, min(total, clearance)))
+    if _nearest_other_road(coords[-1], way_id, ways, tree) <= endpoint_distance:
+        intervals.append((max(0.0, total - clearance), total))
 
     if not intervals:
         return [coords]
@@ -436,11 +457,11 @@ def _clear_pieces(
         else:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
 
-    min_length = max(4.0, pitch)
+    minimum = max(4.0, pitch) if min_length is None else min_length
     pieces: list[list[tuple[float, float]]] = []
     cursor = 0.0
     for start, end in merged + [(total, total)]:
-        if start - cursor >= min_length:
+        if start - cursor >= minimum:
             piece = substring(
                 line,
                 cursor / total,
@@ -487,7 +508,7 @@ def parking_rows(ways: list[ParkingWay]) -> list[ParkingRow]:
             coords = offset_polyline(way.coords, offset, side)
             if len(coords) < 2:
                 continue
-            pieces = _clear_pieces(
+            pieces = clear_pieces(
                 shapely.LineString(coords), coords, way.id, ways, tree, pitch
             )
             for piece in pieces:

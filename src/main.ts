@@ -87,6 +87,8 @@ const FACADE_TILE_MARGIN = 1;
 // the whole city, so show them where they read (measured: posts and rails from
 // 19, a dotted line at 18, noise at 17)
 const FENCE_MIN_ZOOM = 18;
+// sidewalks are a street-level detail; the slabs are cheap but there are many
+const SIDEWALK_MIN_ZOOM = 16;
 
 // MapTiler basemap styles. The map opens on the day style and swaps to the dark
 // one at night, so the bright basemap does not clash with the dark 3D scene.
@@ -308,6 +310,8 @@ class CoolMap {
   private bridgesEnabled = true;
   // transit stops, platforms and rails share one checkbox
   private transitEnabled = true;
+  // sidewalk slabs are their own per-tile mesh
+  private sidewalksEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -838,6 +842,10 @@ class CoolMap {
     });
     wireToggle("#basemap-toggle", (on) => {
       this.setBasemapEnabled(on);
+    });
+    wireToggle("#sidewalks-toggle", (on) => {
+      this.sidewalksEnabled = on;
+      this.applySidewalkVisibility();
     });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
@@ -2084,6 +2092,15 @@ class CoolMap {
 
   // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
   // tunnels) drives both kinds
+  private applySidewalkVisibility() {
+    const on = this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM;
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "sidewalk") mesh.visible = on;
+      }
+    }
+  }
+
   private applyTransitVisibility() {
     for (const meshes of Object.values(this.loadedTiles)) {
       for (const mesh of meshes) {
@@ -2170,6 +2187,7 @@ class CoolMap {
     this.applyFenceVisibility();
     this.applyBridgeVisibility();
     this.applyTransitVisibility();
+    this.applySidewalkVisibility();
   }
 
   private disposeDetail(key: string) {

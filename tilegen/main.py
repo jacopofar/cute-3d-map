@@ -15,10 +15,19 @@ import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from impute import IMPUTED_FIELDS, Distribution, impute
 from lamps import lamp_spots
-from parking import PARKING_HIGHWAYS, ParkingRow, ParkingWay, parking_rows
+from parking import (
+    DEFAULT_HALF_WIDTH,
+    PARKING_HIGHWAYS,
+    ROAD_HALF_WIDTH,
+    ParkingRow,
+    ParkingWay,
+    parking_rows,
+    sidewalk_side,
+)
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.prepared import prep
+from sidewalks import SidewalkLine, sidewalk_centerlines
 from traffic import (
     CAR_CONFIG,
     DRIVABLE_HIGHWAYS,
@@ -993,7 +1002,7 @@ def to_platform(feature_id, tags, s, tile_box) -> dict | None:
     ):
         return None
     if s.geom_type in ("LineString", "MultiLineString"):
-        s = s.buffer(2.0 / 111_000, cap_style=2, join_style=2)
+        s = s.buffer(2.0 / 111_000, cap_style="flat", join_style=2)
     clipped = _flatten(s.intersection(tile_box), "Polygon")
     if clipped is None or area_square_meters(clipped) < 15:
         return None
@@ -1578,6 +1587,10 @@ def load_parking_ways(input_parquet: Path) -> list[ParkingWay]:
         if value not in PARKING_HIGHWAYS:
             continue
         roundabout = tags.get("junction") in ("roundabout", "circular")
+        sidewalk_tagged = any(
+            tags.get(key) for key in ("sidewalk", "sidewalk:left", "sidewalk:right")
+        )
+        make_sidewalk = value != "service" or bool(sidewalk_tagged)
         geometry = shapely.from_wkb(wkb)
         parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
         for part in parts:
@@ -1588,6 +1601,19 @@ def load_parking_ways(input_parquet: Path) -> list[ParkingWay]:
                         coords=[(c[0], c[1]) for c in part.coords],
                         highway=value,
                         roundabout=roundabout,
+                        sidewalk_left=make_sidewalk and sidewalk_side(tags, "left"),
+                        sidewalk_right=make_sidewalk and sidewalk_side(tags, "right"),
+                        sidewalk_width_left=parse_length(
+                            tags.get("sidewalk:left:width")
+                            or tags.get("sidewalk:width")
+                        )
+                        or (1.5 if value == "service" else 2.0),
+                        sidewalk_width_right=parse_length(
+                            tags.get("sidewalk:right:width")
+                            or tags.get("sidewalk:width")
+                        )
+                        or (1.5 if value == "service" else 2.0),
+                        width=road_width(tags),
                     )
                 )
     return ways
@@ -1655,6 +1681,128 @@ def load_crossing_points(input_parquet: Path) -> list[CrossingPoint]:
         {"input_path": str(input_parquet)},
     ).fetchall()
     return crossing_points_from_rows(rows)
+
+
+def load_footway_sidewalks(input_parquet: Path) -> list[SidewalkLine]:
+    """Sidewalks mapped as their own `footway=sidewalk` ways.
+
+    These are already at the sidewalk centre, so they need no road offset; the
+    polygon union merges them with the procedural strips where both exist.
+    """
+    rows = duckdb.execute(
+        """
+        select feature_id, tags, ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['footway'] = 'sidewalk'
+          and ST_GeometryType(geometry) = 'LINESTRING'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    lines: list[SidewalkLine] = []
+    for feature_id, tags, wkb in rows:
+        width = (
+            parse_length(tags.get("width"))
+            or parse_length(tags.get("sidewalk:width"))
+            or 2.0
+        )
+        width = min(max(width, 1.0), 4.0)
+        geometry = shapely.from_wkb(wkb)
+        parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
+        for index, part in enumerate(parts):
+            if not isinstance(part, LineString):
+                continue
+            lines.append(
+                SidewalkLine(
+                    id=f"{feature_id}:mapped:{index}",
+                    coords=[(c[0], c[1]) for c in part.coords],
+                    width=width,
+                    side=0,
+                )
+            )
+    return lines
+
+
+def sidewalk_polygons_by_tile(
+    lines: list[SidewalkLine], ways: list[ParkingWay], zoom: int
+) -> dict[tuple[int, int], list[dict]]:
+    """Buffer, union and clip the sidewalk centre lines per tile.
+
+    Buffering the *whole* line before clipping keeps bends and corners smooth.
+    The union of all sidewalk strips in a tile is then cut by the union of the
+    car-road surfaces, so a sidewalk never runs across a carriageway while two
+    strips that meet at a corner stay one continuous slab.
+    """
+    lines_by_tile: dict[tuple[int, int], list[SidewalkLine]] = defaultdict(list)
+    roads_by_tile: dict[tuple[int, int], list[ParkingWay]] = defaultdict(list)
+    for line in lines:
+        geometry = shapely.LineString(line.coords)
+        min_lon, min_lat, max_lon, max_lat = geometry.bounds
+        margin = 0.00015
+        min_tx, max_ty = coord_to_tile(min_lon - margin, max_lat + margin, zoom)
+        max_tx, min_ty = coord_to_tile(max_lon + margin, min_lat - margin, zoom)
+        for tx in range(min_tx, max_tx + 1):
+            for ty in range(min_ty, max_ty + 1):
+                lines_by_tile[(tx, ty)].append(line)
+    for way in ways:
+        geometry = shapely.LineString(way.coords)
+        min_lon, min_lat, max_lon, max_lat = geometry.bounds
+        margin = 0.0002
+        min_tx, max_ty = coord_to_tile(min_lon - margin, max_lat + margin, zoom)
+        max_tx, min_ty = coord_to_tile(max_lon + margin, min_lat - margin, zoom)
+        for tx in range(min_tx, max_tx + 1):
+            for ty in range(min_ty, max_ty + 1):
+                roads_by_tile[(tx, ty)].append(way)
+
+    by_tile: dict[tuple[int, int], list[dict]] = {}
+    for (tx, ty), tile_lines in lines_by_tile.items():
+        sidewalks = [
+            shapely.LineString(line.coords).buffer(
+                line.width / 2 / 111_000,
+                cap_style="flat",
+                join_style="mitre",
+                resolution=2,
+            )
+            for line in tile_lines
+        ]
+        roads = [
+            shapely.LineString(way.coords).buffer(
+                (
+                    way.width / 2
+                    if way.width
+                    else ROAD_HALF_WIDTH.get(way.highway, DEFAULT_HALF_WIDTH)
+                )
+                / 111_000
+                + 2.0 / 111_000,
+                cap_style="flat",
+                join_style="mitre",
+                resolution=2,
+            )
+            for way in roads_by_tile.get((tx, ty), [])
+        ]
+        union_sidewalks = shapely.union_all(sidewalks)
+        union_roads = shapely.union_all(roads) if roads else None
+        if union_roads is not None and not union_roads.is_empty:
+            clipped = union_sidewalks.difference(union_roads)
+        else:
+            clipped = union_sidewalks
+        box = shapely.box(*tile_lonlat_bounds(tx, ty, zoom))
+        clipped = clipped.intersection(box)
+        if clipped.is_empty:
+            continue
+        # close the hairline gaps where strips from two roads meet at a corner
+        clipped = clipped.buffer(0.000003, join_style="round").buffer(
+            -0.000003, join_style="round"
+        )
+        clipped = clipped.simplify(0.000002, preserve_topology=True)
+        by_tile[(tx, ty)] = [
+            {
+                "type": "feature",
+                "id": f"sidewalk/{tx}/{ty}",
+                "geometry": json.loads(shapely.to_geojson(clipped)),
+                "properties": {"cmtype": "sidewalk"},
+            }
+        ]
+    return by_tile
 
 
 def parking_rows_by_tile(
@@ -1750,8 +1898,9 @@ def load_road_data(input_parquet: Path) -> dict[int, RoadData]:
         line = ways[best[1]]
         tags = tags_by_way[best[1]]
         width = road_width(tags)
+        bearing = way_bearing(line, point)
         roads[feature_id] = RoadData(
-            bearing=way_bearing(line, point),
+            bearing=bearing,
             width=width,
             lanes=parse_lane_count(tags, width),
             oneway=tags.get("oneway"),
@@ -2058,6 +2207,7 @@ def parquet_to_tiles(
     # parking-eligible roads. Pure geometry, so they do not depend on (or need)
     # the traffic loop build.
     parking_by_tile: dict[tuple[int, int], list[dict]] = {}
+    sidewalk_by_tile: dict[tuple[int, int], list[dict]] = {}
     lamp_by_tile: dict[tuple[int, int], list[list[float]]] = {}
     if parking or lamps:
         logger.info("Building parked cars and street lamps")
@@ -2079,6 +2229,23 @@ def parquet_to_tiles(
                 sum(len(rows) for rows in parking_by_tile.values()),
                 len(parking_by_tile),
             )
+        sidewalk_data = sidewalk_centerlines(parking_ways)
+        mapped_sidewalks = load_footway_sidewalks(input_parquet)
+        sidewalk_data.extend(mapped_sidewalks)
+        logger.info(
+            "sidewalks: %d procedural + %d mapped",
+            len(sidewalk_data) - len(mapped_sidewalks),
+            len(mapped_sidewalks),
+        )
+        sidewalk_by_tile = sidewalk_polygons_by_tile(
+            sidewalk_data, parking_ways, zoom_level
+        )
+        logger.info(
+            "sidewalks: %d ways -> %d polygons in %d tiles",
+            len(parking_ways),
+            sum(len(rows) for rows in sidewalk_by_tile.values()),
+            len(sidewalk_by_tile),
+        )
         if lamps:
             lamp_by_tile = lamp_spots(parking_ways, zoom_level)
             logger.info(
@@ -2100,6 +2267,7 @@ def parquet_to_tiles(
         set(features_by_tile)
         | set(traffic_by_tile)
         | set(parking_by_tile)
+        | set(sidewalk_by_tile)
         | set(lamp_by_tile)
     ):
         logger.info(f"Generating tile {x}/{y}")
@@ -2118,6 +2286,9 @@ def parquet_to_tiles(
             terrace_positions,
             road_data,
         )
+        sidewalk_here = sidewalk_by_tile.get((x, y))
+        if sidewalk_here:
+            features.extend(sidewalk_here)
         traffic_loops = traffic_by_tile.get((x, y))
         parking_here = parking_by_tile.get((x, y))
         lamps_here = lamp_by_tile.get((x, y))

@@ -18,6 +18,7 @@ import {
 } from "./elements3d/platform";
 export type { PlatformInfo } from "./elements3d/platform";
 import { rail, railMaterial } from "./elements3d/rail";
+import { sidewalk, sidewalkMaterial } from "./elements3d/sidewalk";
 import { parkedCarsFromRows, type ParkingRow } from "./parking_layout";
 import { roadMarking, roadMarkingMaterial } from "./elements3d/road_marking";
 import {
@@ -143,6 +144,7 @@ export function geoJSONtoGeometries(
     | "road_marking"
     | "platform"
     | "rail"
+    | "sidewalk"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -287,6 +289,14 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "rail") {
     return [{ kind: "rail", geometries: rail(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "sidewalk") {
+    return [
+      {
+        kind: "sidewalk",
+        geometries: sidewalk(originMeters, scaleFactor, f),
+      },
+    ];
   }
   if (f.properties.cmtype === "transit_stop") {
     const { body, sign } = transitStop(originMeters, scaleFactor, f);
@@ -706,17 +716,19 @@ export async function objectsAt(
                                             ? platformMaterial
                                             : kind === "rail"
                                               ? railMaterial
-                                              : kind === "aeroway"
-                                                ? aerowayMaterial
-                                                : kind === "fence"
-                                                  ? fenceMaterial
-                                                  : kind === "bridge"
-                                                    ? bridgeMaterial
-                                                    : kind === "tunnel"
-                                                      ? tunnelMaterial
-                                                      : kind === "bench"
-                                                        ? benchMaterial
-                                                        : treeMaterial;
+                                              : kind === "sidewalk"
+                                                ? sidewalkMaterial
+                                                : kind === "aeroway"
+                                                  ? aerowayMaterial
+                                                  : kind === "fence"
+                                                    ? fenceMaterial
+                                                    : kind === "bridge"
+                                                      ? bridgeMaterial
+                                                      : kind === "tunnel"
+                                                        ? tunnelMaterial
+                                                        : kind === "bench"
+                                                          ? benchMaterial
+                                                          : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
