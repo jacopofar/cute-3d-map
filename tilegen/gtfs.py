@@ -26,10 +26,12 @@ BUS_ROUTE_TYPES = frozenset({"3", "11"})
 TRAM_ROUTE_TYPES = frozenset({"0"})
 
 # Buses are frequent and short, trams are longer; the actual feed frequency is
-# not used, so these spacing values control how many vehicles are drawn.
+# not used, so these spacing values control how many vehicles are drawn. The
+# max_vehicles caps are about one third of the feed-derived fleets, which keeps
+# the map readable instead of stamping every shape with a full service.
 BUS_GTFS_CONFIG = TrafficConfig(
     spacing=1200.0,
-    max_vehicles=3000,
+    max_vehicles=1000,
     colors=("ffd23f", "f2b632", "e8e8e8"),
     gray_colors=(),
     gray_fraction=0.0,
@@ -37,7 +39,7 @@ BUS_GTFS_CONFIG = TrafficConfig(
 )
 TRAM_GTFS_CONFIG = TrafficConfig(
     spacing=1800.0,
-    max_vehicles=900,
+    max_vehicles=260,
     colors=("ff8c00", "ffd23f", "e8e8e8"),
     gray_colors=(),
     gray_fraction=0.0,
