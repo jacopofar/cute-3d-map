@@ -317,6 +317,7 @@ class CoolMap {
   private sidewalksEnabled = true;
   private wallsEnabled = true;
   private rooftopsEnabled = true;
+  private powerLinesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -860,6 +861,10 @@ class CoolMap {
       this.rooftopsEnabled = on;
       this.applyRooftopVisibility();
     });
+    wireToggle("#power-lines-toggle", (on) => {
+      this.powerLinesEnabled = on;
+      this.applyPowerVisibility();
+    });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
     });
@@ -945,7 +950,9 @@ class CoolMap {
     for (const meshes of Object.values(this.loadedTiles)) {
       for (const mesh of meshes) {
         this.customLayer.scene.remove(mesh);
-        if (mesh instanceof THREE.Mesh) mesh.geometry.dispose();
+        if (mesh instanceof THREE.Mesh || mesh instanceof THREE.LineSegments) {
+          mesh.geometry.dispose();
+        }
       }
     }
     this.loadedTiles = {};
@@ -1926,7 +1933,9 @@ class CoolMap {
           this.customLayer.scene.remove(m);
           // each tile owns its merged geometry; the materials are shared
           // module-level singletons, so dispose only the geometry
-          if (m instanceof THREE.Mesh) m.geometry.dispose();
+          if (m instanceof THREE.Mesh || m instanceof THREE.LineSegments) {
+            m.geometry.dispose();
+          }
         });
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
@@ -2049,6 +2058,7 @@ class CoolMap {
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
+      this.applyPowerVisibility();
       this.refreshSunShadow();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -2175,6 +2185,17 @@ class CoolMap {
       for (const mesh of meshes) {
         if (mesh.userData.kind === "rooftop") {
           mesh.visible = this.rooftopsEnabled;
+        }
+      }
+    }
+  }
+
+  private applyPowerVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        const kind = mesh.userData.kind;
+        if (kind === "power_tower" || kind === "power_wire") {
+          mesh.visible = this.powerLinesEnabled;
         }
       }
     }
@@ -2676,7 +2697,12 @@ class CoolMap {
     for (const list of Object.values(this.loadedTiles)) {
       meshes += list.length;
       for (const object of list) {
-        if (!(object instanceof THREE.Mesh)) continue;
+        if (
+          !(object instanceof THREE.Mesh) &&
+          !(object instanceof THREE.LineSegments)
+        ) {
+          continue;
+        }
         const kind = (object.userData.kind as string) ?? "other";
         const bucket = (byKind[kind] ??= {
           meshes: 0,
@@ -2687,9 +2713,12 @@ class CoolMap {
         const count = position ? position.count : 0;
         bucket.meshes += 1;
         bucket.vertices += count;
-        bucket.triangles += object.geometry.index
-          ? object.geometry.index.count / 3
-          : count / 3;
+        bucket.triangles +=
+          object instanceof THREE.LineSegments
+            ? 0
+            : object.geometry.index
+              ? object.geometry.index.count / 3
+              : count / 3;
         vertices += count;
       }
     }

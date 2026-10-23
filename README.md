@@ -57,6 +57,10 @@ The project has two halves:
      `turn_lanes` for stop lines and lane arrows;
    - `cmtype: "platform"` — a clipped rail/tram platform polygon (line
      platforms are buffered to a 4 m ribbon), with a name and ref;
+   - `cmtype: "power_tower"` (Point) — a `power=tower` pylon, with `height`;
+   - `cmtype: "power_line"` (LineString) — a `power=line`/`minor_line` clipped
+     to the tile, with an approximate wire `height`, `voltage`, `cables` and
+     `wires`;
    - `cmtype: "rail"` (LineString/MultiLineString) — an above-ground rail or
      tram way, clipped to the tile, with `kind` rail/tram;
    - `cmtype: "traffic_signal"` / `"crossing"` (point) — an OSM
@@ -372,6 +376,15 @@ gets a small panel array. Buildings carrying solar panels keep a flat top so
 the panels are not buried under a pitched roof. All of them are clickable, with
 the OSM link. One merged Lambert mesh per tile (kind `rooftop`), no shadows;
 `#rooftop-toggle` hides the layer.
+
+### Power lines and pylons
+
+`power=tower` nodes become low-poly pylons, and `power=line` / `power=minor_line`
+ways are clipped per tile and drawn as sagging catenary spans. The wire height
+comes from the line voltage; the towers use a 30 m default because the extract
+does not carry their height. One merged Lambert mesh per tile for the towers and
+one `LineSegments` per tile for the wires, both behind `#power-lines-toggle`.
+Underground and cable-tunnel sections are skipped.
 
 ### Bridges and tunnels
 
