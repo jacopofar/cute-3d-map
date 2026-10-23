@@ -361,6 +361,15 @@ high and 0.3 m thick by default, colored by the `wall` material tag. Gates
 and a closed leaf oriented by the nearest wall. The **walls & gates** checkbox
 (`#walls-toggle`) hides both; no shadows.
 
+### Rooftop accessories
+
+Mapped `man_made=water_tower|chimney|antenna|mast` features and
+`generator:source=solar` generators become rooftop props. tilegen finds the
+containing building and carries its roof height as `base`; the frontend builds
+a water tank on legs, a brick chimney, an antenna mast with crossbars or a flat
+solar panel array on top. One merged Lambert mesh per tile (kind `rooftop`), no
+shadows; `#rooftop-toggle` hides the layer.
+
 ### Bridges and tunnels
 
 The road and rail network is not emitted (the vehicle routes are precomputed

@@ -101,6 +101,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   directions, width, lanes and `turn:lanes`; merged per tile (kind
   `road_marking`), no popup. A two-way road gets the line on the right half,
   a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/rooftop.ts` — mapped water towers, chimneys, antennas and
+  solar generators placed on the carrying building's roof (`base` from
+  tilegen); one merged Lambert mesh per tile (kind `rooftop`), `#rooftop-toggle`.
 - `src/elements3d/wall.ts` / `gate.ts` — low solid walls from `barrier=wall` /
   `wall=*` ways and gate nodes as two posts plus a leaf, oriented by the nearest
   wall. One merged Lambert mesh per tile each (kinds `wall` and `gate`),
@@ -303,6 +306,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   road, the full width on a one-way one.
 - **lane arrow** — one white arrow per multi-lane approach, turned by
   `turn:lanes`; a single-lane approach gets no arrow.
+- **rooftop accessory** — a mapped water tower, chimney, antenna/mast or solar
+  generator, lifted to the roof of the containing building. Shared
+  `#rooftop-toggle`.
 - **wall / gate** — a low solid wall from a `barrier=wall`/`wall=*` way, or a
   gate node as two posts and a leaf, oriented by the nearest wall. Both share
   the `#walls-toggle`.
@@ -390,7 +396,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
   `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`,
-  `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
+  `#rooftop-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars and lamp posts are their own meshes, so those
   are plain visibility switches; the basemap checkbox swaps the MapTiler style
