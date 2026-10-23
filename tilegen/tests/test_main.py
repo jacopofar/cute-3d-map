@@ -875,6 +875,28 @@ def test_walls_and_gates_keep_their_data():
     )
 
 
+def test_power_tower_and_line_are_emitted():
+    tower = main.to_power_tower("node/1", {"power": "tower"}, shapely.Point(9.0, 45.0))
+    assert tower is not None
+    assert tower["properties"]["cmtype"] == "power_tower"
+    assert tower["properties"]["height"] == 30.0
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    line = shapely.LineString([(8.99, 45.005), (9.02, 45.005)])
+    features = main.to_power_line(
+        "way/2", {"power": "line", "voltage": "380000"}, line, tile_box
+    )
+    assert len(features) == 1
+    assert features[0]["properties"]["cmtype"] == "power_line"
+    assert features[0]["properties"]["height"] == 26.0
+    assert features[0]["geometry"]["type"] == "LineString"
+    assert (
+        main.to_power_line(
+            "way/3", {"power": "line", "location": "underground"}, line, tile_box
+        )
+        == []
+    )
+
+
 def test_rooftop_kind_maps_the_supported_tags():
     assert main.rooftop_kind({"man_made": "water_tower"}) == "water_tower"
     assert main.rooftop_kind({"man_made": "chimney"}) == "chimney"

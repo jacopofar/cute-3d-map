@@ -22,6 +22,12 @@ import { sidewalk, sidewalkMaterial } from "./elements3d/sidewalk";
 import { wall, wallMaterial } from "./elements3d/wall";
 import { gate, gateMaterial } from "./elements3d/gate";
 import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
+import {
+  powerTower,
+  powerTowerMaterial,
+  powerWire,
+  powerWireMaterial,
+} from "./elements3d/power";
 import { parkedCarsFromRows, type ParkingRow } from "./parking_layout";
 import { roadMarking, roadMarkingMaterial } from "./elements3d/road_marking";
 import {
@@ -151,6 +157,8 @@ export function geoJSONtoGeometries(
     | "wall"
     | "gate"
     | "rooftop"
+    | "power_tower"
+    | "power_wire"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -315,6 +323,22 @@ export function geoJSONtoGeometries(
       {
         kind: "rooftop",
         geometries: rooftop(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "power_tower") {
+    return [
+      {
+        kind: "power_tower",
+        geometries: powerTower(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "power_line") {
+    return [
+      {
+        kind: "power_wire",
+        geometries: powerWire(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -760,18 +784,28 @@ export async function objectsAt(
                                                     ? gateMaterial
                                                     : kind === "rooftop"
                                                       ? rooftopMaterial
-                                                      : kind === "aeroway"
-                                                        ? aerowayMaterial
-                                                        : kind === "fence"
-                                                          ? fenceMaterial
-                                                          : kind === "bridge"
-                                                            ? bridgeMaterial
-                                                            : kind === "tunnel"
-                                                              ? tunnelMaterial
-                                                              : kind === "bench"
-                                                                ? benchMaterial
-                                                                : treeMaterial;
-      const mesh = new THREE.Mesh(merged, material);
+                                                      : kind === "power_tower"
+                                                        ? powerTowerMaterial
+                                                        : kind === "power_wire"
+                                                          ? powerWireMaterial
+                                                          : kind === "aeroway"
+                                                            ? aerowayMaterial
+                                                            : kind === "fence"
+                                                              ? fenceMaterial
+                                                              : kind ===
+                                                                  "bridge"
+                                                                ? bridgeMaterial
+                                                                : kind ===
+                                                                    "tunnel"
+                                                                  ? tunnelMaterial
+                                                                  : kind ===
+                                                                      "bench"
+                                                                    ? benchMaterial
+                                                                    : treeMaterial;
+      const mesh =
+        kind === "power_wire"
+          ? new THREE.LineSegments(merged, material)
+          : new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
       // camera.projectionMatrix, so three's frustum planes are only approximately

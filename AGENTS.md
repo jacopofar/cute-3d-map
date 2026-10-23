@@ -107,6 +107,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   solar point becomes a small array. A building with solar panels keeps a flat
   top so the panels stay visible. All are clickable with the OSM link; one
   merged Lambert mesh per tile (kind `rooftop`), `#rooftop-toggle`.
+- `src/elements3d/power.ts` — `power=tower` pylons and clipped overhead
+  `power=line`/`minor_line` spans. Towers merge into one Lambert mesh per tile
+  (kind `power_tower`); wires are one `LineSegments` per tile (kind
+  `power_wire`) with a catenary sag, shared `#power-lines-toggle`. Underground
+  and tunnel sections are skipped by tilegen.
 - `src/elements3d/wall.ts` / `gate.ts` — low solid walls from `barrier=wall` /
   `wall=*` ways and gate nodes as two posts plus a leaf, oriented by the nearest
   wall. One merged Lambert mesh per tile each (kinds `wall` and `gate`),
@@ -248,9 +253,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
-  `road_marking`, `platform`, `rail`, `traffic_signal`, `crossing` (the
-  road/rail network is not emitted; routes come from `traffic`). A
-  `building:part` is still `cmtype: "building"`, with a `base` elevation.
+  `road_marking`, `platform`, `rail`, `power_tower`, `power_line`,
+  `traffic_signal`, `crossing` (the road/rail network is not emitted; routes
+  come from `traffic`). A `building:part` is still `cmtype: "building"`, with a
+  `base` elevation.
 - **building part** — a `building:part=*` footprint drawn like a building but
   starting at its `min_height`/`min_level` instead of the street. `height` is
   the top elevation; without it, `max_level` or `building:levels` gives the
@@ -313,6 +319,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   generator, lifted to the roof of the containing building. A solar polygon is
   drawn as a flat panel surface over its own footprint; solar buildings keep a
   flat roof. Clickable; shared `#rooftop-toggle`.
+- **power tower / power line** — a `power=tower` pylon, and a `power=line` or
+  `minor_line` clipped to the tile. The wire height follows the voltage, the
+  tower default is 30 m; both share `#power-lines-toggle`.
 - **wall / gate** — a low solid wall from a `barrier=wall`/`wall=*` way, or a
   gate node as two posts and a leaf, oriented by the nearest wall. Both share
   the `#walls-toggle`.
@@ -400,10 +409,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
   `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`,
-  `#rooftop-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
-  balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
-  bridges & tunnels, parked cars and lamp posts are their own meshes, so those
-  are plain visibility switches; the basemap checkbox swaps the MapTiler style
+  `#rooftop-toggle`, `#power-lines-toggle`, `#bloom-toggle`,
+  `#imputed-colors-toggle`. Windows, balconies, roofs, water, benches, church
+  crosses, parks, airplanes, fences, bridges & tunnels, parked cars, lamp posts
+  and power lines are their own meshes, so those are plain visibility switches; the basemap checkbox swaps the MapTiler style
   for an empty style while keeping the 3D layer; imputed colors are baked into
   the geometry, so changing that one reloads the loaded tiles.
 - Merged per-tile geometry is disposed on unload; materials are shared
