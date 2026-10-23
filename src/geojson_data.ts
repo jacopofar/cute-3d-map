@@ -22,6 +22,7 @@ import { sidewalk, sidewalkMaterial } from "./elements3d/sidewalk";
 import { wall, wallMaterial } from "./elements3d/wall";
 import { gate, gateMaterial } from "./elements3d/gate";
 import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
+import { parkPath, parkPathMaterial } from "./elements3d/park_path";
 import {
   powerTower,
   powerTowerMaterial,
@@ -157,6 +158,7 @@ export function geoJSONtoGeometries(
     | "wall"
     | "gate"
     | "rooftop"
+    | "park_path"
     | "power_tower"
     | "power_wire"
     | "aeroway"
@@ -323,6 +325,14 @@ export function geoJSONtoGeometries(
       {
         kind: "rooftop",
         geometries: rooftop(originMeters, scaleFactor, f),
+      },
+    ];
+  }
+  if (f.properties.cmtype === "park_path") {
+    return [
+      {
+        kind: "park_path",
+        geometries: parkPath(originMeters, scaleFactor, f),
       },
     ];
   }
@@ -784,24 +794,27 @@ export async function objectsAt(
                                                     ? gateMaterial
                                                     : kind === "rooftop"
                                                       ? rooftopMaterial
-                                                      : kind === "power_tower"
-                                                        ? powerTowerMaterial
-                                                        : kind === "power_wire"
-                                                          ? powerWireMaterial
-                                                          : kind === "aeroway"
-                                                            ? aerowayMaterial
-                                                            : kind === "fence"
-                                                              ? fenceMaterial
-                                                              : kind ===
-                                                                  "bridge"
-                                                                ? bridgeMaterial
+                                                      : kind === "park_path"
+                                                        ? parkPathMaterial
+                                                        : kind === "power_tower"
+                                                          ? powerTowerMaterial
+                                                          : kind ===
+                                                              "power_wire"
+                                                            ? powerWireMaterial
+                                                            : kind === "aeroway"
+                                                              ? aerowayMaterial
+                                                              : kind === "fence"
+                                                                ? fenceMaterial
                                                                 : kind ===
-                                                                    "tunnel"
-                                                                  ? tunnelMaterial
+                                                                    "bridge"
+                                                                  ? bridgeMaterial
                                                                   : kind ===
-                                                                      "bench"
-                                                                    ? benchMaterial
-                                                                    : treeMaterial;
+                                                                      "tunnel"
+                                                                    ? tunnelMaterial
+                                                                    : kind ===
+                                                                        "bench"
+                                                                      ? benchMaterial
+                                                                      : treeMaterial;
       const mesh =
         kind === "power_wire"
           ? new THREE.LineSegments(merged, material)
