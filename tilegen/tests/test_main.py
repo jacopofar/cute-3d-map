@@ -805,6 +805,34 @@ def test_parking_rows_are_clipped_to_each_tile():
             assert len(part["coords"]) >= 2
 
 
+def test_sidewalk_polygons_are_clipped_to_each_tile():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    mid_lat = (min_lat + max_lat) / 2
+    line = main.SidewalkLine(
+        id="way/1:L",
+        coords=[
+            (min_lon + 0.0001, mid_lat + 0.0003),
+            (max_lon - 0.0001, mid_lat + 0.0003),
+        ],
+        width=2.2,
+        side=1,
+    )
+    road = main.ParkingWay(
+        id="way/9",
+        coords=[
+            (min_lon + 0.0002, mid_lat - 0.0005),
+            (max_lon - 0.0002, mid_lat - 0.0005),
+        ],
+        highway="residential",
+    )
+    by_tile = main.sidewalk_polygons_by_tile([line], [road], 15)
+    assert by_tile
+    for features in by_tile.values():
+        assert len(features) == 1
+        assert features[0]["properties"]["cmtype"] == "sidewalk"
+        assert features[0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
+
+
 def test_construction_is_clipped_and_marks_the_crane_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)

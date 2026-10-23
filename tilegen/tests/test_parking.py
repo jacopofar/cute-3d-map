@@ -146,7 +146,7 @@ def test_parking_row_is_split_at_a_mid_path_crossing():
     )
     ways = [way, cross]
     tree = shapely.STRtree([shapely.LineString(w.coords) for w in ways])
-    pieces = parking._clear_pieces(
+    pieces = parking.clear_pieces(
         shapely.LineString(coords), coords, way.id, ways, tree, 4.0
     )
     assert len(pieces) == 2

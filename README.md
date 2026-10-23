@@ -83,7 +83,7 @@ The project has two halves:
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
    playground, monument, construction, crosswalk, road_marking, platform,
-   rail).
+   rail, sidewalk).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -335,6 +335,22 @@ for heavy rail, two embedded rails for trams, and catenary poles and a wire for
 both. Tunnels, covered sections and bridge decks are skipped. The `transit &`
 `rails` checkbox hides platforms, rails, stops and metro signs together. One
 merged mesh per tile each; no shadows.
+
+### Sidewalks and curbs
+
+Sidewalks are authored in `tilegen/sidewalks.py` from car-road centre lines and
+mapped `footway=sidewalk` ways. A car road defaults to a sidewalk on both sides;
+`sidewalk:left/right`, then `sidewalk`, override that (`no`/`none` removes a
+side, `separate` leaves the separately mapped footway alone, `left`/`right`
+limits the side). Width comes from `sidewalk:side:width`, then `sidewalk:width`,
+defaulting to 2 m (1.5 m on service roads). Mapped footway sidewalks use their
+own `width`/`sidewalk:width`, default 2 m.
+
+tilegen buffers the centre lines, unions them per tile, subtracts the
+car-road surfaces with extra clearance, and closes hairline corner gaps. The
+frontend (`src/elements3d/sidewalk.ts`) extrudes the resulting polygons into a
+0.14 m slab with a darker kerb face, one mesh per tile. The
+`#sidewalks-toggle` checkbox hides the layer; it is gated at zoom 16.
 
 ### Bridges and tunnels
 
