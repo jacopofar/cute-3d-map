@@ -2,6 +2,7 @@ import {
   GeolocateControl,
   Map as MapLibreMap,
   MercatorCoordinate,
+  NavigationControl,
   Popup,
   ScaleControl,
 } from "maplibre-gl";
@@ -409,6 +410,16 @@ class CoolMap {
         positionOptions: { enableHighAccuracy: true },
         trackUserLocation: false,
         showAccuracyCircle: true,
+      }),
+      "top-right",
+    );
+    // MapLibre's compass resets the bearing to north; the zoom buttons are
+    // deliberately off because the map already has a scale bar and wheel zoom.
+    this.map.addControl(
+      new NavigationControl({
+        showCompass: true,
+        showZoom: false,
+        visualizePitch: false,
       }),
       "top-right",
     );
