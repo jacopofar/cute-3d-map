@@ -150,7 +150,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
   pure maths and unit-tested. Footprints with an inner ring, a concave outline,
   or more than `MAX_ROOF_VERTICES` (8) corners stay flat, as the ridge fan breaks
-  up on them. `src/elements3d/random.ts` holds the seeded PRNG and hash shared by
+  up on them; that flat fallback is the extrusion's top cap, colored with the
+  real or imputed `roof_color`. `src/elements3d/random.ts` holds the seeded PRNG and hash shared by
   the facade and roof code.
 - `src/elements3d/church.ts` — the church look. `isChurch` classifies a
   building from the tile's `building`/`religion` tags (tilegen only reports

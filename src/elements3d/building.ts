@@ -11,8 +11,7 @@ import {
   churchWallColor,
   isChurch,
 } from "./church";
-import { roofGeometry } from "./roof";
-import { applyVertexColor } from "./vertex_color";
+import { DEFAULT_ROOF_COLOR, roofGeometry } from "./roof";
 
 function coordsToShape(
   coords: Geojson.Position[][],
@@ -51,6 +50,29 @@ function geoJSONtoBase(f: BuildingFeature): number {
 }
 
 const DEFAULT_BUILDING_COLOR = "#aaaaaa";
+
+/** Color the extruded walls, giving the top cap the roof tone. This is the
+ * fallback roof for footprints that cannot carry a pitched roof (a courtyard,
+ * a concave outline, too many corners): a flat top with the real/imputed
+ * roof_color instead of the wall color. */
+function applyBuildingColors(
+  geometry: THREE.BufferGeometry,
+  wallColor: THREE.Color,
+  roofColor: THREE.Color,
+): THREE.BufferGeometry {
+  const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+  const normals = flat.getAttribute("normal");
+  const colors = new Float32Array(normals.count * 3);
+  for (let i = 0; i < normals.count; i++) {
+    const color = normals.getZ(i) > 0.5 ? roofColor : wallColor;
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  flat.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.dispose();
+  return flat;
+}
 
 // bake the per-feature color into a vertex color attribute, so many buildings
 // can be merged into a single mesh (one draw call per tile, not per building)
@@ -164,10 +186,14 @@ export function building(
       // ... pitched steeper than the default
       church ? CHURCH_PITCH : 1,
     );
+  const roofCapColor = parseColor(roofColor, DEFAULT_ROOF_COLOR);
   const withRoof = (
     ring: Geojson.Position[][],
     geometry: THREE.BufferGeometry,
-  ) => ({ walls: geometry, roof: roofFor(ring) });
+  ) => ({
+    walls: applyBuildingColors(geometry, color, roofCapColor),
+    roof: roofFor(ring),
+  });
 
   if (f.geometry.type === "MultiPolygon") {
     return f.geometry.coordinates.map((polygon) => {
@@ -181,7 +207,6 @@ export function building(
         extrudeSettings,
       );
       if (base > 0) geometry.translate(0, 0, base);
-      applyVertexColor(geometry, color);
       return withRoof(polygon, geometry);
     });
   }
@@ -196,7 +221,6 @@ export function building(
       extrudeSettings,
     );
     if (base > 0) geometry.translate(0, 0, base);
-    applyVertexColor(geometry, color);
     return [withRoof(f.geometry.coordinates, geometry)];
   }
   throw Error(`Cannot have building of type ${f.geometry.type}`);
