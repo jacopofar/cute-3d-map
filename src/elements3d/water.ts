@@ -350,12 +350,24 @@ export const waterMaterial = new THREE.ShaderMaterial({
         sin(vPos.x * 0.045 + t * 0.7) *
         sin(vPos.y * 0.060 - t * 0.5) * 0.5 + 0.5;
       float grain = noise(vPos * 0.08 + vec2(t * 0.25, -t * 0.18));
-      float ripple = clamp(swell * 0.65 + grain * 0.35, 0.0, 1.0);
+      // two extra octaves keep the surface crisp when the camera is close;
+      // fwidth fades them before they turn into shimmer at city scale
+      float fine = noise(vPos * 0.38 + vec2(t * 0.55, -t * 0.42));
+      float micro = noise(vPos * 1.25 - vec2(t * 0.9, -t * 0.7));
+      float ripple = clamp(
+        swell * 0.48 + grain * 0.28 + fine * 0.17 + micro * 0.07,
+        0.0,
+        1.0
+      );
+      float detailFade = 1.0 - smoothstep(0.25, 1.4, max(fwidth(vPos.x), fwidth(vPos.y)));
 
       // narrow bright bands that travel across the surface
       float bands =
-        0.5 + 0.5 * sin((ripple * 6.0 + grain * 3.0) * 6.2831853 - t * 1.6);
-      float glint = pow(bands, 12.0);
+        0.5 + 0.5 * sin((ripple * 6.0 + grain * 3.0 + fine * 1.2) * 6.2831853 - t * 1.6);
+      float glint = pow(bands, 28.0);
+      float fineBands =
+        0.5 + 0.5 * sin(vPos.x * 0.62 + vPos.y * 0.47 - t * 2.3 + micro * 9.0);
+      float crisp = pow(fineBands, 30.0) * detailFade;
 
       // Sun glitter: the bands run along the sun's azimuth, so the sparkle
       // reads as a path toward the sun rather than random noise. A true
@@ -366,21 +378,27 @@ export const waterMaterial = new THREE.ShaderMaterial({
       float swath = pow(max(dot(away, sunFlat), 0.0), 5.0);
       float alongSun = dot(vPos, sunFlat);
       float sunBands =
-        0.5 + 0.5 * sin(alongSun * 0.11 - t * 1.1 + ripple * 5.0);
-      float sunGlint = pow(sunBands, 10.0);
+        0.5 + 0.5 * sin(alongSun * 0.18 - t * 1.5 + ripple * 6.0 + fine * 2.0);
+      float sunGlint = pow(sunBands, 24.0);
+      float sunFine =
+        pow(
+          0.5 + 0.5 * sin(alongSun * 0.42 - t * 2.5 + micro * 10.0),
+          30.0
+        ) * detailFade;
 
       // a low sun paints a long, warm path: full strength at dusk, a faint
       // sheen at noon. uNight then dims whatever is left.
       float lowSun = 1.0 - smoothstep(0.15, 0.65, uSunDirection.z);
       float sunPower = uSunIntensity * 0.4 * mix(0.1, 1.0, lowSun);
       vec3 glitter =
-        uSunColor * (0.25 + sunGlint * 0.9 + glint * 0.8) *
+        uSunColor *
+        (0.25 + sunGlint * 1.05 + sunFine * 0.45 + glint * 0.8) *
         (0.5 + swath) * sunPower;
 
       vec3 color = mix(vColor * 0.82, vColor, ripple);
       // a faint sky sheen from the travelling bands, so still water reads as a
       // surface even when the sun is not in view
-      color += uHighlight * glint * 0.22;
+      color += uHighlight * (glint * 0.22 + crisp * 0.16);
       // bank foam: the ribbon's outer rows, broken up by drifting noise so it
       // reads as lapping water and not a painted kerb. fwidth fades it out
       // once the ribbon is only a couple of pixels wide, where it would just
