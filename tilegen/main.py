@@ -1267,6 +1267,10 @@ def to_furniture(feature_id, tags, s) -> dict | None:
 # the core; a guard rail or a railing is the same shape with a metal color, so
 # they come along for free (the frontend colors by the `barrier` sub-kind).
 FENCE_BARRIERS = frozenset({"fence", "guard_rail", "railing"})
+WALL_BARRIERS = frozenset({"wall", "retaining_wall", "city_wall", "hoarding"})
+GATE_BARRIERS = frozenset(
+    {"gate", "lift_gate", "swing_gate", "wicket_gate", "sliding_gate"}
+)
 # a clip can leave a stub of fence a few centimeters long at a tile edge; it
 # still costs a vertex band and a draw, and reads as nothing. The geometry here
 # is in degrees (the tile box is lon/lat), so this is ~1 m at Milan's latitude.
@@ -1285,6 +1289,47 @@ def fence_lines(geometry, tile_box, min_length: float = MIN_FENCE_LENGTH):
     if len(parts) == 1:
         return parts[0]
     return shapely.MultiLineString(parts)
+
+
+def to_wall(feature_id, tags, s, tile_box) -> dict | None:
+    barrier = tags.get("barrier")
+    if barrier not in WALL_BARRIERS and not tags.get("wall"):
+        return None
+    geometry = s.boundary if s.geom_type in ("Polygon", "MultiPolygon") else s
+    if geometry.geom_type not in ("LineString", "MultiLineString"):
+        return None
+    clipped = fence_lines(geometry, tile_box)
+    if clipped is None:
+        return None
+    properties = {
+        "cmtype": "wall",
+        "wall": tags.get("wall") or barrier,
+        "height": parse_length(tags.get("height")),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(clipped)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
+def to_gate(feature_id, tags, s, gate_bearings: dict[int, float] | None) -> dict | None:
+    if s.geom_type != "Point" or tags.get("barrier") not in GATE_BARRIERS:
+        return None
+    bearing = (gate_bearings or {}).get(feature_id)
+    if bearing is None:
+        return None
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(s)),
+        "properties": {
+            "cmtype": "gate",
+            "bearing": round(bearing, 1),
+            "width": 3.0,
+        },
+    }
 
 
 def to_fence(feature_id, tags, s, tile_box) -> dict | None:
@@ -1442,6 +1487,7 @@ def tile_to_geojson(
     distributions: dict[str, Distribution] | None = None,
     terrace_positions: dict[str, tuple[float, float]] | None = None,
     road_data: dict[int, RoadData] | None = None,
+    gate_bearings: dict[int, float] | None = None,
 ) -> tuple[list, list]:
     """Build the render features (buildings, trees, water) and the raw-tag
     features.
@@ -1521,6 +1567,10 @@ def tile_to_geojson(
             ret.append(to_green(feature_id, tags, s, tile_box))
         elif tags.get("aeroway") in (AEROWAY_LINE_KINDS | AEROWAY_AREA_KINDS):
             ret.append(to_aeroway(feature_id, tags, s))
+        elif tags.get("barrier") in GATE_BARRIERS:
+            ret.append(to_gate(feature_id, tags, s, gate_bearings))
+        elif tags.get("barrier") in WALL_BARRIERS or tags.get("wall"):
+            ret.append(to_wall(feature_id, tags, s, tile_box))
         elif tags.get("barrier") in FENCE_BARRIERS:
             ret.append(to_fence(feature_id, tags, s, tile_box))
 
@@ -1841,6 +1891,47 @@ def parking_rows_by_tile(
                         }
                     )
     return dict(by_tile)
+
+
+def load_gate_bearings(input_parquet: Path) -> dict[int, float]:
+    """Match gate nodes to the nearest wall way, for the gate's orientation."""
+    rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where (tags['barrier'] in ('wall', 'retaining_wall', 'city_wall', 'hoarding')
+               or tags['wall'] is not null)
+          and ST_GeometryType(geometry) = 'LINESTRING'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    walls = [shapely.from_wkb(wkb) for (wkb,) in rows]
+    if not walls:
+        return {}
+    tree = shapely.STRtree(walls)
+    gates = duckdb.execute(
+        """
+        select feature_id, ST_X(geometry), ST_Y(geometry)
+        from read_parquet($input_path)
+        where tags['barrier'] in ('gate', 'lift_gate', 'swing_gate', 'wicket_gate', 'sliding_gate')
+          and ST_GeometryType(geometry) = 'POINT'
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    bearings: dict[int, float] = {}
+    for feature_id, lon, lat in gates:
+        point = Point(lon, lat)
+        candidates = tree.query(point.buffer(0.00005))
+        best_distance = math.inf
+        best_line: LineString | None = None
+        for index in candidates:
+            distance = walls[index].distance(point)
+            if distance < best_distance:
+                best_distance = distance
+                best_line = walls[index]
+        if best_line is not None and best_distance <= 0.00005:
+            bearings[feature_id] = way_bearing(best_line, point)
+    return bearings
 
 
 def load_road_data(input_parquet: Path) -> dict[int, RoadData]:
@@ -2260,7 +2351,11 @@ def parquet_to_tiles(
     features_by_tile = parquet_features_by_tile(input_parquet, zoom_level)
     logger.info(f"features fall in {len(features_by_tile)} tiles")
     road_data = load_road_data(input_parquet)
-    logger.info(f"road data for {len(road_data)} crossing/stop nodes")
+    gate_bearings = load_gate_bearings(input_parquet)
+    logger.info(
+        f"road data for {len(road_data)} crossing/stop nodes, "
+        f"{len(gate_bearings)} gates"
+    )
     # a tile that holds traffic, parking or lamps but no OSM feature still gets
     # a file
     for x, y in sorted(
@@ -2285,6 +2380,7 @@ def parquet_to_tiles(
             distributions,
             terrace_positions,
             road_data,
+            gate_bearings,
         )
         sidewalk_here = sidewalk_by_tile.get((x, y))
         if sidewalk_here:

@@ -101,6 +101,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   directions, width, lanes and `turn:lanes`; merged per tile (kind
   `road_marking`), no popup. A two-way road gets the line on the right half,
   a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/wall.ts` / `gate.ts` — low solid walls from `barrier=wall` /
+  `wall=*` ways and gate nodes as two posts plus a leaf, oriented by the nearest
+  wall. One merged Lambert mesh per tile each (kinds `wall` and `gate`),
+  `#walls-toggle`, no shadows.
 - `src/elements3d/sidewalk.ts` — sidewalk polygons authored by tilegen
   (`sidewalk` kind): a 0.14 m slab with darker kerb faces, one mesh per tile,
   `#sidewalks-toggle`, gated at zoom 16. Mapped `footway=sidewalk` ways and
@@ -201,6 +205,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
+- `tilegen/main.py` walls/gates — `WALL_BARRIERS`, `GATE_BARRIERS`, `to_wall`,
+  `to_gate` and `load_gate_bearings`; gate nodes get their bearing from the
+  nearest wall way. Walls clip like fences.
 - `tilegen/sidewalks.py` — authors sidewalk centre lines from car roads
   (default both sides; explicit `sidewalk:left/right`, `sidewalk` and
   `sidewalk=separate` honoured) and feeds mapped `footway=sidewalk` ways into
@@ -295,6 +302,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   road, the full width on a one-way one.
 - **lane arrow** — one white arrow per multi-lane approach, turned by
   `turn:lanes`; a single-lane approach gets no arrow.
+- **wall / gate** — a low solid wall from a `barrier=wall`/`wall=*` way, or a
+  gate node as two posts and a leaf, oriented by the nearest wall. Both share
+  the `#walls-toggle`.
 - **platform** — a clipped rail/tram platform area, raised by 0.28 m with a
   white edge and clickable. A platform mapped as an edge line is buffered to a
   4 m ribbon by tilegen.
@@ -378,8 +388,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
   `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
   `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
-  `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#bloom-toggle`,
-  `#imputed-colors-toggle`. Windows,
+  `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`,
+  `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars and lamp posts are their own meshes, so those
   are plain visibility switches; the basemap checkbox swaps the MapTiler style
