@@ -40,7 +40,13 @@ import type {
   TrafficLoop,
   WaterInfo,
 } from "./geojson_data.ts";
-import { TrafficRenderer, CAR_TRAFFIC, TRAIN_TRAFFIC } from "./traffic.ts";
+import {
+  TrafficRenderer,
+  BUS_TRAFFIC,
+  CAR_TRAFFIC,
+  TRAIN_TRAFFIC,
+  TRAM_TRAFFIC,
+} from "./traffic.ts";
 import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
 import { NightLights, type NightLightTile } from "./night_lights.ts";
 import { BloomPass } from "./bloom.ts";
@@ -327,6 +333,8 @@ class CoolMap {
   private popup?: Popup;
   private carsTraffic?: TrafficRenderer;
   private trainsTraffic?: TrafficRenderer;
+  private busesTraffic?: TrafficRenderer;
+  private tramsTraffic?: TrafficRenderer;
   private clouds?: CloudLayer;
   private airplanes?: PlaneLayer;
   // the scene lights, kept so the time-of-day model can drive them. They are
@@ -582,6 +590,8 @@ class CoolMap {
         // positions are recomputed each frame from the precomputed loops
         coolMap.carsTraffic = new TrafficRenderer(this.scene, CAR_TRAFFIC);
         coolMap.trainsTraffic = new TrafficRenderer(this.scene, TRAIN_TRAFFIC);
+        coolMap.busesTraffic = new TrafficRenderer(this.scene, BUS_TRAFFIC);
+        coolMap.tramsTraffic = new TrafficRenderer(this.scene, TRAM_TRAFFIC);
         // decorative clouds, also added directly to the scene: their positions
         // are relative to the visible area rather than to a tile
         coolMap.clouds = new CloudLayer(this.scene);
@@ -675,6 +685,12 @@ class CoolMap {
         }
         if (coolMap.trainsTraffic) {
           coolMap.trainsTraffic.update(originMeters, scaleFactor, view);
+        }
+        if (coolMap.busesTraffic) {
+          coolMap.busesTraffic.update(originMeters, scaleFactor, view);
+        }
+        if (coolMap.tramsTraffic) {
+          coolMap.tramsTraffic.update(originMeters, scaleFactor, view);
         }
         coolMap.updateClouds(originMeters, scaleFactor);
         // planes are placed from wall-clock time and the loaded runways
@@ -1048,11 +1064,19 @@ class CoolMap {
       }
     }
     const hits = raycaster.intersectObjects(pickable, false);
+    // a GTFS vehicle is in its own instanced mesh, so it is not in the static
+    // pickable list; compare its ray distance with the nearest static hit
+    const vehicle = this.vehicleAt(raycaster);
     if (hits.length === 0) {
-      this.clearSelection();
+      if (vehicle) this.selectVehicle(vehicle.meta, event.lngLat);
+      else this.clearSelection();
       return;
     }
     const hit = hits[0];
+    if (vehicle && vehicle.distance < hit.distance) {
+      this.selectVehicle(vehicle.meta, event.lngLat);
+      return;
+    }
     const tileKey = (hit.object.userData.tileKey as string | undefined) ?? "";
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
@@ -1760,6 +1784,41 @@ class CoolMap {
       .addTo(this.map);
   }
 
+  private vehicleAt(
+    raycaster: THREE.Raycaster,
+  ): { meta: NonNullable<TrafficLoop["meta"]>; distance: number } | undefined {
+    let best:
+      { meta: NonNullable<TrafficLoop["meta"]>; distance: number } | undefined;
+    for (const fleet of [this.busesTraffic, this.tramsTraffic]) {
+      const hit = fleet?.pick(raycaster);
+      if (hit && (!best || hit.distance < best.distance)) {
+        best = { meta: hit.meta, distance: hit.distance };
+      }
+    }
+    return best;
+  }
+
+  private selectVehicle(
+    meta: NonNullable<TrafficLoop["meta"]>,
+    lngLat: LngLat,
+  ) {
+    this.clearSelection();
+    const line = meta.line?.trim();
+    const route = meta.route?.trim();
+    const headsign = meta.headsign?.trim();
+    const mode = meta.type === "tram" ? "Tram" : "Bus";
+    const title = line ? `${mode} ${line}` : mode;
+    const lines = [
+      `<strong>${escapeHtml(title)}</strong>`,
+      route ? escapeHtml(route) : null,
+      headsign ? `Towards ${escapeHtml(headsign)}` : null,
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+  }
+
   private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
     this.clearSelection();
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
@@ -2088,10 +2147,15 @@ class CoolMap {
   // show/hide the traffic renderers from the toggle and the current zoom
   private applyTrafficState() {
     if (!this.carsTraffic || !this.trainsTraffic) return;
+    const fleets = [
+      this.carsTraffic,
+      this.trainsTraffic,
+      this.busesTraffic,
+      this.tramsTraffic,
+    ].filter((fleet): fleet is TrafficRenderer => fleet !== undefined);
     const on = this.trafficEnabled && this.map.getZoom() >= VEHICLE_MIN_ZOOM;
     if (on === this.carsTraffic.enabled) return;
-    this.carsTraffic.setEnabled(on);
-    this.trainsTraffic.setEnabled(on);
+    for (const fleet of fleets) fleet.setEnabled(on);
     if (on) this.syncTraffic();
   }
 
@@ -2595,6 +2659,14 @@ class CoolMap {
       loops.filter((loop) => loop.kind === "train"),
       crossings,
     );
+    this.busesTraffic?.setLoops(
+      loops.filter((loop) => loop.kind === "bus"),
+      crossings,
+    );
+    this.tramsTraffic?.setLoops(
+      loops.filter((loop) => loop.kind === "tram"),
+      crossings,
+    );
   }
 
   // hand the plane layer the loaded runways (as flight paths) and aprons (as
@@ -2714,6 +2786,10 @@ class CoolMap {
     nightLightMeshes: number;
     vehiclesDrawn: number;
     trainsDrawn: number;
+    buses: number;
+    trams: number;
+    busesDrawn: number;
+    tramsDrawn: number;
   } {
     let meshes = 0;
     let vertices = 0;
@@ -2783,6 +2859,10 @@ class CoolMap {
       nightLightMeshes: this.nightLights?.meshCount ?? 0,
       vehiclesDrawn: this.carsTraffic?.drawnCount ?? 0,
       trainsDrawn: this.trainsTraffic?.drawnCount ?? 0,
+      buses: this.busesTraffic?.count ?? 0,
+      trams: this.tramsTraffic?.count ?? 0,
+      busesDrawn: this.busesTraffic?.drawnCount ?? 0,
+      tramsDrawn: this.tramsTraffic?.drawnCount ?? 0,
     };
   }
 

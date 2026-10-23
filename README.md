@@ -438,12 +438,18 @@ is a stateless renderer that samples it. There is no runtime simulation.
 - Each loop is split per tile at tile boundaries. A tile stores the pieces
   that fall inside it (`runs`, with `t0`/`t1` seconds into `period`) plus the
   `vehicles` (`phase` + color) on those loops; each entry is tagged `kind`
-  (`car` or `train`) and the renderer merges pieces that share a loop `id`.
-  Nothing simulates, nothing rebuilds when a tile arrives, and a piece is drawn
-  only while its half-open `[t0, t1)` contains the phase.
-- Two fleets come out of the same machinery: cars on drivable highways (up to
-  15k vehicles across the 1000 loops) and trains/trams on `railway=rail`/`tram`
-  (spacing 800 m, orange).
+  (`car`, `train`, `bus` or `tram`) and the renderer merges pieces that share a
+  loop `id`. Nothing simulates, nothing rebuilds when a tile arrives, and a
+  piece is drawn only while its half-open `[t0, t1)` contains the phase.
+- Two fleets come out of the same machinery by default: cars on drivable
+  highways (up to 15k vehicles across the 1000 loops) and trains/trams on
+  `railway=rail`/`tram` (spacing 800 m, orange).
+- With `--gtfs gtfs.zip`, the feed supplies the bus and tram paths instead:
+  `shapes.txt` becomes an out-and-back loop per shape, route type 3/11 is a
+  bus and type 0 a tram, and only `railway=rail` remains in the OSM train
+  fleet. The feed's route short name, long name and trip headsign travel with
+  the loop; clicking a moving bus/tram opens a popup with its line and
+  direction. The feed is optional and ignored without `--traffic`.
 - Vehicles slow down at **signals and crossings**, cosmetically only. The tiles
   carry the OSM `highway=traffic_signals` / `highway=crossing` nodes as points;
   the renderer matches them to each loop's vertices, turns the windows into
@@ -634,7 +640,11 @@ By default the run also precomputes the vehicle routes (see "Precomputed
 traffic" above) and writes them into the tiles; pass `--no-traffic` to skip
 that step and emit only the geometry tiles. With traffic on it also writes the
 loop report into `tilegen/report/` (`--report-dir` to move it, `--no-report` to
-skip).
+skip). Pass `--gtfs gtfs.zip` to use the GTFS feed for bus and tram routes; the
+file is optional and currently local-only.
+
+`gtfs.zip` is ignored by git; keep it next to `pyproject.toml` and pass
+`--gtfs ../gtfs.zip` from `tilegen/` when rebuilding.
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
 works. Features currently handled: `building`, `natural=tree`,

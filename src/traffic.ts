@@ -51,6 +51,24 @@ export const TRAIN_TRAFFIC: TrafficFleetConfig = {
   maxVehicles: 500,
 };
 
+// GTFS buses and trams share the long windowed body but keep their own size and
+// capacity; the route color comes from the loop's vehicles.
+export const BUS_TRAFFIC: TrafficFleetConfig = {
+  length: 11,
+  width: 2.5,
+  height: 3,
+  body: "train",
+  maxVehicles: 3000,
+};
+
+export const TRAM_TRAFFIC: TrafficFleetConfig = {
+  length: 23,
+  width: 2.4,
+  height: 3.2,
+  body: "train",
+  maxVehicles: 900,
+};
+
 interface PreparedVehicle {
   phase: number;
   period: number;
@@ -59,6 +77,8 @@ interface PreparedVehicle {
   runs: PreparedRun[];
   // shared too: the loop's crossings, matched from the tile's point features
   crossings: PreparedCrossing[];
+  // GTFS line/route/headsign for the click popup; cars and trains have none
+  meta?: TrafficLoop["meta"];
 }
 
 // vehicles update at ~30 Hz. Two slices are placed per cycle, one per update,
@@ -241,6 +261,7 @@ export class TrafficRenderer {
         period: number;
         runs: PreparedRun[];
         vehicles: TrafficLoop["vehicles"];
+        meta?: TrafficLoop["meta"];
       }
     >();
     for (const loop of loops) {
@@ -250,6 +271,7 @@ export class TrafficRenderer {
           period: loop.period,
           runs: [],
           vehicles: loop.vehicles,
+          meta: loop.meta,
         };
         byId.set(loop.id, group);
       }
@@ -269,6 +291,7 @@ export class TrafficRenderer {
           color: vehicle.color,
           runs: group.runs,
           crossings,
+          meta: group.meta,
         });
       }
     }
@@ -286,6 +309,30 @@ export class TrafficRenderer {
     this.lastRemap = 0;
     this.lastOriginKey = "";
     this.lastViewKey = "";
+  }
+
+  // Return the visible vehicle under a ray, if any. Only the compacted slots
+  // are drawn, so the instance id is the slot; `slots` maps it back to the
+  // vehicle and therefore to the GTFS metadata.
+  pick(raycaster: THREE.Raycaster):
+    | {
+        meta: NonNullable<TrafficLoop["meta"]>;
+        point: THREE.Vector3;
+        distance: number;
+      }
+    | undefined {
+    if (!this.enabled || this.visibleCount === 0) return undefined;
+    // the instance matrices move every frame; a stale bounding sphere from
+    // before the first placement would make the ray reject the whole mesh
+    this.mesh.computeBoundingSphere();
+    for (const hit of raycaster.intersectObject(this.mesh, false)) {
+      const slot = hit.instanceId;
+      if (slot === undefined || slot >= this.visibleCount) continue;
+      const vehicle = this.vehicles[this.slots[slot]];
+      if (!vehicle.meta) continue;
+      return { meta: vehicle.meta, point: hit.point, distance: hit.distance };
+    }
+    return undefined;
   }
 
   // Place the vehicles for the current wall-clock phase. The visible set is

@@ -210,6 +210,9 @@ class Loop:
     period: float  # seconds for one lap (speeds vary along the loop)
     kind: str = "car"
     vehicles: list[dict] = field(default_factory=list)
+    # optional display metadata (GTFS line/route/headsign); the frontend shows
+    # it when a moving bus/tram is clicked
+    meta: dict | None = None
 
     @property
     def v(self) -> float:
@@ -797,6 +800,7 @@ def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[d
                         {"phase": round(v["phase"], 6), "color": v["color"]}
                         for v in loop.vehicles
                     ],
+                    **({"meta": loop.meta} if loop.meta else {}),
                 }
             )
     return by_tile
@@ -836,6 +840,7 @@ def loops_to_records(loops: list[Loop]) -> list[dict]:
             "seg_speeds": list(loop.seg_speeds),
             "segs": [[list(coord) for coord in seg] for seg in loop.segs],
             "vehicles": [dict(vehicle) for vehicle in loop.vehicles],
+            "meta": loop.meta,
         }
         for loop in loops
     ]
@@ -854,6 +859,7 @@ def loops_from_records(records: list[dict]) -> list[Loop]:
                 {"phase": vehicle["phase"], "color": vehicle["color"]}
                 for vehicle in record["vehicles"]
             ],
+            meta=record.get("meta"),
         )
         for record in records
     ]

@@ -216,6 +216,17 @@ def test_loops_to_tiles_shares_geometry_and_vehicles():
     assert entry["runs"][0]["t0"] == 0.0
 
 
+def test_loop_metadata_survives_tiles_and_cache():
+    _, loops = find(square_ways(9.18, 45.5, 0.001))
+    loops[0].meta = {"line": "1", "type": "tram"}
+    traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
+    entry = next(iter(traffic.loops_to_tiles(loops, 15).values()))[0]
+    assert entry["meta"] == {"line": "1", "type": "tram"}
+    records = traffic.loops_to_records(loops)
+    restored = traffic.loops_from_records(records)
+    assert restored[0].meta == {"line": "1", "type": "tram"}
+
+
 def test_global_budget_raises_spacing():
     ways = square_ways(9.18, 45.5, 0.001)
     _graph, loops = find(ways)

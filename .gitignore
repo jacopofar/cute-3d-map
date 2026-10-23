@@ -2,6 +2,7 @@
 Screenshot*.png
 # own data for testing
 data/
+gtfs.zip
 public/tiles
 # generated loop report (tilegen/report)
 tilegen/report

@@ -179,9 +179,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   just above it. The cross is its own per-tile kind (`church`), so its checkbox
   hides just the ornament.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
-  routes; the only fleet renderer. It places a slice of vehicles per update at
-  ~30 Hz (spread over frames) and culls runs outside the map bounds, so the CPU
-  only samples what is on screen; positions stay a pure function of time.
+  routes; one instance per fleet (`CAR_TRAFFIC`, `TRAIN_TRAFFIC`, `BUS_TRAFFIC`,
+  `TRAM_TRAFFIC`). It places a slice of vehicles per update at ~30 Hz (spread
+  over frames) and culls runs outside the map bounds, so the CPU only samples
+  what is on screen; positions stay a pure function of time. `pick()` raycasts
+  the visible instances and returns the loop's GTFS `meta` for the click popup.
 - `src/parking_layout.ts` — walks the tile's authored parking rows (kerb line,
   style, pitch, side, occupancy) and places the occupied cars in model space.
   Pure and unit-tested; `geojson_data` turns the result into `ParkedCar`s.
@@ -222,6 +224,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and trains, and `loop_report` / `loops_to_geojson` build the loop report.
   Takes plain `Way` inputs and does no OSM I/O itself (`main.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
+  A loop may carry `meta` (GTFS line/route/headsign); it survives the cache and
+  the per-tile traffic block.
+- `tilegen/gtfs.py` — optional GTFS zip reader. Uses the feed's shapes as
+  out-and-back bus/tram loops (route types 3/11 and 0), assigns vehicles with
+  `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign
+  metadata for the moving-vehicle popup. The feed is opt-in via `--gtfs`; the
+  default OSM rail logic remains when it is absent.
 - `tilegen/main.py` walls/gates — `WALL_BARRIERS`, `GATE_BARRIERS`, `to_wall`,
   `to_gate` and `load_gate_bearings`; gate nodes get their bearing from the
   nearest wall way. Walls clip like fences.
@@ -275,7 +284,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   traffic.
 - **method** — how a fleet builds loops: `random` (cars: shortest paths through
   three random nodes) or `faces` (trains: planar faces of the graph).
-- **kind** — a loop/vehicle tag, `car` or `train`; picks the fleet and body.
+- **kind** — a loop/vehicle tag, `car`, `train`, `bus` or `tram`; picks the
+  fleet and body. GTFS loops also carry a `meta` block for the popup.
 - **run** — the piece of a loop that falls inside one tile, with `[t0, t1)`
   seconds into the loop's `period` and a `times` keyframe per coordinate.
 - **phase** — a vehicle's 0..1 offset along its loop; vehicles are spread
@@ -388,6 +398,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   eases down from 60 m out to ~15% of cruise and back over ~255 m, on green it
   nudges up and settles. Both bumps are smooth and return to zero, so the loop's
   path and timing are unchanged — nothing waits.
+- **GTFS path** — an out-and-back loop built from one GTFS `shapes.txt` shape;
+  route type 3/11 becomes a bus and type 0 a tram. The loop metadata names the
+  line, route and headsign.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
 - **parking row / parked car** — a kerb line authored by tilegen with a style
