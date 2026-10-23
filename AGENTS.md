@@ -183,7 +183,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `TRAM_TRAFFIC`). It places a slice of vehicles per update at ~30 Hz (spread
   over frames) and culls runs outside the map bounds, so the CPU only samples
   what is on screen; positions stay a pure function of time. `pick()` raycasts
-  the visible instances and returns the loop's GTFS `meta` for the click popup.
+  the visible instances and returns the loop's GTFS `meta` for the click popup;
+  `positionAt()` gives the camera follow its exact drawn lon/lat/heading.
 - `src/parking_layout.ts` — walks the tile's authored parking rows (kerb line,
   style, pitch, side, occupancy) and places the occupied cars in model space.
   Pure and unit-tested; `geojson_data` turns the result into `ParkedCar`s.

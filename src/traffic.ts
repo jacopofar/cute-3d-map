@@ -70,6 +70,7 @@ export const TRAM_TRAFFIC: TrafficFleetConfig = {
 };
 
 interface PreparedVehicle {
+  loopId: string;
   phase: number;
   period: number;
   color: number;
@@ -239,6 +240,12 @@ export class TrafficRenderer {
     if (enabled) this.needsFullUpdate = true;
   }
 
+  // the clock used for the current positions; the camera follow reads the
+  // same clock so it tracks the drawn instance
+  get currentTime(): number {
+    return this.now();
+  }
+
   // live vehicle count, for the perf benchmark
   get count(): number {
     return this.vehicles.length;
@@ -258,6 +265,7 @@ export class TrafficRenderer {
     const byId = new Map<
       string,
       {
+        id: string;
         period: number;
         runs: PreparedRun[];
         vehicles: TrafficLoop["vehicles"];
@@ -268,6 +276,7 @@ export class TrafficRenderer {
       let group = byId.get(loop.id);
       if (!group) {
         group = {
+          id: loop.id,
           period: loop.period,
           runs: [],
           vehicles: loop.vehicles,
@@ -286,6 +295,7 @@ export class TrafficRenderer {
       for (const vehicle of group.vehicles) {
         if (vehicles.length >= this.capacity) break;
         vehicles.push({
+          loopId: group.id,
           phase: vehicle.phase,
           period: group.period,
           color: vehicle.color,
@@ -319,6 +329,8 @@ export class TrafficRenderer {
         meta: NonNullable<TrafficLoop["meta"]>;
         point: THREE.Vector3;
         distance: number;
+        loopId: string;
+        phase: number;
       }
     | undefined {
     if (!this.enabled || this.visibleCount === 0) return undefined;
@@ -330,9 +342,36 @@ export class TrafficRenderer {
       if (slot === undefined || slot >= this.visibleCount) continue;
       const vehicle = this.vehicles[this.slots[slot]];
       if (!vehicle.meta) continue;
-      return { meta: vehicle.meta, point: hit.point, distance: hit.distance };
+      return {
+        meta: vehicle.meta,
+        point: hit.point,
+        distance: hit.distance,
+        loopId: vehicle.loopId,
+        phase: vehicle.phase,
+      };
     }
     return undefined;
+  }
+
+  // Current lon/lat and heading of one vehicle, for camera following. Uses the
+  // same phase/crossing shift as the rendered instance, so the camera tracks
+  // what is on screen rather than a nearby but different point.
+  positionAt(
+    loopId: string,
+    phase: number,
+    now: number,
+  ): { lon: number; lat: number; heading: number } | undefined {
+    const vehicle = this.vehicles.find(
+      (candidate) => candidate.loopId === loopId && candidate.phase === phase,
+    );
+    if (!vehicle) return undefined;
+    let tau = (now + vehicle.phase * vehicle.period) % vehicle.period;
+    if (tau < 0) tau += vehicle.period;
+    const drawn =
+      (tau + crossingShift(tau, vehicle.crossings, now)) % vehicle.period;
+    const run = findRun(vehicle.runs, drawn);
+    if (!run) return undefined;
+    return sampleRun(run, drawn - run.t0);
   }
 
   // Place the vehicles for the current wall-clock phase. The visible set is
