@@ -167,3 +167,9 @@ body {
   font-style: italic;
   font-size: 12px;
 }
+
+/* the moving-vehicle popup doubles as the follow indicator */
+.follow-hint {
+  color: #667;
+  font-size: 11px;
+}

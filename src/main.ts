@@ -335,6 +335,13 @@ class CoolMap {
   private trainsTraffic?: TrafficRenderer;
   private busesTraffic?: TrafficRenderer;
   private tramsTraffic?: TrafficRenderer;
+  // the moving bus/tram the camera is following; cleared by a map click or drag
+  private following?: {
+    renderer: TrafficRenderer;
+    loopId: string;
+    phase: number;
+  };
+  private lastFollowAt = 0;
   private clouds?: CloudLayer;
   private airplanes?: PlaneLayer;
   // the scene lights, kept so the time-of-day model can drive them. They are
@@ -692,6 +699,7 @@ class CoolMap {
         if (coolMap.tramsTraffic) {
           coolMap.tramsTraffic.update(originMeters, scaleFactor, view);
         }
+        coolMap.updateFollow();
         coolMap.updateClouds(originMeters, scaleFactor);
         // planes are placed from wall-clock time and the loaded runways
         coolMap.airplanes?.update(originMeters, scaleFactor, {
@@ -974,6 +982,7 @@ class CoolMap {
     );
 
     this.map.on("click", (event) => this.onMapClick(event));
+    this.map.on("dragstart", () => this.stopFollowing());
   }
 
   // drop every loaded tile so the next load pass rebuilds them, picking up the
@@ -1021,6 +1030,9 @@ class CoolMap {
     point: { x: number; y: number };
     lngLat: LngLat;
   }) {
+    // clicking the map is how the user stops following a vehicle, even when
+    // inspect mode is off
+    this.stopFollowing();
     if (!this.inspectEnabled) return;
     const canvas = this.map.getCanvas();
     // event.point is already in CSS pixels relative to the map canvas
@@ -1068,13 +1080,13 @@ class CoolMap {
     // pickable list; compare its ray distance with the nearest static hit
     const vehicle = this.vehicleAt(raycaster);
     if (hits.length === 0) {
-      if (vehicle) this.selectVehicle(vehicle.meta, event.lngLat);
+      if (vehicle) this.selectVehicle(vehicle, event.lngLat);
       else this.clearSelection();
       return;
     }
     const hit = hits[0];
     if (vehicle && vehicle.distance < hit.distance) {
-      this.selectVehicle(vehicle.meta, event.lngLat);
+      this.selectVehicle(vehicle, event.lngLat);
       return;
     }
     const tileKey = (hit.object.userData.tileKey as string | undefined) ?? "";
@@ -1784,25 +1796,51 @@ class CoolMap {
       .addTo(this.map);
   }
 
-  private vehicleAt(
-    raycaster: THREE.Raycaster,
-  ): { meta: NonNullable<TrafficLoop["meta"]>; distance: number } | undefined {
+  private vehicleAt(raycaster: THREE.Raycaster):
+    | {
+        meta: NonNullable<TrafficLoop["meta"]>;
+        distance: number;
+        renderer: TrafficRenderer;
+        loopId: string;
+        phase: number;
+      }
+    | undefined {
     let best:
-      { meta: NonNullable<TrafficLoop["meta"]>; distance: number } | undefined;
+      | {
+          meta: NonNullable<TrafficLoop["meta"]>;
+          distance: number;
+          renderer: TrafficRenderer;
+          loopId: string;
+          phase: number;
+        }
+      | undefined;
     for (const fleet of [this.busesTraffic, this.tramsTraffic]) {
-      const hit = fleet?.pick(raycaster);
+      if (!fleet) continue;
+      const hit = fleet.pick(raycaster);
       if (hit && (!best || hit.distance < best.distance)) {
-        best = { meta: hit.meta, distance: hit.distance };
+        best = {
+          meta: hit.meta,
+          distance: hit.distance,
+          renderer: fleet,
+          loopId: hit.loopId,
+          phase: hit.phase,
+        };
       }
     }
     return best;
   }
 
   private selectVehicle(
-    meta: NonNullable<TrafficLoop["meta"]>,
+    hit: {
+      meta: NonNullable<TrafficLoop["meta"]>;
+      renderer: TrafficRenderer;
+      loopId: string;
+      phase: number;
+    },
     lngLat: LngLat,
   ) {
     this.clearSelection();
+    const meta = hit.meta;
     const line = meta.line?.trim();
     const route = meta.route?.trim();
     const headsign = meta.headsign?.trim();
@@ -1812,11 +1850,44 @@ class CoolMap {
       `<strong>${escapeHtml(title)}</strong>`,
       route ? escapeHtml(route) : null,
       headsign ? `Towards ${escapeHtml(headsign)}` : null,
+      '<span class="follow-hint">Following — click the map to stop</span>',
     ].filter(Boolean);
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
       .setHTML(lines.join("<br>"))
       .addTo(this.map);
+    this.popup.on("close", () => this.stopFollowing());
+    this.startFollowing(hit.renderer, hit.loopId, hit.phase);
+  }
+
+  private startFollowing(
+    renderer: TrafficRenderer,
+    loopId: string,
+    phase: number,
+  ) {
+    this.following = { renderer, loopId, phase };
+    this.lastFollowAt = 0;
+  }
+
+  private stopFollowing() {
+    this.following = undefined;
+    this.lastFollowAt = 0;
+  }
+
+  private updateFollow() {
+    if (!this.following) return;
+    const { renderer, loopId, phase } = this.following;
+    if (!renderer.enabled) {
+      this.stopFollowing();
+      return;
+    }
+    const position = renderer.positionAt(loopId, phase, renderer.currentTime);
+    if (!position) return;
+    const now = performance.now();
+    if (now - this.lastFollowAt < 30) return;
+    this.lastFollowAt = now;
+    this.map.jumpTo({ center: [position.lon, position.lat] });
+    this.popup?.setLngLat([position.lon, position.lat]);
   }
 
   private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
