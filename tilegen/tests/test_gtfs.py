@@ -1,6 +1,7 @@
 import zipfile
 
 from gtfs import load_gtfs_fleets
+from traffic import haversine_m
 
 ROUTES = """route_id,route_short_name,route_long_name,route_type,route_color
 R1,1,One,3,ff0000
@@ -46,6 +47,10 @@ def test_gtfs_shapes_become_bus_and_tram_loops(tmp_path):
     assert bus.meta["line"] == "1"
     assert bus.meta["headsign"] == "Terminus A"
     assert bus.segs[0][0] == bus.segs[0][-1]
+    # outbound and return lanes are each 1.5 m to their own right, so the two
+    # directions are about 3 m apart at the start/end
+    lane_gap = haversine_m(bus.segs[0][0], bus.segs[0][-2])
+    assert 2.0 < lane_gap < 4.0
     assert bus.vehicles
     assert fleets["tram"][0].meta is not None
     assert fleets["tram"][0].meta["line"] == "2"

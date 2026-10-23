@@ -15,15 +15,21 @@ rail fleet.
 
 import csv
 import io
+import math
 import zipfile
 from collections import defaultdict
 from itertools import pairwise
 from pathlib import Path
 
+import shapely
 from traffic import Loop, TrafficConfig, assign_vehicles, haversine_m
 
 BUS_ROUTE_TYPES = frozenset({"3", "11"})
 TRAM_ROUTE_TYPES = frozenset({"0"})
+# GTFS shapes are a single line, so an out-and-back loop would put the two
+# directions on top of each other. Offset each direction 1.5 m to its right;
+# the return lane therefore sits 3 m from the outbound one.
+LANE_OFFSET_M = 1.5
 
 # Buses are frequent and short, trams are longer; the actual feed frequency is
 # not used, so these spacing values control how many vehicles are drawn. The
@@ -132,11 +138,50 @@ def _clean(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
     return result
 
 
-def _round_trip(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """A GTFS shape runs one way; mirror it so the loop model can repeat it."""
+def _offset_right(
+    points: list[tuple[float, float]], distance: float
+) -> list[tuple[float, float]]:
+    """Offset a lon/lat line to the right by `distance` meters.
+
+    Shapely works in the input coordinate units, so project locally to meters
+    first: a degree of longitude is cos(latitude) shorter than a degree of
+    latitude, and a raw 1.5e-5 degree offset would be visibly wrong on an
+    east-west path.
+    """
     if len(points) < 2:
         return []
-    return points + list(reversed(points[:-1]))
+    lat0 = sum(point[1] for point in points) / len(points)
+    scale_x = 111320.0 * math.cos(math.radians(lat0))
+    scale_y = 110540.0
+    local = [(lon * scale_x, lat * scale_y) for lon, lat in points]
+    shifted = shapely.LineString(local).offset_curve(-distance, quad_segs=8)
+    parts = [
+        part for part in shapely.get_parts(shifted) if part.geom_type == "LineString"
+    ]
+    if not parts:
+        return []
+    # an offset curve can split at a sharp bend; keep the longest continuous
+    # piece rather than introducing a teleport in the loop
+    line = max(parts, key=lambda part: part.length)
+    return [(x / scale_x, y / scale_y) for x, y in line.coords]
+
+
+def _round_trip(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Out and back on separate right-hand lanes.
+
+    The outbound path is shifted right of the feed direction; the return path
+    is shifted right of the reversed direction. The two short connectors at the
+    termini close the loop and are what make the two lanes 3 m apart.
+    """
+    if len(points) < 2:
+        return []
+    outbound = _offset_right(points, LANE_OFFSET_M)
+    returning = _offset_right(list(reversed(points)), LANE_OFFSET_M)
+    if len(outbound) < 2 or len(returning) < 2:
+        # degenerate geometry: keep the old plain out-and-back rather than
+        # dropping a whole route
+        return list(points) + list(reversed(points[:-1]))
+    return outbound + returning + [outbound[0]]
 
 
 def _loop(
