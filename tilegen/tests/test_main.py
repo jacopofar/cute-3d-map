@@ -948,6 +948,19 @@ def test_rooftop_feature_lifts_a_water_tower_to_the_building_roof():
     )
     assert levels is not None
     assert levels["properties"]["base"] == 12.0
+    part_building = [shapely.box(9.0, 45.0, 9.001, 45.001)]
+    part_tags = [{"building:part": "yes", "min_height": "10", "building:levels": "2"}]
+    part_tree = shapely.STRtree(part_building)
+    part = main.rooftop_feature(
+        "node/2c",
+        {"man_made": "antenna"},
+        shapely.Point(9.0005, 45.0005),
+        part_building,
+        part_tags,
+        part_tree,
+    )
+    assert part is not None
+    assert part["properties"]["base"] == 16.0
     solar = main.rooftop_feature(
         "node/3",
         {"generator:source": "solar"},

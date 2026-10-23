@@ -1816,12 +1816,10 @@ def rooftop_feature(
     for index in tree.query(point):
         if buildings[index].contains(point):
             btags = building_tags[index]
-            height = parse_length(btags.get("height"))
-            if height is None and btags.get("building:levels"):
-                levels = parse_length(btags.get("building:levels"))
-                if levels is not None:
-                    height = levels * 3
-            base = height or 10.0
+            # Reuse the building height rules: a part's top is min_height plus
+            # its levels, not the levels alone. The old duplicate here ignored
+            # min_height and dropped rooftop gear inside the podium.
+            base = building_top(btags, building_base(btags)) or 10.0
             break
     _kind, default_height, default_size = ROOFTOP_KINDS.get(
         tags.get("man_made"), (kind, 0.5, 2.0)
