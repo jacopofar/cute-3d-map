@@ -422,12 +422,20 @@ export interface TrafficVehicle {
 // the vehicles on it. The same loop id appears in every tile it spans, with
 // disjoint run sets; the renderer merges them.
 export interface TrafficLoop {
-  kind: "car" | "train";
+  kind: "car" | "train" | "bus" | "tram";
   id: string;
   v: number; // cruise speed, m/s
   period: number; // seconds for one lap
   runs: TrafficRun[];
   vehicles: TrafficVehicle[];
+  // GTFS display metadata; absent on the synthetic OSM fleets
+  meta?: {
+    line?: string;
+    route?: string;
+    headsign?: string;
+    route_id?: string;
+    type?: string;
+  };
 }
 
 // a building footprint for click-picking + info (outer rings only)
@@ -1079,12 +1087,13 @@ export function apronInfo(f: Geojson.Feature): ApronRing | null {
 // the traffic block as written by tilegen (colors are "rrggbb" strings there,
 // because JSON has no integer colors)
 interface RawTrafficLoop {
-  kind: "car" | "train";
+  kind: "car" | "train" | "bus" | "tram";
   id: string;
   v: number;
   period: number;
   runs: TrafficRun[];
   vehicles: { phase: number; color: string }[];
+  meta?: TrafficLoop["meta"];
 }
 
 function rooftopInfo(f: Geojson.Feature): RooftopInfo | null {
@@ -1165,5 +1174,6 @@ function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
       phase: vehicle.phase,
       color: parseInt(vehicle.color, 16),
     })),
+    meta: loop.meta,
   }));
 }

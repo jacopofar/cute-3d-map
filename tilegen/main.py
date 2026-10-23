@@ -13,6 +13,7 @@ import duckdb
 import quackosm as qosm
 import shapely
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
+from gtfs import load_gtfs_fleets
 from impute import IMPUTED_FIELDS, Distribution, impute
 from lamps import lamp_spots
 from parking import (
@@ -2532,6 +2533,7 @@ def parquet_to_tiles(
     report_polygon: BaseGeometry | None = None,
     cache_dir: Path = Path("cache"),
     use_cache: bool = True,
+    gtfs_path: Path | None = None,
 ) -> None:
     duckdb.load_extension("spatial")
     zoom_level = TILE_ZOOM
@@ -2570,14 +2572,24 @@ def parquet_to_tiles(
         # traffic is global: one graph per fleet over the whole network, loops
         # split per tile at the end (see tilegen/traffic.py)
         logger.info("Building global traffic loops")
+        # With GTFS, the feed owns the bus/tram paths; keep the OSM train fleet
+        # for heavy rail only so trams are not drawn twice.
+        railways = frozenset({"rail"}) if gtfs_path else RAILWAYS
         ways_by_kind = {
             "car": load_ways(input_parquet, "highway", DRIVABLE_HIGHWAYS),
-            "train": load_ways(input_parquet, "railway", RAILWAYS),
+            "train": load_ways(input_parquet, "railway", railways),
         }
         configs = {"car": CAR_CONFIG, "train": TRAIN_CONFIG}
         crossing_points = load_crossing_points(input_parquet)
         logger.info(f"{len(crossing_points)} crossing points (signals and crossings)")
         fleets = load_or_build_fleets(ways_by_kind, configs, cache_dir, use_cache)
+        if gtfs_path is not None:
+            gtfs_fleets = load_gtfs_fleets(gtfs_path)
+            fleets.update(gtfs_fleets)
+            logger.info(
+                "GTFS paths: %s",
+                {kind: len(loops) for kind, loops in gtfs_fleets.items()},
+            )
         for fleet_type, loops in fleets.items():
             logger.info(f"for {fleet_type=} got {len(loops)} loops")
         traffic_by_tile = fleets_to_tiles(fleets, zoom_level)
@@ -2786,6 +2798,15 @@ def parquet_to_tiles(
     ),
 )
 @click.option(
+    "--gtfs",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Optional GTFS zip. Its shapes become the bus and tram paths; without "
+        "it the OSM rail fleet and the current traffic logic are used."
+    ),
+)
+@click.option(
     "--cache/--no-cache",
     default=True,
     help=(
@@ -2812,6 +2833,7 @@ def main(
     report: bool,
     report_dir: Path,
     report_polygon: Path | None,
+    gtfs: Path | None,
     cache: bool,
     cache_dir: Path,
 ) -> None:
@@ -2844,6 +2866,7 @@ def main(
         report_polygon=report_shape,
         cache_dir=cache_dir,
         use_cache=cache,
+        gtfs_path=gtfs,
     )
 
 
