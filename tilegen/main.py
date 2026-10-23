@@ -153,7 +153,9 @@ def building_top(tags, base: float) -> float | None:
     return height
 
 
-def to_building(feature_id, tags, s, distributions=None) -> dict | None:
+def to_building(
+    feature_id, tags, s, distributions=None, solar_buildings=None
+) -> dict | None:
     if s.geom_type == "Point":
         logger.warning(f"Point building?? {feature_id}")
         return None
@@ -188,6 +190,11 @@ def to_building(feature_id, tags, s, distributions=None) -> dict | None:
         # `imputed` names the fields that were sampled rather than tagged.
         **values,
         "imputed": sampled or None,
+        # a building carrying mapped solar panels keeps a flat top so the
+        # panels sit on it instead of disappearing inside a pitched roof
+        "solar": (
+            True if solar_buildings and str(feature_id) in solar_buildings else None
+        ),
     }
     return {
         "type": "feature",
@@ -1488,6 +1495,7 @@ def tile_to_geojson(
     terrace_positions: dict[str, tuple[float, float]] | None = None,
     road_data: dict[int, RoadData] | None = None,
     gate_bearings: dict[int, float] | None = None,
+    solar_buildings: set[str] | None = None,
 ) -> tuple[list, list]:
     """Build the render features (buildings, trees, water) and the raw-tag
     features.
@@ -1519,7 +1527,7 @@ def tile_to_geojson(
             # guard falls through), only a road/rail tunnel becomes a portal
             ret.extend(to_tunnel(feature_id, tags, s, tile_box))
         elif "building" in tags or "building:part" in tags:
-            ret.append(to_building(feature_id, tags, s, distributions))
+            ret.append(to_building(feature_id, tags, s, distributions, solar_buildings))
         elif tags.get("natural") == "tree":
             ret.append(to_tree(feature_id, tags, s))
         elif tags.get("natural") == "tree_row":
@@ -1829,33 +1837,48 @@ def rooftop_feature(
             else default_height
         )
         size = parse_length(tags.get("width")) or default_size
+    geometry_out = (
+        json.loads(shapely.to_geojson(geometry))
+        if kind == "solar" and geometry.geom_type in ("Polygon", "MultiPolygon")
+        else {"type": "Point", "coordinates": [point.x, point.y]}
+    )
+    properties = {
+        "cmtype": "rooftop",
+        "kind": kind,
+        "base": round(base, 1),
+        "height": round(height, 1),
+        "size": round(size, 1),
+    }
+    if tags.get("name"):
+        properties["name"] = tags["name"]
     return {
         "type": "feature",
         "id": str(feature_id),
-        "geometry": {"type": "Point", "coordinates": [point.x, point.y]},
-        "properties": {
-            "cmtype": "rooftop",
-            "kind": kind,
-            "base": round(base, 1),
-            "height": round(height, 1),
-            "size": round(size, 1),
-        },
+        "geometry": geometry_out,
+        "properties": properties,
     }
 
 
-def load_rooftop_accessories(input_parquet: Path) -> dict[tuple[int, int], list[dict]]:
-    """Mapped rooftop equipment, placed on the roof of the containing building."""
+def load_rooftop_accessories(
+    input_parquet: Path,
+) -> tuple[dict[tuple[int, int], list[dict]], set[str]]:
+    """Mapped rooftop equipment, placed on the roof of the containing building.
+
+    Also returns the ids of buildings carrying solar panels, so their pitched
+    roof can be kept flat and the panels stay visible.
+    """
     building_rows = duckdb.execute(
         """
-        select tags, ST_AsWKB(geometry)
+        select feature_id, tags, ST_AsWKB(geometry)
         from read_parquet($input_path)
         where tags['building'] is not null
           and ST_GeometryType(geometry) in ('POLYGON', 'MULTIPOLYGON')
         """,
         {"input_path": str(input_parquet)},
     ).fetchall()
-    buildings = [shapely.from_wkb(wkb) for _tags, wkb in building_rows]
-    building_tags = [tags for tags, _wkb in building_rows]
+    building_ids = [feature_id for feature_id, _tags, _wkb in building_rows]
+    buildings = [shapely.from_wkb(wkb) for _id, _tags, wkb in building_rows]
+    building_tags = [tags for _id, tags, _wkb in building_rows]
     tree = shapely.STRtree(buildings)
     rows = duckdb.execute(
         """
@@ -1867,20 +1890,28 @@ def load_rooftop_accessories(input_parquet: Path) -> dict[tuple[int, int], list[
         {"input_path": str(input_parquet)},
     ).fetchall()
     by_tile: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    solar_buildings: set[str] = set()
     for feature_id, tags, wkb in rows:
+        geometry = shapely.from_wkb(wkb)
+        if rooftop_kind(tags) == "solar":
+            center = geometry if geometry.geom_type == "Point" else geometry.centroid
+            for index in tree.query(center):
+                if buildings[index].contains(center):
+                    solar_buildings.add(str(building_ids[index]))
+                    break
         feature = rooftop_feature(
             feature_id,
             tags,
-            shapely.from_wkb(wkb),
+            geometry,
             buildings,
             building_tags,
             tree,
         )
         if feature is None:
             continue
-        point = feature["geometry"]["coordinates"]
-        by_tile[coord_to_tile(point[0], point[1], TILE_ZOOM)].append(feature)
-    return dict(by_tile)
+        point = geometry if geometry.geom_type == "Point" else geometry.centroid
+        by_tile[coord_to_tile(point.x, point.y, TILE_ZOOM)].append(feature)
+    return dict(by_tile), solar_buildings
 
 
 def sidewalk_polygons_by_tile(
@@ -2411,6 +2442,7 @@ def parquet_to_tiles(
     parking_by_tile: dict[tuple[int, int], list[dict]] = {}
     sidewalk_by_tile: dict[tuple[int, int], list[dict]] = {}
     rooftop_by_tile: dict[tuple[int, int], list[dict]] = {}
+    solar_buildings: set[str] = set()
     lamp_by_tile: dict[tuple[int, int], list[list[float]]] = {}
     if parking or lamps:
         logger.info("Building parked cars and street lamps")
@@ -2443,11 +2475,6 @@ def parquet_to_tiles(
         sidewalk_by_tile = sidewalk_polygons_by_tile(
             sidewalk_data, parking_ways, zoom_level
         )
-        rooftop_by_tile = load_rooftop_accessories(input_parquet)
-        logger.info(
-            "rooftop accessories: %d tiles",
-            len(rooftop_by_tile),
-        )
         logger.info(
             "sidewalks: %d ways -> %d polygons in %d tiles",
             len(parking_ways),
@@ -2462,6 +2489,13 @@ def parquet_to_tiles(
                 sum(len(spots) for spots in lamp_by_tile.values()),
                 len(lamp_by_tile),
             )
+    # rooftop equipment is independent of the parking/lamps pass
+    rooftop_by_tile, solar_buildings = load_rooftop_accessories(input_parquet)
+    logger.info(
+        "rooftop accessories: %d tiles, %d solar buildings",
+        len(rooftop_by_tile),
+        len(solar_buildings),
+    )
     # one scan groups every feature into the tiles it intersects, instead of a
     # full-parquet query per tile (the grid is mostly empty, and even an empty
     # query costs a full scan)
@@ -2499,6 +2533,7 @@ def parquet_to_tiles(
             terrace_positions,
             road_data,
             gate_bearings,
+            solar_buildings,
         )
         sidewalk_here = sidewalk_by_tile.get((x, y))
         if sidewalk_here:

@@ -1,5 +1,6 @@
 import json
 
+import duckdb
 import geo
 import impute
 import main
@@ -48,6 +49,22 @@ def test_to_building_height_and_color():
     assert f["properties"]["cmtype"] == "building"
     assert f["properties"]["height"] == 12.0
     assert f["properties"]["color"] == "#ff0000"
+
+
+def test_to_building_marks_the_roof_flat_for_solar_panels():
+    f = main.to_building(
+        42,
+        {"building": "yes", "height": "10", "roof:shape": "pyramidal"},
+        geom(POLYGON),
+        solar_buildings={"42"},
+    )
+    assert f is not None
+    assert f["properties"]["solar"] is True
+    other = main.to_building(
+        43, {"building": "yes", "height": "10"}, geom(POLYGON), solar_buildings={"42"}
+    )
+    assert other is not None
+    assert "solar" not in other["properties"]
 
 
 def test_to_building_part_uses_min_height_and_levels():
@@ -866,6 +883,31 @@ def test_rooftop_kind_maps_the_supported_tags():
     assert main.rooftop_kind({"man_made": "bench"}) is None
 
 
+def test_load_rooftop_accessories_marks_the_solar_building(tmp_path):
+    duckdb.load_extension("spatial")
+    path = tmp_path / "rooftops.parquet"
+    con = duckdb.connect()
+    con.execute(
+        "create table t(feature_id bigint, tags map(varchar,varchar), geometry geometry)"
+    )
+    con.execute(
+        "insert into t values (1, map(['building','height'],['yes','12']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.box(9.0, 45.0, 9.001, 45.001))],
+    )
+    con.execute(
+        "insert into t values (2, map(['generator:source'],['solar']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.box(9.0002, 45.0002, 9.0008, 45.0008))],
+    )
+    con.execute(
+        "insert into t values (3, map(['man_made'],['water_tower']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.Point(9.0005, 45.0005))],
+    )
+    con.execute(f"copy t to '{path}' (format parquet)")
+    by_tile, solar_buildings = main.load_rooftop_accessories(path)
+    assert solar_buildings == {"1"}
+    assert sum(len(features) for features in by_tile.values()) == 2
+
+
 def test_rooftop_feature_lifts_a_water_tower_to_the_building_roof():
     building = shapely.box(9.0, 45.0, 9.001, 45.001)
     buildings = [building]
@@ -917,6 +959,7 @@ def test_rooftop_feature_lifts_a_water_tower_to_the_building_roof():
     assert solar is not None
     assert solar["properties"]["base"] == 12.0
     assert solar["properties"]["height"] == 0.4
+    assert solar["geometry"]["type"] == "Polygon"
     chimney = main.rooftop_feature(
         "node/4",
         {"man_made": "chimney", "height": "20"},

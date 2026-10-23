@@ -28,6 +28,30 @@ describe("rooftop", () => {
     }
   });
 
+  it("builds mapped solar polygons as a flat panel surface", () => {
+    const f: Geojson.Feature = {
+      type: "Feature",
+      id: "way/9",
+      properties: { cmtype: "rooftop", kind: "solar", base: 12 },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [9.189, 45.459],
+            [9.191, 45.459],
+            [9.191, 45.461],
+            [9.189, 45.461],
+            [9.189, 45.459],
+          ],
+        ],
+      },
+    };
+    const built = rooftop(ORIGIN_METERS, SCALE, f);
+    expect(built).toHaveLength(1);
+    built[0].computeBoundingBox();
+    expect(built[0].boundingBox!.max.z).toBeCloseTo(12.12, 2);
+  });
+
   it("returns nothing for a line", () => {
     const f = feature("antenna");
     f.geometry = {

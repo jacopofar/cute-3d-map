@@ -92,6 +92,20 @@ describe("building", () => {
     expect(color[2]).toBeLessThan(0.1);
   });
 
+  it("keeps the roof flat under mapped solar panels", () => {
+    const built = building(
+      ORIGIN_METERS,
+      SCALE,
+      feature({
+        building: "yes",
+        height: 10,
+        roof_shape: "pyramidal",
+        solar: true,
+      }),
+    );
+    expect(built[0].roof).toBeNull();
+  });
+
   it("keeps an ordinary building on the ground", () => {
     const built = building(
       ORIGIN_METERS,

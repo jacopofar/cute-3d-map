@@ -103,7 +103,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   a one-way road the full width; arrows appear only on multi-lane approaches.
 - `src/elements3d/rooftop.ts` — mapped water towers, chimneys, antennas and
   solar generators placed on the carrying building's roof (`base` from
-  tilegen); one merged Lambert mesh per tile (kind `rooftop`), `#rooftop-toggle`.
+  tilegen); a solar polygon keeps its footprint as a flat panel surface, a
+  solar point becomes a small array. A building with solar panels keeps a flat
+  top so the panels stay visible. All are clickable with the OSM link; one
+  merged Lambert mesh per tile (kind `rooftop`), `#rooftop-toggle`.
 - `src/elements3d/wall.ts` / `gate.ts` — low solid walls from `barrier=wall` /
   `wall=*` ways and gate nodes as two posts plus a leaf, oriented by the nearest
   wall. One merged Lambert mesh per tile each (kinds `wall` and `gate`),
@@ -307,8 +310,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **lane arrow** — one white arrow per multi-lane approach, turned by
   `turn:lanes`; a single-lane approach gets no arrow.
 - **rooftop accessory** — a mapped water tower, chimney, antenna/mast or solar
-  generator, lifted to the roof of the containing building. Shared
-  `#rooftop-toggle`.
+  generator, lifted to the roof of the containing building. A solar polygon is
+  drawn as a flat panel surface over its own footprint; solar buildings keep a
+  flat roof. Clickable; shared `#rooftop-toggle`.
 - **wall / gate** — a low solid wall from a `barrier=wall`/`wall=*` way, or a
   gate node as two posts and a leaf, oriented by the nearest wall. Both share
   the `#walls-toggle`.

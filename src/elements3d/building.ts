@@ -88,6 +88,8 @@ export type BuildingFeature = {
     // real (or tilegen-imputed) roof data, and which fields were imputed
     roof_shape?: string;
     roof_color?: string;
+    // mapped solar panels on the roof: keep the top flat so they stay visible
+    solar?: boolean;
     imputed?: string[];
     // the OSM building value and, for a place of worship, its religion: the
     // marker the church look is keyed on
@@ -181,7 +183,14 @@ export function building(
       scaleFactor,
       // a church gets a gabled roof ... a footprint too complex for one (a
       // courtyard, a concave outline) still stays flat inside roofGeometry
-      church ? CHURCH_ROOF_SHAPE : f.properties.roof_shape,
+      // a building with mapped solar panels keeps a flat top: a pitched roof
+      // would bury the panels, and the OSM solar data is stronger evidence
+      // than the roof shape tilegen had to impute
+      f.properties.solar
+        ? "flat"
+        : church
+          ? CHURCH_ROOF_SHAPE
+          : f.properties.roof_shape,
       roofColor,
       // ... pitched steeper than the default
       church ? CHURCH_PITCH : 1,
