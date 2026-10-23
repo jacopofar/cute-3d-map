@@ -70,3 +70,24 @@ test("the locate button centers the map on the browser position", async ({
     )
     .toBeLessThan(0.01);
 });
+
+test("the compass resets a rotated map north", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".maplibregl-ctrl-compass")).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __coolMap: any }).__coolMap.map.jumpTo({
+      bearing: 45,
+    });
+  });
+  await page.click(".maplibregl-ctrl-compass");
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          return map.map.getBearing();
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(0);
+});
