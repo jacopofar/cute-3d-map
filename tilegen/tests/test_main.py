@@ -1,5 +1,6 @@
 import json
 
+import duckdb
 import geo
 import impute
 import main
@@ -48,6 +49,22 @@ def test_to_building_height_and_color():
     assert f["properties"]["cmtype"] == "building"
     assert f["properties"]["height"] == 12.0
     assert f["properties"]["color"] == "#ff0000"
+
+
+def test_to_building_marks_the_roof_flat_for_solar_panels():
+    f = main.to_building(
+        42,
+        {"building": "yes", "height": "10", "roof:shape": "pyramidal"},
+        geom(POLYGON),
+        solar_buildings={"42"},
+    )
+    assert f is not None
+    assert f["properties"]["solar"] is True
+    other = main.to_building(
+        43, {"building": "yes", "height": "10"}, geom(POLYGON), solar_buildings={"42"}
+    )
+    assert other is not None
+    assert "solar" not in other["properties"]
 
 
 def test_to_building_part_uses_min_height_and_levels():
@@ -856,6 +873,136 @@ def test_walls_and_gates_keep_their_data():
         main.to_gate(3, {"barrier": "gate"}, shapely.Point(min_lon, min_lat), {})
         is None
     )
+
+
+def test_rooftop_kind_maps_the_supported_tags():
+    assert main.rooftop_kind({"man_made": "water_tower"}) == "water_tower"
+    assert main.rooftop_kind({"man_made": "chimney"}) == "chimney"
+    assert main.rooftop_kind({"man_made": "mast"}) == "antenna"
+    assert main.rooftop_kind({"generator:source": "solar"}) == "solar"
+    assert main.rooftop_kind({"man_made": "bench"}) is None
+
+
+def test_load_rooftop_accessories_marks_the_solar_building(tmp_path):
+    duckdb.load_extension("spatial")
+    path = tmp_path / "rooftops.parquet"
+    con = duckdb.connect()
+    con.execute(
+        "create table t(feature_id bigint, tags map(varchar,varchar), geometry geometry)"
+    )
+    con.execute(
+        "insert into t values (1, map(['building','height'],['yes','12']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.box(9.0, 45.0, 9.001, 45.001))],
+    )
+    con.execute(
+        "insert into t values (2, map(['generator:source'],['solar']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.box(9.0002, 45.0002, 9.0008, 45.0008))],
+    )
+    con.execute(
+        "insert into t values (3, map(['man_made'],['water_tower']), ST_GeomFromWKB(?))",
+        [shapely.to_wkb(shapely.Point(9.0005, 45.0005))],
+    )
+    con.execute(f"copy t to '{path}' (format parquet)")
+    by_tile, solar_buildings = main.load_rooftop_accessories(path)
+    assert solar_buildings == {"1"}
+    assert sum(len(features) for features in by_tile.values()) == 2
+
+
+def test_rooftop_feature_lifts_a_water_tower_to_the_building_roof():
+    building = shapely.box(9.0, 45.0, 9.001, 45.001)
+    buildings = [building]
+    tags = [{"building": "yes", "height": "12"}]
+    tree = shapely.STRtree(buildings)
+    f = main.rooftop_feature(
+        "node/1",
+        {"man_made": "water_tower"},
+        shapely.Point(9.0005, 45.0005),
+        buildings,
+        tags,
+        tree,
+    )
+    assert f is not None
+    assert f["properties"]["base"] == 12.0
+    assert f["properties"]["kind"] == "water_tower"
+    assert f["properties"]["height"] == 8.0
+    outside = main.rooftop_feature(
+        "node/2",
+        {"man_made": "chimney"},
+        shapely.Point(9.1, 45.1),
+        buildings,
+        tags,
+        tree,
+    )
+    assert outside is not None
+    assert outside["properties"]["base"] == 0.0
+    level_building = [shapely.box(9.0, 45.0, 9.001, 45.001)]
+    level_tags = [{"building": "yes", "building:levels": "4"}]
+    level_tree = shapely.STRtree(level_building)
+    levels = main.rooftop_feature(
+        "node/2b",
+        {"man_made": "antenna"},
+        shapely.Point(9.0005, 45.0005),
+        level_building,
+        level_tags,
+        level_tree,
+    )
+    assert levels is not None
+    assert levels["properties"]["base"] == 12.0
+    solar = main.rooftop_feature(
+        "node/3",
+        {"generator:source": "solar"},
+        shapely.box(9.0002, 45.0002, 9.0008, 45.0008),
+        buildings,
+        tags,
+        tree,
+    )
+    assert solar is not None
+    assert solar["properties"]["base"] == 12.0
+    assert solar["properties"]["height"] == 0.4
+    assert solar["geometry"]["type"] == "Polygon"
+    chimney = main.rooftop_feature(
+        "node/4",
+        {"man_made": "chimney", "height": "20"},
+        shapely.Point(9.0005, 45.0005),
+        buildings,
+        tags,
+        tree,
+    )
+    assert chimney is not None
+    assert chimney["properties"]["height"] == 8.0
+    assert (
+        main.rooftop_feature(
+            "node/5",
+            {"man_made": "water_tower"},
+            shapely.LineString([(9.0, 45.0), (9.001, 45.001)]),
+            buildings,
+            tags,
+            tree,
+        )
+        is None
+    )
+    assert (
+        main.rooftop_feature(
+            "node/6",
+            {"man_made": "bench"},
+            shapely.Point(9.0, 45.0),
+            buildings,
+            tags,
+            tree,
+        )
+        is None
+    )
+
+
+def test_wall_polygon_uses_its_boundary():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    area = shapely.box(
+        min_lon + 0.0001, min_lat + 0.0001, min_lon + 0.0003, min_lat + 0.0003
+    )
+    f = main.to_wall(1, {"barrier": "wall"}, area, box)
+    assert f is not None
+    assert f["geometry"]["type"] == "LineString"
 
 
 def test_construction_is_clipped_and_marks_the_crane_tile():

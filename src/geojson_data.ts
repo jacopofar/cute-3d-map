@@ -21,6 +21,7 @@ import { rail, railMaterial } from "./elements3d/rail";
 import { sidewalk, sidewalkMaterial } from "./elements3d/sidewalk";
 import { wall, wallMaterial } from "./elements3d/wall";
 import { gate, gateMaterial } from "./elements3d/gate";
+import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
 import { parkedCarsFromRows, type ParkingRow } from "./parking_layout";
 import { roadMarking, roadMarkingMaterial } from "./elements3d/road_marking";
 import {
@@ -149,6 +150,7 @@ export function geoJSONtoGeometries(
     | "sidewalk"
     | "wall"
     | "gate"
+    | "rooftop"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -307,6 +309,14 @@ export function geoJSONtoGeometries(
   }
   if (f.properties.cmtype === "gate") {
     return [{ kind: "gate", geometries: gate(originMeters, scaleFactor, f) }];
+  }
+  if (f.properties.cmtype === "rooftop") {
+    return [
+      {
+        kind: "rooftop",
+        geometries: rooftop(originMeters, scaleFactor, f),
+      },
+    ];
   }
   if (f.properties.cmtype === "transit_stop") {
     const { body, sign } = transitStop(originMeters, scaleFactor, f);
@@ -498,6 +508,15 @@ export interface LampSpot {
   lat: number;
 }
 
+export interface RooftopInfo {
+  id?: string;
+  name?: string;
+  kind: string;
+  lon: number;
+  lat: number;
+  rings?: [number, number][][];
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -511,6 +530,7 @@ export interface TileObjects {
   construction: ConstructionInfo[];
   crosswalks: CrosswalkInfo[];
   platforms: PlatformInfo[];
+  rooftops: RooftopInfo[];
   traffic: TrafficLoop[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
@@ -555,6 +575,7 @@ export async function objectsAt(
       construction: [],
       crosswalks: [],
       platforms: [],
+      rooftops: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -583,6 +604,7 @@ export async function objectsAt(
       construction: [],
       crosswalks: [],
       platforms: [],
+      rooftops: [],
       traffic: [],
       crossings: [],
       signals: [],
@@ -617,6 +639,7 @@ export async function objectsAt(
   const construction: ConstructionInfo[] = [];
   const crosswalks: CrosswalkInfo[] = [];
   const platforms: PlatformInfo[] = [];
+  const rooftops: RooftopInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
   const runways: RunwayLine[] = [];
@@ -669,6 +692,9 @@ export async function objectsAt(
     } else if (cmtype === "platform") {
       const info = platformInfo(f);
       if (info) platforms.push(info);
+    } else if (cmtype === "rooftop") {
+      const info = rooftopInfo(f);
+      if (info) rooftops.push(info);
     } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
       const runway = runwayInfo(f);
       if (runway) runways.push(runway);
@@ -732,17 +758,19 @@ export async function objectsAt(
                                                   ? wallMaterial
                                                   : kind === "gate"
                                                     ? gateMaterial
-                                                    : kind === "aeroway"
-                                                      ? aerowayMaterial
-                                                      : kind === "fence"
-                                                        ? fenceMaterial
-                                                        : kind === "bridge"
-                                                          ? bridgeMaterial
-                                                          : kind === "tunnel"
-                                                            ? tunnelMaterial
-                                                            : kind === "bench"
-                                                              ? benchMaterial
-                                                              : treeMaterial;
+                                                    : kind === "rooftop"
+                                                      ? rooftopMaterial
+                                                      : kind === "aeroway"
+                                                        ? aerowayMaterial
+                                                        : kind === "fence"
+                                                          ? fenceMaterial
+                                                          : kind === "bridge"
+                                                            ? bridgeMaterial
+                                                            : kind === "tunnel"
+                                                              ? tunnelMaterial
+                                                              : kind === "bench"
+                                                                ? benchMaterial
+                                                                : treeMaterial;
       const mesh = new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
@@ -789,6 +817,7 @@ export async function objectsAt(
     construction,
     crosswalks,
     platforms,
+    rooftops,
     traffic,
     crossings,
     signals,
@@ -819,7 +848,8 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     name: props.name as string | undefined,
     street: props.street as string | undefined,
     housenumber: props.housenumber as string | undefined,
-    roofShape: props.roof_shape as string | undefined,
+    // a solar building is rendered with a flat top, so the popup says flat
+    roofShape: props.solar ? "flat" : (props.roof_shape as string | undefined),
     roofColor: props.roof_color as string | undefined,
     imputed: Array.isArray(props.imputed) ? (props.imputed as string[]) : [],
     building: props.building as string | undefined,
@@ -1008,6 +1038,45 @@ interface RawTrafficLoop {
   period: number;
   runs: TrafficRun[];
   vehicles: { phase: number; color: string }[];
+}
+
+function rooftopInfo(f: Geojson.Feature): RooftopInfo | null {
+  const props = f.properties ?? {};
+  const kind = typeof props.kind === "string" ? props.kind : "rooftop";
+  const geom = f.geometry;
+  if (geom.type === "Point") {
+    const [lon, lat] = geom.coordinates as [number, number];
+    return {
+      id: typeof f.id === "string" ? f.id : undefined,
+      name: typeof props.name === "string" ? props.name : undefined,
+      kind,
+      lon,
+      lat,
+    };
+  }
+  const rings: [number, number][][] = [];
+  if (geom.type === "Polygon")
+    rings.push(geom.coordinates[0] as [number, number][]);
+  else if (geom.type === "MultiPolygon") {
+    for (const polygon of geom.coordinates) {
+      rings.push(polygon[0] as [number, number][]);
+    }
+  } else return null;
+  if (rings.length === 0) return null;
+  let lon = 0;
+  let lat = 0;
+  for (const [x, y] of rings[0]) {
+    lon += x;
+    lat += y;
+  }
+  return {
+    id: typeof f.id === "string" ? f.id : undefined,
+    name: typeof props.name === "string" ? props.name : undefined,
+    kind,
+    lon: lon / rings[0].length,
+    lat: lat / rings[0].length,
+    rings,
+  };
 }
 
 // the parking block written by tilegen: authored rows, each with the kerb line,

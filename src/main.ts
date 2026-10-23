@@ -30,6 +30,7 @@ import type {
   MonumentInfo,
   PlatformInfo,
   PlaygroundInfo,
+  RooftopInfo,
   TerraceInfo,
   TransitInfo,
   LampSpot,
@@ -256,6 +257,8 @@ class CoolMap {
   private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
   // rail platforms per loaded tile, for click-picking
   private loadedPlatforms: { [key: string]: PlatformInfo[] } = {};
+  // rooftop accessories per loaded tile, for click-picking
+  private loadedRooftops: { [key: string]: RooftopInfo[] } = {};
   // construction sites per loaded tile, for click-picking
   private loadedConstruction: { [key: string]: ConstructionInfo[] } = {};
   // marked crossings per loaded tile, for click-picking
@@ -313,6 +316,7 @@ class CoolMap {
   // sidewalk slabs are their own per-tile mesh
   private sidewalksEnabled = true;
   private wallsEnabled = true;
+  private rooftopsEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -852,6 +856,10 @@ class CoolMap {
       this.wallsEnabled = on;
       this.applyWallVisibility();
     });
+    wireToggle("#rooftop-toggle", (on) => {
+      this.rooftopsEnabled = on;
+      this.applyRooftopVisibility();
+    });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
     });
@@ -951,6 +959,7 @@ class CoolMap {
     this.loadedPlaygrounds = {};
     this.loadedMonuments = {};
     this.loadedPlatforms = {};
+    this.loadedRooftops = {};
     this.loadedConstruction = {};
     this.loadedCrosswalks = {};
     this.loadedCrossings = {};
@@ -1004,6 +1013,7 @@ class CoolMap {
           kind === "monument" ||
           kind === "construction" ||
           kind === "crosswalk" ||
+          (kind === "rooftop" && mesh.visible) ||
           ((kind === "platform" ||
             kind === "transit_stop" ||
             kind === "metro_sign") &&
@@ -1093,6 +1103,20 @@ class CoolMap {
       const info = this.platformAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectPlatform(info, event.lngLat);
       else this.clearSelection();
+      return;
+    }
+    if (hit.object.userData.kind === "rooftop") {
+      const info = this.rooftopAt(tileKey, point, originMeters, scaleFactor);
+      if (info) this.selectRooftop(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    // A solar panel can sit under a pitched roof at the exact same spot, so
+    // the roof wins the raycast even though the panel is what was clicked.
+    // Give the mapped solar footprint precedence over the building below it.
+    const solar = this.rooftopAt(tileKey, point, originMeters, scaleFactor);
+    if (this.rooftopsEnabled && solar?.kind === "solar") {
+      this.selectRooftop(solar, event.lngLat);
       return;
     }
     const candidates = this.loadedBuildings[tileKey] ?? [];
@@ -1366,6 +1390,52 @@ class CoolMap {
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
       .setHTML([label, osmLink(info.id)].join("<br>"))
+      .addTo(this.map);
+  }
+
+  private rooftopAt(
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ): RooftopInfo | undefined {
+    const candidates = this.loadedRooftops[tileKey] ?? [];
+    const inside = candidates.find((info) =>
+      (info.rings ?? []).some((ring) =>
+        ringContains(ring, point, originMeters, scaleFactor),
+      ),
+    );
+    return (
+      inside ??
+      this.nearestPoint(candidates, point, originMeters, scaleFactor, 8)
+    );
+  }
+
+  private selectRooftop(info: RooftopInfo, lngLat: LngLat) {
+    this.clearSelection();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const [x, y] = toModelCoords(
+      [info.lon, info.lat],
+      originMeters,
+      scaleFactor,
+    );
+    this.highlightPoint(x, y, 5);
+    const labels: Record<string, string> = {
+      water_tower: "Water tower",
+      chimney: "Chimney",
+      antenna: "Antenna",
+      solar: "Solar panels",
+    };
+    const label = labels[info.kind] ?? "Rooftop equipment";
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      label,
+      osmLink(info.id),
+    ].filter(Boolean);
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
       .addTo(this.map);
   }
 
@@ -1868,6 +1938,7 @@ class CoolMap {
         delete this.loadedPlaygrounds[k];
         delete this.loadedMonuments[k];
         delete this.loadedPlatforms[k];
+        delete this.loadedRooftops[k];
         delete this.loadedConstruction[k];
         delete this.loadedCrosswalks[k];
         delete this.loadedCrossings[k];
@@ -1928,6 +1999,7 @@ class CoolMap {
         playgrounds,
         monuments,
         platforms,
+        rooftops,
         construction,
         crosswalks,
         traffic,
@@ -1965,6 +2037,7 @@ class CoolMap {
       this.loadedPlaygrounds[tileKey] = playgrounds;
       this.loadedMonuments[tileKey] = monuments;
       this.loadedPlatforms[tileKey] = platforms;
+      this.loadedRooftops[tileKey] = rooftops;
       this.loadedConstruction[tileKey] = construction;
       this.loadedCrosswalks[tileKey] = crosswalks;
       this.loadedCrossings[tileKey] = crossings;
@@ -2097,6 +2170,16 @@ class CoolMap {
 
   // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
   // tunnels) drives both kinds
+  private applyRooftopVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "rooftop") {
+          mesh.visible = this.rooftopsEnabled;
+        }
+      }
+    }
+  }
+
   private applyWallVisibility() {
     for (const meshes of Object.values(this.loadedTiles)) {
       for (const mesh of meshes) {
@@ -2204,6 +2287,7 @@ class CoolMap {
     this.applyTransitVisibility();
     this.applySidewalkVisibility();
     this.applyWallVisibility();
+    this.applyRooftopVisibility();
   }
 
   private disposeDetail(key: string) {
