@@ -57,6 +57,8 @@ The project has two halves:
      `turn_lanes` for stop lines and lane arrows;
    - `cmtype: "platform"` — a clipped rail/tram platform polygon (line
      platforms are buffered to a 4 m ribbon), with a name and ref;
+   - `cmtype: "park_path"` — a foot/cycle path clipped to the tile's green
+     areas, with `kind` walk/bike, `surface` and `width`;
    - `cmtype: "power_tower"` (Point) — a `power=tower` pylon, with `height`;
    - `cmtype: "power_line"` (LineString) — a `power=line`/`minor_line` clipped
      to the tile, with an approximate wire `height`, `voltage`, `cables` and
@@ -376,6 +378,14 @@ gets a small panel array. Buildings carrying solar panels keep a flat top so
 the panels are not buried under a pitched roof. All of them are clickable, with
 the OSM link. One merged Lambert mesh per tile (kind `rooftop`), no shadows;
 `#rooftop-toggle` hides the layer.
+
+### Park paths
+
+Footways and cycleways that pass through a park or green area are clipped to the
+park's footprint and to the tile, then drawn as narrow ground ribbons. A mapped
+`surface` picks the color (`asphalt`, `gravel`, `paving_stones`, `dirt`, ...);
+otherwise walkways are light brown and cycleways brick red. `#park-paths-toggle`
+hides the layer. Mapped `footway=sidewalk` ways stay in the sidewalk layer.
 
 ### Power lines and pylons
 

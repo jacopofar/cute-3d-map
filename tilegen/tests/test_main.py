@@ -875,6 +875,46 @@ def test_walls_and_gates_keep_their_data():
     )
 
 
+def test_park_path_is_clipped_to_green_and_classified():
+    green = shapely.box(9.0, 45.0, 9.01, 45.01)
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    path = shapely.LineString([(8.99, 45.005), (9.02, 45.005)])
+    walk = main.to_park_path("way/1", {"highway": "footway"}, path, green, tile_box)
+    assert walk is not None
+    assert walk["properties"]["kind"] == "walk"
+    assert walk["geometry"]["type"] == "LineString"
+    bike = main.to_park_path(
+        "way/2",
+        {"highway": "path", "bicycle": "designated", "surface": "asphalt"},
+        path,
+        green,
+        tile_box,
+    )
+    assert bike is not None
+    assert bike["properties"]["kind"] == "bike"
+    assert bike["properties"]["surface"] == "asphalt"
+    assert (
+        main.to_park_path(
+            "way/3",
+            {"highway": "footway", "footway": "sidewalk"},
+            path,
+            green,
+            tile_box,
+        )
+        is None
+    )
+    assert (
+        main.to_park_path(
+            "way/4",
+            {"highway": "footway"},
+            shapely.LineString([(8.9, 45.2), (8.92, 45.2)]),
+            green,
+            tile_box,
+        )
+        is None
+    )
+
+
 def test_power_tower_and_line_are_emitted():
     tower = main.to_power_tower("node/1", {"power": "tower"}, shapely.Point(9.0, 45.0))
     assert tower is not None

@@ -317,6 +317,7 @@ class CoolMap {
   private sidewalksEnabled = true;
   private wallsEnabled = true;
   private rooftopsEnabled = true;
+  private parkPathsEnabled = true;
   private powerLinesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
@@ -864,6 +865,10 @@ class CoolMap {
     wireToggle("#power-lines-toggle", (on) => {
       this.powerLinesEnabled = on;
       this.applyPowerVisibility();
+    });
+    wireToggle("#park-paths-toggle", (on) => {
+      this.parkPathsEnabled = on;
+      this.applyParkPathVisibility();
     });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
@@ -2059,6 +2064,7 @@ class CoolMap {
       this.syncAirplanes();
       this.syncBuildingDetail();
       this.applyPowerVisibility();
+      this.applyParkPathVisibility();
       this.refreshSunShadow();
     } catch (e) {
       // leave the tile out of loadedTiles so a later move retries it
@@ -2185,6 +2191,16 @@ class CoolMap {
       for (const mesh of meshes) {
         if (mesh.userData.kind === "rooftop") {
           mesh.visible = this.rooftopsEnabled;
+        }
+      }
+    }
+  }
+
+  private applyParkPathVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "park_path") {
+          mesh.visible = this.parkPathsEnabled;
         }
       }
     }

@@ -107,6 +107,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   solar point becomes a small array. A building with solar panels keeps a flat
   top so the panels stay visible. All are clickable with the OSM link; one
   merged Lambert mesh per tile (kind `rooftop`), `#rooftop-toggle`.
+- `src/elements3d/park_path.ts` — foot/cycle paths clipped by tilegen to the
+  tile's green union, drawn as flat ribbons above the green shader. The color
+  comes from `surface` when mapped, else light brown for walk and brick red for
+  bike; one merged Lambert mesh per tile (kind `park_path`),
+  `#park-paths-toggle`. Mapped `footway=sidewalk` ways are excluded.
 - `src/elements3d/power.ts` — `power=tower` pylons and clipped overhead
   `power=line`/`minor_line` spans. Towers merge into one Lambert mesh per tile
   (kind `power_tower`); wires are one `LineSegments` per tile (kind
@@ -253,7 +258,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
-  `road_marking`, `platform`, `rail`, `power_tower`, `power_line`,
+  `road_marking`, `platform`, `rail`, `park_path`, `power_tower`, `power_line`,
   `traffic_signal`, `crossing` (the road/rail network is not emitted; routes
   come from `traffic`). A `building:part` is still `cmtype: "building"`, with a
   `base` elevation.
@@ -319,6 +324,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   generator, lifted to the roof of the containing building. A solar polygon is
   drawn as a flat panel surface over its own footprint; solar buildings keep a
   flat roof. Clickable; shared `#rooftop-toggle`.
+- **park path** — a `highway=footway|path|cycleway|bridleway` clipped to the
+  tile's green union and tile bounds; `kind` is walk or bike, and the frontend
+  maps `surface` to a color. `#park-paths-toggle`.
 - **power tower / power line** — a `power=tower` pylon, and a `power=line` or
   `minor_line` clipped to the tile. The wire height follows the voltage, the
   tower default is 30 m; both share `#power-lines-toggle`.

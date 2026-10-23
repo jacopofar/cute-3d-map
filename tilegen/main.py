@@ -704,6 +704,67 @@ def is_green(tags) -> bool:
 MIN_CEMETERY_AREA = 80.0
 
 
+# paths: only the ways that actually pass through a park or green area. The
+# sidewalk mapper already draws `footway=sidewalk` along roads, so those are not
+# park paths, and a path underground or behind a private gate is not visible.
+PARK_PATH_HIGHWAYS = frozenset({"footway", "path", "cycleway", "bridleway"})
+PARK_PATH_EXCLUDED_FOOTWAY = frozenset({"sidewalk", "crossing"})
+
+
+def is_park_path(tags) -> bool:
+    if tags.get("highway") not in PARK_PATH_HIGHWAYS:
+        return False
+    if tags.get("footway") in PARK_PATH_EXCLUDED_FOOTWAY:
+        return False
+    if tags.get("area") == "yes" or tags.get("indoor") == "yes":
+        return False
+    if tags.get("access") in ("private", "no"):
+        return False
+    return not (tags.get("location") == "underground" or tags.get("tunnel") == "yes")
+
+
+def park_path_kind(tags) -> str:
+    """`bike` wins a shared path: the bicycle is the faster, more distinctive
+    surface to show, and `bicycle=designated` is explicit OSM intent."""
+    if tags.get("highway") == "cycleway":
+        return "bike"
+    if tags.get("bicycle") in ("designated", "yes"):
+        return "bike"
+    return "walk"
+
+
+def to_park_path(feature_id, tags, s, green_union, tile_box) -> dict | None:
+    """The part of a foot/cycle path that falls inside green space and the tile.
+
+    Clipping to the union of the tile's green polygons means a long riverside
+    path stops at the park boundary instead of running through the city, and a
+    path crossing a tile boundary is stored only once per tile.
+    """
+    if not is_park_path(tags) or s.geom_type not in ("LineString", "MultiLineString"):
+        return None
+    captured = s.intersection(green_union)
+    if captured.is_empty:
+        return None
+    captured = captured.intersection(tile_box)
+    line = _flatten(captured, "LineString")
+    if line is None:
+        return None
+    width = parse_length(tags.get("width"))
+    properties = {
+        "cmtype": "park_path",
+        "kind": park_path_kind(tags),
+        "surface": tags.get("surface"),
+        "width": width,
+        "name": tags.get("name"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(line)),
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def is_cemetery(tags) -> bool:
     return tags.get("landuse") == "cemetery" or tags.get("amenity") == "grave_yard"
 
@@ -1586,6 +1647,16 @@ def tile_to_geojson(
     # water is clipped to the tile, so its box is built once here
     min_lon, min_lat, max_lon, max_lat = tile_lonlat_bounds(tile_x, tile_y, zoom)
     tile_box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    green_shapes = [
+        shapely.from_wkb(geometry)
+        for _feature_id, tags2, geometry in data
+        if is_green(tags2)
+    ]
+    green_union = (
+        shapely.union_all(green_shapes)
+        if green_shapes
+        else shapely.GeometryCollection()
+    )
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
         ret_raw.append(
@@ -1648,6 +1719,8 @@ def tile_to_geojson(
             ret.append(to_power_tower(feature_id, tags, s))
         elif is_power_line(tags):
             ret.extend(to_power_line(feature_id, tags, s, tile_box))
+        elif is_park_path(tags):
+            ret.append(to_park_path(feature_id, tags, s, green_union, tile_box))
         elif is_water(tags):
             ret.append(to_water(feature_id, tags, s, tile_box))
         elif is_cemetery(tags):
