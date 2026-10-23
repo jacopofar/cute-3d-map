@@ -83,7 +83,7 @@ The project has two halves:
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
    playground, monument, construction, crosswalk, road_marking, platform,
-   rail, sidewalk).
+   rail, sidewalk, wall, gate).
    Coordinates are projected from EPSG:4326 → EPSG:3857 meters, centered on the
    map origin and scaled by `cos(latitude)`; the Three.js camera is driven by
    MapLibre's projection matrix. Above zoom 17 the app also builds **windows,
@@ -351,6 +351,15 @@ car-road surfaces with extra clearance, and closes hairline corner gaps. The
 frontend (`src/elements3d/sidewalk.ts`) extrudes the resulting polygons into a
 0.14 m slab with a darker kerb face, one mesh per tile. The
 `#sidewalks-toggle` checkbox hides the layer; it is gated at zoom 16.
+
+### Walls and gates
+
+`barrier=wall`, `retaining_wall`, `city_wall`, `hoarding` and `wall=*` ways
+become low solid walls (`src/elements3d/wall.ts`): one box per segment, 1.5 m
+high and 0.3 m thick by default, colored by the `wall` material tag. Gates
+(`barrier=gate|lift_gate|swing_gate|wicket_gate|sliding_gate`) become two posts
+and a closed leaf oriented by the nearest wall. The **walls & gates** checkbox
+(`#walls-toggle`) hides both; no shadows.
 
 ### Bridges and tunnels
 

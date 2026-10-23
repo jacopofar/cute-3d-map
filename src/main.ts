@@ -312,6 +312,7 @@ class CoolMap {
   private transitEnabled = true;
   // sidewalk slabs are their own per-tile mesh
   private sidewalksEnabled = true;
+  private wallsEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
   private imputedColorsEnabled = true;
@@ -846,6 +847,10 @@ class CoolMap {
     wireToggle("#sidewalks-toggle", (on) => {
       this.sidewalksEnabled = on;
       this.applySidewalkVisibility();
+    });
+    wireToggle("#walls-toggle", (on) => {
+      this.wallsEnabled = on;
+      this.applyWallVisibility();
     });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
@@ -2092,6 +2097,16 @@ class CoolMap {
 
   // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
   // tunnels) drives both kinds
+  private applyWallVisibility() {
+    for (const meshes of Object.values(this.loadedTiles)) {
+      for (const mesh of meshes) {
+        if (mesh.userData.kind === "wall" || mesh.userData.kind === "gate") {
+          mesh.visible = this.wallsEnabled;
+        }
+      }
+    }
+  }
+
   private applySidewalkVisibility() {
     const on = this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM;
     for (const meshes of Object.values(this.loadedTiles)) {
@@ -2188,6 +2203,7 @@ class CoolMap {
     this.applyBridgeVisibility();
     this.applyTransitVisibility();
     this.applySidewalkVisibility();
+    this.applyWallVisibility();
   }
 
   private disposeDetail(key: string) {

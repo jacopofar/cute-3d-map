@@ -833,6 +833,31 @@ def test_sidewalk_polygons_are_clipped_to_each_tile():
         assert features[0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
 
 
+def test_walls_and_gates_keep_their_data():
+    min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
+    box = shapely.box(min_lon, min_lat, max_lon, max_lat)
+    wall = shapely.LineString(
+        [(min_lon + 0.0001, min_lat + 0.0001), (min_lon + 0.0004, min_lat + 0.0001)]
+    )
+    f = main.to_wall(1, {"barrier": "wall", "wall": "brick", "height": "2"}, wall, box)
+    assert f is not None
+    assert f["properties"]["cmtype"] == "wall"
+    assert f["properties"]["wall"] == "brick"
+    gate = main.to_gate(
+        2,
+        {"barrier": "gate"},
+        shapely.Point(min_lon + 0.0002, min_lat + 0.0001),
+        {2: 90.0},
+    )
+    assert gate is not None
+    assert gate["properties"]["cmtype"] == "gate"
+    assert gate["properties"]["bearing"] == 90.0
+    assert (
+        main.to_gate(3, {"barrier": "gate"}, shapely.Point(min_lon, min_lat), {})
+        is None
+    )
+
+
 def test_construction_is_clipped_and_marks_the_crane_tile():
     min_lon, min_lat, max_lon, max_lat = geo.tile_lonlat_bounds(17220, 11723, 15)
     box = shapely.box(min_lon, min_lat, max_lon, max_lat)
