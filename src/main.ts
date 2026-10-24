@@ -1810,7 +1810,7 @@ class CoolMap {
 
   private vehicleAt(raycaster: THREE.Raycaster):
     | {
-        meta: NonNullable<TrafficLoop["meta"]>;
+        meta: TrafficLoop["meta"];
         distance: number;
         renderer: TrafficRenderer;
         loopId: string;
@@ -1819,14 +1819,18 @@ class CoolMap {
     | undefined {
     let best:
       | {
-          meta: NonNullable<TrafficLoop["meta"]>;
+          meta: TrafficLoop["meta"];
           distance: number;
           renderer: TrafficRenderer;
           loopId: string;
           phase: number;
         }
       | undefined;
-    for (const fleet of [this.busesTraffic, this.tramsTraffic]) {
+    for (const fleet of [
+      this.carsTraffic,
+      this.busesTraffic,
+      this.tramsTraffic,
+    ]) {
       if (!fleet) continue;
       const hit = fleet.pick(raycaster);
       if (hit && (!best || hit.distance < best.distance)) {
@@ -1844,7 +1848,7 @@ class CoolMap {
 
   private selectVehicle(
     hit: {
-      meta: NonNullable<TrafficLoop["meta"]>;
+      meta: TrafficLoop["meta"];
       renderer: TrafficRenderer;
       loopId: string;
       phase: number;
@@ -1853,10 +1857,10 @@ class CoolMap {
   ) {
     this.clearSelection();
     const meta = hit.meta;
-    const line = meta.line?.trim();
-    const route = meta.route?.trim();
-    const headsign = meta.headsign?.trim();
-    const mode = meta.type === "tram" ? "Tram" : "Bus";
+    const line = meta?.line?.trim();
+    const route = meta?.route?.trim();
+    const headsign = meta?.headsign?.trim();
+    const mode = meta?.type === "tram" ? "Tram" : meta ? "Bus" : "Car";
     const title = line ? `${mode} ${line}` : mode;
     const lines = [
       `<strong>${escapeHtml(title)}</strong>`,

@@ -348,10 +348,11 @@ export class TrafficRenderer {
 
   // Return the visible vehicle under a ray, if any. Only the compacted slots
   // are drawn, so the instance id is the slot; `slots` maps it back to the
-  // vehicle and therefore to the GTFS metadata.
+  // vehicle and therefore to its GTFS metadata, when the fleet has any. Cars
+  // have no metadata, so the caller falls back to a plain "Car" popup.
   pick(raycaster: THREE.Raycaster):
     | {
-        meta: NonNullable<TrafficLoop["meta"]>;
+        meta: TrafficLoop["meta"];
         point: THREE.Vector3;
         distance: number;
         loopId: string;
@@ -366,7 +367,6 @@ export class TrafficRenderer {
       const slot = hit.instanceId;
       if (slot === undefined || slot >= this.visibleCount) continue;
       const vehicle = this.vehicles[this.slots[slot]];
-      if (!vehicle.meta) continue;
       return {
         meta: vehicle.meta,
         point: hit.point,
