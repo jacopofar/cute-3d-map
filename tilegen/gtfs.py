@@ -31,13 +31,16 @@ TRAM_ROUTE_TYPES = frozenset({"0"})
 # GTFS often has arrival == departure at a stop; still make the vehicle pause
 # there so the stop is visible rather than a continuous fly-through.
 MIN_STOP_DWELL = 12.0
+# GTFS travel times are scaled up for the map: a 50% faster vehicle makes the
+# service readable at city scale while keeping the scheduled stop dwell.
+GTFS_SPEED_FACTOR = 1.5
 # Buses are frequent and short, trams are longer; the actual feed frequency is
 # not used, so these spacing values control how many vehicles are drawn. The
 # max_vehicles caps are about one third of the feed-derived fleets, which keeps
 # the map readable instead of stamping every shape with a full service.
 BUS_GTFS_CONFIG = TrafficConfig(
     spacing=1200.0,
-    max_vehicles=1000,
+    max_vehicles=1500,
     colors=("ffd23f", "f2b632", "e8e8e8"),
     gray_colors=(),
     gray_fraction=0.0,
@@ -45,7 +48,7 @@ BUS_GTFS_CONFIG = TrafficConfig(
 )
 TRAM_GTFS_CONFIG = TrafficConfig(
     spacing=1800.0,
-    max_vehicles=260,
+    max_vehicles=390,
     colors=("ff8c00", "ffd23f", "e8e8e8"),
     gray_colors=(),
     gray_fraction=0.0,
@@ -152,7 +155,7 @@ def _loop(
     length = sum(haversine_m(a, b) for a, b in pairwise(coords))
     if length < config.min_loop_length:
         return None
-    speed = config.default_speed
+    speed = config.default_speed * GTFS_SPEED_FACTOR
     return Loop(
         id=f"gtfs-{kind}-{shape_id}",
         segs=[coords],
@@ -251,7 +254,7 @@ def _scheduled_loop(
         coords = [(lon, lat) for lon, lat in segment.coords]
         if len(coords) < 2:
             return None
-        travel = max(1.0, next_arrival - departure)
+        travel = max(1.0, (next_arrival - departure) / GTFS_SPEED_FACTOR)
         dwell = max(MIN_STOP_DWELL, next_departure - next_arrival)
         segs.append(coords)
         times.append(travel)
