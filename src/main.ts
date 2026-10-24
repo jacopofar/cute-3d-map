@@ -242,6 +242,80 @@ function getTileIndex(point: { lng: number; lat: number }): [number, number] {
   return [lon2tile(point.lng), lat2tile(point.lat)];
 }
 
+// the browser name is enough for the perf report; the full UA string is noisy
+// and the payload is meant to be grouped, not fingerprinted
+function browserName(): string {
+  const ua = navigator.userAgent;
+  if (/Edg\//.test(ua)) return "Edge";
+  if (/OPR\//.test(ua)) return "Opera";
+  if (/Firefox\//.test(ua)) return "Firefox";
+  if (/Chrome\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua)) return "Safari";
+  return "Unknown";
+}
+
+function webGPUSupported(): boolean {
+  // WebGPU is exposed as navigator.gpu; the property is absent on browsers that
+  // only implement WebGL
+  return "gpu" in navigator;
+}
+
+// The layers menu owns every checkbox, but the night and inspect switches are
+// outside it; collect all of them by id so the report always matches the DOM.
+function checkboxStates(): Record<string, boolean> {
+  const states: Record<string, boolean> = {};
+  document
+    .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+    .forEach((input, index) => {
+      const label = input.closest("label");
+      states[label?.id || input.id || `checkbox-${index}`] = input.checked;
+    });
+  return states;
+}
+
+const CHECKBOX_COOKIE = "map-checkboxes";
+const CHECKBOX_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
+function readCheckboxCookie(): Record<string, boolean> {
+  const prefix = `${CHECKBOX_COOKIE}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  if (!entry) return {};
+  try {
+    const parsed: unknown = JSON.parse(
+      decodeURIComponent(entry.slice(prefix.length)),
+    );
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([key, value]) => key.length > 0 && typeof value === "boolean",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function restoreCheckboxStates() {
+  for (const [id, checked] of Object.entries(readCheckboxCookie())) {
+    const label = document.getElementById(id);
+    const input = label?.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    if (input) input.checked = checked;
+  }
+}
+
+function saveCheckboxStates() {
+  const value = encodeURIComponent(JSON.stringify(checkboxStates()));
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${CHECKBOX_COOKIE}=${value}; Max-Age=${CHECKBOX_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
+}
+
 class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
@@ -293,6 +367,10 @@ class CoolMap {
   // The scene's own draw stats, captured before the bloom passes overwrite
   // renderer.info (the final composite is a one-draw, two-triangle quad).
   private lastSceneDraw = { calls: 0, triangles: 0 };
+  // render timestamps for the perf report; a two-second window is long enough
+  // to smooth a hitch but short enough to follow a pan or a toggle
+  private frameTimes: number[] = [];
+  private fpsValue = 0;
   // facade detail (windows/doors and balconies) meshes per tile, built only
   // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
   // as they were
@@ -391,6 +469,13 @@ class CoolMap {
     scale: number;
   };
   constructor(tileCenter: [number, number], zoomLevel: number = 16) {
+    // A saved day/night switch wins over the solar seed, so the first basemap
+    // is the one the user last chose instead of a frame of the other one.
+    const savedNight = readCheckboxCookie()["night-toggle"];
+    if (savedNight !== undefined) {
+      this.timeOfDay = savedNight ? NIGHT_HOUR : DAY_HOUR;
+      this.lighting = lightingAt(this.timeOfDay);
+    }
     // Open on the basemap the current sun calls for, so the day style does not
     // flash before the first applyLighting() swaps it.
     const nightBasemap = this.lighting.night > BASEMAP_NIGHT_AT;
@@ -629,6 +714,7 @@ class CoolMap {
         // document.body.appendChild(VRButton.createButton(this.renderer));
       },
       render(gl, args) {
+        coolMap.recordFrame(performance.now());
         const modelTransform = coolMap.modelTransform;
         const rotationX = new THREE.Matrix4().makeRotationAxis(
           new THREE.Vector3(1, 0, 0),
@@ -985,6 +1071,20 @@ class CoolMap {
 
     this.map.on("click", (event) => this.onMapClick(event));
     this.map.on("dragstart", () => this.stopFollowing());
+
+    document.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
+        return;
+      }
+      saveCheckboxStates();
+      this.reportPerf({ event: "toggle" });
+    });
+    const scheduleInitialReport = () => {
+      window.setTimeout(() => this.reportPerf(), 8000);
+    };
+    if (document.readyState === "complete") scheduleInitialReport();
+    else window.addEventListener("load", scheduleInitialReport, { once: true });
   }
 
   // drop every loaded tile so the next load pass rebuilds them, picking up the
@@ -1862,6 +1962,14 @@ class CoolMap {
     const headsign = meta?.headsign?.trim();
     const mode = meta?.type === "tram" ? "Tram" : meta ? "Bus" : "Car";
     const title = line ? `${mode} ${line}` : mode;
+    const description = [
+      title,
+      route && route !== line ? route : null,
+      headsign ? `towards ${headsign}` : null,
+    ]
+      .filter(Boolean)
+      .join(" — ");
+    this.reportPerf({ event: "vehicle", vehicle: description });
     const lines = [
       `<strong>${escapeHtml(title)}</strong>`,
       route ? escapeHtml(route) : null,
@@ -2933,6 +3041,39 @@ class CoolMap {
     this.nightLights?.setVisible(this.lighting.night, this.map.getZoom());
   }
 
+  private recordFrame(now: number) {
+    this.frameTimes.push(now);
+    const cutoff = now - 2000;
+    while (this.frameTimes.length > 1 && this.frameTimes[0] < cutoff) {
+      this.frameTimes.shift();
+    }
+    const elapsed = now - this.frameTimes[0];
+    this.fpsValue =
+      elapsed > 0 ? ((this.frameTimes.length - 1) * 1000) / elapsed : 0;
+  }
+
+  private perfPayload(extra: Record<string, unknown> = {}) {
+    return {
+      browser: browserName(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      webgpu: webGPUSupported(),
+      fps: Math.round(this.fpsValue * 10) / 10,
+      checkboxes: checkboxStates(),
+      ...extra,
+    };
+  }
+
+  private reportPerf(extra: Record<string, unknown> = {}) {
+    // diagnostics must never break the map: a missing collector or an offline
+    // page is a no-op, not an unhandled rejection
+    void fetch("/t/perf", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(this.perfPayload(extra)),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
   // app itself never calls this
   stats(): {
@@ -3077,6 +3218,7 @@ class CoolMap {
   // }
 }
 
+restoreCheckboxStates();
 const c = new CoolMap([9.186, 45.497]);
 
 // dev-only handle for the perf benchmark (perf/frame_times.spec.ts); stripped
