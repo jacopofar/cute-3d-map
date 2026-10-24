@@ -490,9 +490,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and power lines are their own meshes, so those are plain visibility switches; the basemap checkbox swaps the MapTiler style
   for an empty style while keeping the 3D layer; imputed colors are baked into
   the geometry, so changing that one reloads the loaded tiles.
-- Car mode is not a checkbox: `#drive-button` at the bottom center enters and
+- Car mode is not a checkbox: `#drive-button` in the layers menu enters and
   leaves it, `#drive-hud` shows the speed and the keys, and Escape also leaves.
-  While driving, the map handlers are disabled and the button reports
-  `drive-start` / `drive-stop` events through the perf endpoint.
+  Choosing it closes the menu. While driving, the map handlers are disabled and
+  the button reports `drive-start` / `drive-stop` events through the perf
+  endpoint.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

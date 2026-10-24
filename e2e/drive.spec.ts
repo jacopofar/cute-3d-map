@@ -63,8 +63,11 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     })
     .toBe(true);
 
-  // the button enters the mode: car visible, gestures off, HUD on
+  // the button lives in the layers menu: open the gear, then enter the mode
+  await page.click("#layer-menu-button");
   await page.click("#drive-button");
+  // entering closes the menu so the chase camera is visible
+  await expect(page.locator("#layer-menu-panel")).toBeHidden();
   const entered = await probe(page);
   expect(entered.state.active).toBe(true);
   expect(entered.carVisible).toBe(true);

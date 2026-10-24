@@ -194,43 +194,43 @@ body {
   background: #eef;
 }
 
-/* Car mode: a bottom-center pill toggles the chase camera, and a small HUD
-   above it shows the speed and the keys. The HUD ignores the pointer so a
-   click passes through to the map. */
+/* Car mode: the Drive action sits in the layers menu with the checkboxes, as a
+   full-width row; the HUD stays over the map while driving and ignores the
+   pointer so a click passes through. */
 #drive-button {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  z-index: 10;
   display: flex;
   gap: 7px;
   align-items: center;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
-  color: #213547;
+  justify-content: center;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #21354755;
+  border-radius: 4px;
+  background: #213547;
+  color: #fff;
   font: 600 13px sans-serif;
   letter-spacing: 0.02em;
   cursor: pointer;
-  transform: translateX(-50%);
 }
 
 #drive-button:hover {
-  background: #fff;
+  background: #2f465c;
 }
 
-/* while driving the same button leaves the mode, so it reads as the active
-   control rather than a neutral one */
+/* while driving the same row leaves the mode: invert it so it reads as active
+   rather than as the usual call to action */
 #drive-button[aria-pressed="true"] {
-  background: #213547;
-  color: #fff;
+  background: #fff;
+  color: #213547;
+}
+
+#drive-button[aria-pressed="true"]:hover {
+  background: #eef1f4;
 }
 
 #drive-hud {
   position: fixed;
-  bottom: 74px;
+  bottom: 24px;
   left: 50%;
   z-index: 10;
   display: flex;

@@ -120,7 +120,9 @@ const SIDEWALK_MIN_ZOOM = 16;
 // 2.7 m car at roughly 25 px, large enough to read as a car rather than a dot.
 const DRIVE_ZOOM = 20;
 const DRIVE_PITCH = 55;
-const DRIVE_LOOK_AHEAD = 18;
+// keep the car clear of the bottom-edge HUD: at zoom 20 and this pitch, a
+// longer look-ahead pushes the car down towards the HUD and the screen edge
+const DRIVE_LOOK_AHEAD = 10;
 // The camera jumps every frame, which keeps the map "moving", so the debounced
 // move handler never fires while driving. The tile pass runs on its own slower
 // clock instead, and the 2 km shadow cascade can afford to follow even less.
@@ -1158,15 +1160,18 @@ class CoolMap {
       document.querySelector<HTMLElement>("#drive-hud") ?? undefined;
     this.driveSpeed =
       document.querySelector<HTMLElement>("#drive-speed") ?? undefined;
-    this.driveButton?.addEventListener("click", () => {
-      if (this.drivingActive) this.stopDriving();
-      else this.startDriving();
-    });
     window.addEventListener("keydown", (event) => this.onDriveKeyDown(event));
     window.addEventListener("keyup", (event) => this.onDriveKeyUp(event));
     // a key held when the window loses focus would stay "down" forever
     window.addEventListener("blur", () => this.driveKeys.clear());
     this.applyDriveUi();
+    // The Drive row lives in the menu: entering or leaving the mode should get
+    // the panel out of the way so the chase camera is visible.
+    this.driveButton?.addEventListener("click", () => {
+      if (this.drivingActive) this.stopDriving();
+      else this.startDriving();
+      setMenuOpen(false);
+    });
 
     document.addEventListener("change", (event) => {
       const target = event.target;

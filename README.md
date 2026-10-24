@@ -508,7 +508,7 @@ The **parked cars** checkbox is a plain visibility switch.
 
 ### Drive mode
 
-The **Drive** button at the bottom of the page drops a red car onto the nearest
+The **Drive** button in the layers menu drops a red car onto the nearest
 precomputed car route and hands it to WASD (the arrow keys work too): W/S
 accelerate, brake and reverse, A/D steer, and Escape leaves. The camera chases
 it at a fixed zoom and pitch, looking a little ahead of the car, so the map's
