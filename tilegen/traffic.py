@@ -218,6 +218,8 @@ class Loop:
     # optional display metadata (GTFS line/route/headsign); the frontend shows
     # it when a moving bus/tram is clicked
     meta: dict | None = None
+    # optional body length override, e.g. a shorter tram on some lines
+    vehicle_length: float | None = None
 
     @property
     def v(self) -> float:
@@ -842,6 +844,11 @@ def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[d
                         {"phase": round(v["phase"], 6), "color": v["color"]}
                         for v in loop.vehicles
                     ],
+                    **(
+                        {"vehicle_length": round(loop.vehicle_length, 3)}
+                        if loop.vehicle_length is not None
+                        else {}
+                    ),
                     **({"meta": loop.meta} if loop.meta else {}),
                 }
             )
@@ -885,6 +892,7 @@ def loops_to_records(loops: list[Loop]) -> list[dict]:
             "seg_dwells": loop.seg_dwells,
             "vehicles": [dict(vehicle) for vehicle in loop.vehicles],
             "meta": loop.meta,
+            "vehicle_length": loop.vehicle_length,
         }
         for loop in loops
     ]
@@ -906,6 +914,7 @@ def loops_from_records(records: list[dict]) -> list[Loop]:
                 for vehicle in record["vehicles"]
             ],
             meta=record.get("meta"),
+            vehicle_length=record.get("vehicle_length"),
         )
         for record in records
     ]

@@ -48,6 +48,30 @@ def test_city_building_and_vehicle_overrides(tmp_path):
     assert profile.vehicle_color({"line": "1"}) == "f2c94c"
 
 
+def test_vehicle_default_color_and_line_length(tmp_path):
+    _write_city(
+        tmp_path,
+        vehicles={
+            "default_color": "#1b5e20",
+            "by_line": {"1": {"color": "#EC7C26", "length": 15.2}},
+        },
+    )
+    profile = load_city(tmp_path)
+    assert profile.vehicle_color({"line": "2"}) == "1b5e20"
+    assert profile.vehicle_color({"line": "1"}) == "EC7C26"
+    assert profile.vehicle_length({"line": "1"}) == 15.2
+    assert profile.vehicle_length({"line": "2"}) is None
+
+
+def test_invalid_vehicle_length_fails(tmp_path):
+    _write_city(
+        tmp_path,
+        vehicles={"by_line": {"1": {"length": 0}}},
+    )
+    with pytest.raises(CityError, match="length"):
+        load_city(tmp_path)
+
+
 def test_model_override_is_validated(tmp_path):
     _write_city(
         tmp_path,

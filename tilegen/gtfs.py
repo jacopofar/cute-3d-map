@@ -383,4 +383,8 @@ def load_gtfs_fleets(
             if color:
                 for vehicle in loop.vehicles:
                     vehicle["color"] = color
+            if city:
+                length = city.vehicle_length(loop.meta)
+                if length is not None:
+                    loop.vehicle_length = length
     return fleets
