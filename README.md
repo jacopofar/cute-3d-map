@@ -619,6 +619,24 @@ printed, so a run can be kept next to a commit. Two gotchas when comparing:
   (default 250 ms). Regressions in the *ratio* are what the test is for; the
   absolute numbers are for the human reading `perf-results`.
 
+## Inspecting tiles
+
+`tilegen/tile_inspector.py` renders a flat SVG or PNG of an area directly from
+the generated tiles: one logical color per `cmtype`, no basemap, lighting or
+3D decoration. It is the quickest way to check coverage and whether a feature
+made it into the tile.
+
+```bash
+cd tilegen
+uv run tile_inspector.py \
+  --bbox 9.17,45.46,9.20,45.48 \
+  --output /tmp/tiles.png \
+  --legend
+```
+
+Use a `.svg` output for vector inspection or `.png` for a raster; PNG uses
+Pillow. `--width` sets the raster width, and `--legend` adds a small color key.
+
 ## Regenerating tiles
 
 Put an OSM PBF extract in `data/` (e.g. from
