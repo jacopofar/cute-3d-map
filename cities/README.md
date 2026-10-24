@@ -88,7 +88,7 @@ district polygon.
 
 ```json
 {
-  "default_color": "#1b5e20",
+  "default_color": "#EC7C26",
   "by_line": {
     "1": { "color": "#EC7C26", "length": 15.2 },
     "90": "#e07a3f"
@@ -112,5 +112,5 @@ vehicle body length in meters and overrides the fleet default (11 m for buses,
   from the hospital polygon.
 - `buildings.json` replaces the Pirelli tower (`way/89444196`) with
   `assets/pirelli_uv_basic.glb`.
-- `vehicles.json` paints buses and trams dark green, with the short tram lines
-  1, 5, 10, 19 and 33 in `#EC7C26` and 15.2 m long.
+- `vehicles.json` uses `#EC7C26` as the default bus/tram color; tram lines 1, 5,
+  10, 19 and 33 also set it explicitly and use 15.2 m bodies.
