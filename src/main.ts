@@ -1066,6 +1066,7 @@ class CoolMap {
           kind === "monument" ||
           kind === "construction" ||
           kind === "crosswalk" ||
+          (kind === "custom_model" && mesh.visible) ||
           (kind === "rooftop" && mesh.visible) ||
           ((kind === "platform" ||
             kind === "transit_stop" ||
@@ -1077,7 +1078,7 @@ class CoolMap {
         }
       }
     }
-    const hits = raycaster.intersectObjects(pickable, false);
+    const hits = raycaster.intersectObjects(pickable, true);
     // a GTFS vehicle is in its own instanced mesh, so it is not in the static
     // pickable list; compare its ray distance with the nearest static hit
     const vehicle = this.vehicleAt(raycaster);
@@ -1095,6 +1096,15 @@ class CoolMap {
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    if (hit.object.userData.kind === "custom_model") {
+      const buildingId = hit.object.userData.buildingId as string | undefined;
+      const info = (this.loadedBuildings[tileKey] ?? []).find(
+        (candidate) => candidate.id === buildingId,
+      );
+      if (info) this.selectBuilding(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
     if (hit.object.userData.kind === "water") {
       const info = this.waterAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectWater(info, event.lngLat);
@@ -1971,7 +1981,29 @@ class CoolMap {
     });
   }
 
+  private saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   private async downloadBuildingGLTF(info: BuildingInfo) {
+    const safe =
+      (info.id ?? info.name ?? "building").replace(/[^a-z0-9._-]+/gi, "_") ||
+      "building";
+    if (info.model?.asset) {
+      try {
+        const response = await fetch(`tiles/${info.model.asset}`);
+        if (!response.ok) throw new Error(`asset HTTP ${response.status}`);
+        this.saveBlob(await response.blob(), `${safe}.glb`);
+      } catch (error) {
+        console.warn("building model download failed", error);
+      }
+      return;
+    }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
     const feature: Geojson.Feature = {
@@ -2017,17 +2049,10 @@ class CoolMap {
           { binary: true },
         );
       });
-      const safe =
-        (info.id ?? info.name ?? "building").replace(/[^a-z0-9._-]+/gi, "_") ||
-        "building";
-      const url = URL.createObjectURL(
+      this.saveBlob(
         new Blob([buffer], { type: "model/gltf-binary" }),
+        `${safe}.glb`,
       );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${safe}.glb`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
       console.warn("building GLTF export failed", error);
     }

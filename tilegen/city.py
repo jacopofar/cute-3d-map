@@ -42,12 +42,23 @@ def _optional_bool(value: object, where: str) -> bool | None:
 
 
 @dataclass(frozen=True)
+class CustomModel:
+    """A GLTF asset that replaces the generated volume of a building."""
+
+    file: str
+    scale: float = 1.0
+    rotation: float = 0.0
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+@dataclass(frozen=True)
 class BuildingOverride:
     color: str | None = None
     roof_color: str | None = None
     roof_shape: str | None = None
     windows: bool | None = None
     balconies: bool | None = None
+    model: CustomModel | None = None
 
     @property
     def facade(self) -> dict[str, bool] | None:
@@ -105,6 +116,37 @@ class CityProfile:
         return color or None
 
 
+def _model(value: object, where: str) -> CustomModel | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return CustomModel(file=value)
+    if not isinstance(value, dict):
+        raise CityError(f"{where}.model: expected a path string or object")
+    file = value.get("file")
+    if not isinstance(file, str) or not file:
+        raise CityError(f"{where}.model.file: expected a path string")
+    scale = value.get("scale", 1.0)
+    rotation = value.get("rotation", 0.0)
+    offset = value.get("offset", [0.0, 0.0, 0.0])
+    if not isinstance(scale, (int, float)) or scale <= 0:
+        raise CityError(f"{where}.model.scale: expected a positive number")
+    if not isinstance(rotation, (int, float)):
+        raise CityError(f"{where}.model.rotation: expected degrees")
+    if (
+        not isinstance(offset, list)
+        or len(offset) != 3
+        or not all(isinstance(value, (int, float)) for value in offset)
+    ):
+        raise CityError(f"{where}.model.offset: expected [x, y, z]")
+    return CustomModel(
+        file=file,
+        scale=float(scale),
+        rotation=float(rotation),
+        offset=(float(offset[0]), float(offset[1]), float(offset[2])),
+    )
+
+
 def _building_override(value: object, where: str) -> BuildingOverride:
     if not isinstance(value, dict):
         raise CityError(f"{where}: expected an object")
@@ -124,6 +166,7 @@ def _building_override(value: object, where: str) -> BuildingOverride:
         roof_shape=roof_shape,
         windows=windows,
         balconies=balconies,
+        model=_model(value.get("model"), where),
     )
 
 
@@ -248,6 +291,15 @@ def load_city(directory: Path | None) -> CityProfile:
         area_overrides=areas,
         asset_base=city.get("asset_base"),
     )
+    for override in (
+        *buildings.values(),
+        *building_names.values(),
+        *(override for _area, override in areas),
+    ):
+        if override.model is not None:
+            asset = directory / override.model.file
+            if not asset.exists():
+                raise CityError(f"missing model asset: {asset}")
     logger.info(
         "city profile %s: %d building overrides, %d area overrides, %d line colors",
         profile.name,

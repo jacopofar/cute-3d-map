@@ -15,6 +15,18 @@
         "balconies": false
       },
       "roof_color": "#a65f4a"
+    },
+    "way/89444196": {
+      "model": {
+        "file": "assets/pirelli_uv_basic.glb",
+        "scale": 1.0,
+        "rotation": 0.0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
     }
   }
 }
