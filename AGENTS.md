@@ -221,8 +221,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - `tilegen/city.py` — optional city profile loader/validator
   (`cities/<name>/city.json`, `buildings.json`, `areas.geojson`,
   `vehicles.json`). Applies building color/roof/facade overrides, polygon-area
-  building overrides and GTFS line colors; missing files keep the Milan
-  defaults.
+  building overrides, GTFS line colors/body lengths and GLTF model replacements;
+  missing files keep the Milan defaults. `vehicles.json` supports
+  `default_color`, `by_line` and `by_route_id`; a line/route value is a color or
+  `{ "color", "length" }`, and the frontend scales the fleet body to the loop's
+  `vehicle_length`. Model files are copied into the tile's `{y}_assets/` folder
+  and loaded by the frontend.
 - `tilegen/features.py` — pure OSM-tag predicates and tile feature builders
   (`to_building`, `to_water`, `to_park_path`, ...). No parquet I/O; the loaders
   and pipeline import it.

@@ -1,8 +1,8 @@
 # City profiles
 
-Optional file-driven overrides for the tile generator. The default Milan profile
-is intentionally empty and is used automatically; copy this folder for another
-city and pass `--city-dir ../cities/<name>` from `tilegen/`.
+Optional file-driven overrides for the tile generator. The Milan profile is
+used automatically; copy this folder for another city and pass
+`--city-dir ../cities/<name>` from `tilegen/`.
 
 ## `city.json`
 
@@ -88,13 +88,20 @@ district polygon.
 
 ```json
 {
-  "by_line": { "1": "#f2c94c", "90": "#e07a3f" },
+  "default_color": "#1b5e20",
+  "by_line": {
+    "1": { "color": "#EC7C26", "length": 15.2 },
+    "90": "#e07a3f"
+  },
   "by_route_id": { "T1": "#f2c94c" }
 }
 ```
 
-A city line color wins over the feed's route color, which wins over the fleet
-default.
+`default_color` paints every GTFS bus/tram whose line has no override. A line
+override wins over a route override, and both win over the feed's route color.
+A string value is shorthand for `{ "color": "#rrggbb" }`; `length` is the
+vehicle body length in meters and overrides the fleet default (11 m for buses,
+23 m for trams).
 
 ## Milan profile
 
@@ -105,4 +112,5 @@ default.
   from the hospital polygon.
 - `buildings.json` replaces the Pirelli tower (`way/89444196`) with
   `assets/pirelli_uv_basic.glb`.
-- `vehicles.json` is empty until specific line liveries are added.
+- `vehicles.json` paints buses and trams dark green, with the short tram lines
+  1, 5, 10, 19 and 33 in `#EC7C26` and 15.2 m long.

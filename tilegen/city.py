@@ -71,13 +71,30 @@ class BuildingOverride:
 
 
 @dataclass(frozen=True)
+class VehicleOverride:
+    """A line or route paint and, optionally, its vehicle body length."""
+
+    color: str | None = None
+    length: float | None = None
+
+
+def _as_vehicle_override(value: object) -> VehicleOverride | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return VehicleOverride(color=value)
+    return value if isinstance(value, VehicleOverride) else None
+
+
+@dataclass(frozen=True)
 class CityProfile:
     name: str = "Milan"
     directory: Path | None = None
     building_by_id: dict[str, BuildingOverride] | None = None
     building_by_name: dict[str, BuildingOverride] | None = None
-    vehicle_by_line: dict[str, str] | None = None
-    vehicle_by_route: dict[str, str] | None = None
+    vehicle_default_color: str | None = None
+    vehicle_by_line: dict[str, VehicleOverride | str] | None = None
+    vehicle_by_route: dict[str, VehicleOverride | str] | None = None
     area_overrides: list[tuple[BaseGeometry, BuildingOverride]] | None = None
     asset_base: str | None = None
 
@@ -104,16 +121,34 @@ class CityProfile:
             return override
         return None
 
-    def vehicle_color(self, meta: dict | None) -> str | None:
-        """City line/route color, without the leading '#'."""
+    def vehicle_override(self, meta: dict | None) -> VehicleOverride | None:
+        """Line/route override, with a line value winning over a route one."""
         if not meta:
             return None
         line = str(meta.get("line") or "").strip()
         route_id = str(meta.get("route_id") or "").strip()
-        color = (self.vehicle_by_line or {}).get(line)
-        if color is None:
-            color = (self.vehicle_by_route or {}).get(route_id)
-        return color or None
+        line_override = _as_vehicle_override((self.vehicle_by_line or {}).get(line))
+        route_override = _as_vehicle_override(
+            (self.vehicle_by_route or {}).get(route_id)
+        )
+        if line_override is None:
+            return route_override
+        if route_override is None:
+            return line_override
+        return VehicleOverride(
+            color=line_override.color or route_override.color,
+            length=line_override.length or route_override.length,
+        )
+
+    def vehicle_color(self, meta: dict | None) -> str | None:
+        """City line/route color, without the leading '#'."""
+        override = self.vehicle_override(meta)
+        return (override.color if override else None) or self.vehicle_default_color
+
+    def vehicle_length(self, meta: dict | None) -> float | None:
+        """Body length in meters, when the line overrides the fleet default."""
+        override = self.vehicle_override(meta)
+        return override.length if override else None
 
 
 def _model(value: object, where: str) -> CustomModel | None:
@@ -203,20 +238,43 @@ def _building_maps(document: object) -> tuple[dict, dict]:
     )
 
 
-def _vehicle_maps(document: object) -> tuple[dict[str, str], dict[str, str]]:
+def _vehicle_override(value: object, where: str) -> VehicleOverride:
+    if isinstance(value, str):
+        return VehicleOverride(color=(_color(value, where) or "")[1:])
+    if not isinstance(value, dict):
+        raise CityError(f"{where}: expected a color string or object")
+    color = value.get("color")
+    length = value.get("length")
+    if length is not None and (not isinstance(length, (int, float)) or length <= 0):
+        raise CityError(f"{where}.length: expected a positive number of meters")
+    return VehicleOverride(
+        color=(_color(color, f"{where}.color") or "")[1:] if color else None,
+        length=float(length) if length is not None else None,
+    )
+
+
+def _vehicle_maps(
+    document: object,
+) -> tuple[
+    str | None,
+    dict[str, VehicleOverride | str],
+    dict[str, VehicleOverride | str],
+]:
     if not isinstance(document, dict):
         raise CityError("vehicles.json: expected an object")
+    default_color = document.get("default_color")
     by_line = document.get("by_line", {})
     by_route = document.get("by_route_id", {})
     if not isinstance(by_line, dict) or not isinstance(by_route, dict):
         raise CityError("vehicles.json: by_line/by_route_id must be objects")
     return (
+        (_color(default_color, "vehicles.json.default_color") or "")[1:] or None,
         {
-            str(key): (_color(value, f"vehicles.json.by_line.{key}") or "")[1:]
+            str(key): _vehicle_override(value, f"vehicles.json.by_line.{key}")
             for key, value in by_line.items()
         },
         {
-            str(key): (_color(value, f"vehicles.json.by_route_id.{key}") or "")[1:]
+            str(key): _vehicle_override(value, f"vehicles.json.by_route_id.{key}")
             for key, value in by_route.items()
         },
     )
@@ -272,9 +330,11 @@ def load_city(directory: Path | None) -> CityProfile:
     buildings, building_names = _building_maps(
         _read_json(directory / "buildings.json", {})
     )
-    vehicles_by_line, vehicles_by_route = _vehicle_maps(
-        _read_json(directory / "vehicles.json", {})
-    )
+    (
+        vehicle_default_color,
+        vehicles_by_line,
+        vehicles_by_route,
+    ) = _vehicle_maps(_read_json(directory / "vehicles.json", {}))
     area_path = directory / "areas.geojson"
     if not area_path.exists():
         area_path = directory / "areas.json"
@@ -286,6 +346,7 @@ def load_city(directory: Path | None) -> CityProfile:
         directory=directory,
         building_by_id=buildings,
         building_by_name=building_names,
+        vehicle_default_color=vehicle_default_color,
         vehicle_by_line=vehicles_by_line,
         vehicle_by_route=vehicles_by_route,
         area_overrides=areas,

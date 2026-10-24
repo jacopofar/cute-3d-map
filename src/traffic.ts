@@ -74,6 +74,8 @@ interface PreparedVehicle {
   phase: number;
   period: number;
   color: number;
+  // body length in meters, from the loop's city override or the fleet default
+  length: number;
   // shared by every vehicle on the loop, so the geometry is prepared once
   runs: PreparedRun[];
   // shared too: the loop's crossings, matched from the tile's point features
@@ -294,6 +296,7 @@ export class TrafficRenderer {
         period: number;
         runs: PreparedRun[];
         vehicles: TrafficLoop["vehicles"];
+        vehicleLength?: number;
         meta?: TrafficLoop["meta"];
       }
     >();
@@ -305,6 +308,7 @@ export class TrafficRenderer {
           period: loop.period,
           runs: [],
           vehicles: loop.vehicles,
+          vehicleLength: loop.vehicleLength,
           meta: loop.meta,
         };
         byId.set(loop.id, group);
@@ -324,6 +328,7 @@ export class TrafficRenderer {
           phase: vehicle.phase,
           period: group.period,
           color: vehicle.color,
+          length: group.vehicleLength ?? this.config.length,
           runs: group.runs,
           crossings,
           meta: group.meta,
@@ -529,6 +534,8 @@ export class TrafficRenderer {
     const m = toModelCoords([lon, lat], originMeters, scaleFactor);
     this.dummy.position.set(m[0], m[1], this.config.height / 2);
     this.dummy.rotation.set(0, 0, heading);
+    // the body is built at the fleet length; a line override only stretches X
+    this.dummy.scale.set(vehicle.length / this.config.length, 1, 1);
     this.dummy.updateMatrix();
     this.mesh.setMatrixAt(slot, this.dummy.matrix);
   }

@@ -432,6 +432,9 @@ export interface TrafficLoop {
   period: number; // seconds for one lap
   runs: TrafficRun[];
   vehicles: TrafficVehicle[];
+  // a city-profile body length for this line, in meters; absent means the
+  // fleet default in traffic.ts
+  vehicleLength?: number;
   // GTFS display metadata; absent on the synthetic OSM fleets
   meta?: {
     line?: string;
@@ -1199,6 +1202,7 @@ interface RawTrafficLoop {
   period: number;
   runs: TrafficRun[];
   vehicles: { phase: number; color: string }[];
+  vehicle_length?: number;
   meta?: TrafficLoop["meta"];
 }
 
@@ -1280,6 +1284,7 @@ function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
       phase: vehicle.phase,
       color: parseInt(vehicle.color, 16),
     })),
+    vehicleLength: loop.vehicle_length,
     meta: loop.meta,
   }));
 }

@@ -1,4 +1,26 @@
 {
-  "by_line": {},
+  "default_color": "#1b5e20",
+  "by_line": {
+    "1": {
+      "color": "#EC7C26",
+      "length": 15.2
+    },
+    "5": {
+      "color": "#EC7C26",
+      "length": 15.2
+    },
+    "10": {
+      "color": "#EC7C26",
+      "length": 15.2
+    },
+    "19": {
+      "color": "#EC7C26",
+      "length": 15.2
+    },
+    "33": {
+      "color": "#EC7C26",
+      "length": 15.2
+    }
+  },
   "by_route_id": {}
 }

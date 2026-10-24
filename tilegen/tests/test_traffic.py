@@ -237,12 +237,15 @@ def test_scheduled_loop_keeps_stop_dwell():
 def test_loop_metadata_survives_tiles_and_cache():
     _, loops = find(square_ways(9.18, 45.5, 0.001))
     loops[0].meta = {"line": "1", "type": "tram"}
+    loops[0].vehicle_length = 15.2
     traffic.assign_vehicles(loops, TrafficConfig(spacing=50.0))
     entry = next(iter(traffic.loops_to_tiles(loops, 15).values()))[0]
     assert entry["meta"] == {"line": "1", "type": "tram"}
+    assert entry["vehicle_length"] == 15.2
     records = traffic.loops_to_records(loops)
     restored = traffic.loops_from_records(records)
     assert restored[0].meta == {"line": "1", "type": "tram"}
+    assert restored[0].vehicle_length == 15.2
 
 
 def test_global_budget_raises_spacing():
