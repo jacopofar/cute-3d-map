@@ -39,8 +39,10 @@ STYLE: dict[str, str] = {
     "terrace": "#d98ba4",
     "playground": "#e8c84d",
     "monument": "#c7a444",
-    "crosswalk": "#ffffff",
-    "road_marking": "#ffffff",
+    # white paint is invisible on the inspector's light canvas; use a dark
+    # logical ink instead
+    "crosswalk": "#3f3f3f",
+    "road_marking": "#4a4a4a",
     "power_tower": "#41474b",
     "power_line": "#41474b",
     "wall": "#6d655e",
@@ -291,15 +293,20 @@ def render_svg(
     return "\n".join(parts)
 
 
+LEGEND_ITEMS = [
+    ("building", STYLE["building"]),
+    ("water", STYLE["water"]),
+    ("green", STYLE["green"]),
+    ("tree", STYLE["tree"]),
+    ("park path", STYLE["park_path"]),
+    ("sidewalk", STYLE["sidewalk"]),
+    ("crosswalk", STYLE["crosswalk"]),
+    ("power", STYLE["power_line"]),
+]
+
+
 def _svg_legend(width: int, height: int) -> list[str]:
-    items = [
-        ("building", STYLE["building"]),
-        ("water", STYLE["water"]),
-        ("green", STYLE["green"]),
-        ("tree", STYLE["tree"]),
-        ("park path", STYLE["park_path"]),
-        ("power", STYLE["power_line"]),
-    ]
+    items = LEGEND_ITEMS
     x = 16
     y = height - 18 * len(items) - 12
     out = [
@@ -369,14 +376,7 @@ def render_png(
                     px, py = project(lon, lat)
                     draw.ellipse((px - 2, py - 2, px + 2, py + 2), fill=shape.color)
     if legend:
-        items = [
-            ("building", STYLE["building"]),
-            ("water", STYLE["water"]),
-            ("green", STYLE["green"]),
-            ("tree", STYLE["tree"]),
-            ("park path", STYLE["park_path"]),
-            ("power", STYLE["power_line"]),
-        ]
+        items = LEGEND_ITEMS
         x = 16
         y = height - 18 * len(items) - 12
         draw.rectangle(
