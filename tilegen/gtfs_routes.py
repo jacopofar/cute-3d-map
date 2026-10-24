@@ -6,6 +6,7 @@ which carry no direction_id. Run it before deciding how to treat GTFS shapes in
 the traffic generator.
 """
 
+import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -91,33 +92,8 @@ def summary(shapes: list[dict], pairs: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-@click.command()
-@click.option(
-    "--gtfs",
-    "gtfs_path",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="GTFS zip to inspect.",
-)
-@click.option(
-    "--output",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("gtfs-routes.geojson"),
-    show_default=True,
-    help="GeoJSON output; one feature per shape.",
-)
-@click.option(
-    "--summary",
-    "summary_path",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("gtfs-routes.md"),
-    show_default=True,
-    help="Markdown summary output.",
-)
-def main(gtfs_path: Path, output: Path, summary_path: Path) -> None:
-    """Export GTFS route shapes and print their direction situation."""
-    shapes = read_route_shapes(gtfs_path)
-    pairs = reverse_pairs(shapes)
+def geojson_collection(shapes: list[dict], pairs: dict[str, str]) -> dict:
+    """Build a valid FeatureCollection from route shapes and reverse pairs."""
     features = []
     for shape in shapes:
         props = {
@@ -146,18 +122,42 @@ def main(gtfs_path: Path, output: Path, summary_path: Path) -> None:
                 },
             }
         )
+    return {"type": "FeatureCollection", "features": features}
+
+
+@click.command()
+@click.option(
+    "--gtfs",
+    "gtfs_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="GTFS zip to inspect.",
+)
+@click.option(
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=Path("gtfs-routes.geojson"),
+    show_default=True,
+    help="GeoJSON output; one feature per shape.",
+)
+@click.option(
+    "--summary",
+    "summary_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=Path("gtfs-routes.md"),
+    show_default=True,
+    help="Markdown summary output.",
+)
+def main(gtfs_path: Path, output: Path, summary_path: Path) -> None:
+    """Export GTFS route shapes and print their direction situation."""
+    shapes = read_route_shapes(gtfs_path)
+    pairs = reverse_pairs(shapes)
+    collection = geojson_collection(shapes, pairs)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        '{"type":"FeatureCollection","features":'
-        + ",".join(
-            __import__("json").dumps(feature, separators=(",", ":"))
-            for feature in features
-        )
-        + "}"
-    )
+    output.write_text(json.dumps(collection, indent=2) + "\n")
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(summary(shapes, pairs))
-    click.echo(f"{len(features)} shapes -> {output}")
+    click.echo(f"{len(collection['features'])} shapes -> {output}")
     click.echo(f"summary -> {summary_path}")
 
 
