@@ -12,6 +12,8 @@ from pathlib import Path
 
 import duckdb
 import shapely
+from shapely.geometry.base import BaseGeometry
+
 from city import CityProfile, load_city
 from features import (
     AEROWAY_AREA_KINDS,
@@ -92,7 +94,6 @@ from loaders import (
     terrace_positions_from_parquet,
 )
 from parking import parking_rows
-from shapely.geometry.base import BaseGeometry
 from sidewalks import sidewalk_centerlines
 from traffic import (
     CAR_CONFIG,

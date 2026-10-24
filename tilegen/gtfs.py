@@ -22,9 +22,10 @@ from itertools import pairwise
 from pathlib import Path
 
 import shapely
-from city import CityProfile
 from shapely.geometry import Point
 from shapely.ops import substring
+
+from city import CityProfile
 from traffic import Loop, TrafficConfig, assign_vehicles, haversine_m
 
 BUS_ROUTE_TYPES = frozenset({"3", "11"})

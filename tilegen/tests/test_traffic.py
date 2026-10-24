@@ -2,8 +2,9 @@ import json
 import math
 from itertools import pairwise
 
-import geo
 import pytest
+
+import geo
 import traffic
 from traffic import TrafficConfig, Way
 

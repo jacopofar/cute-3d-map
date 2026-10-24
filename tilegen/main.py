@@ -11,6 +11,8 @@ from pathlib import Path
 import click
 import quackosm as qosm
 import shapely
+from shapely.geometry.base import BaseGeometry
+
 from city import CityError
 from features import (  # noqa: F401 - re-exported for the existing API/tests
     _LEVEL_RE,
@@ -157,7 +159,6 @@ from pipeline import (  # noqa: F401 - re-exported for the existing API/tests
     tile_to_geojson,
     write_loop_report,
 )
-from shapely.geometry.base import BaseGeometry
 from sidewalks import SidewalkLine, sidewalk_centerlines  # noqa: F401
 from traffic import (
     road_oneway,  # noqa: F401 - re-exported for tests

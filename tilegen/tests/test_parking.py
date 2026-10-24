@@ -1,8 +1,9 @@
 import math
 
-import parking
 import pytest
 import shapely
+
+import parking
 
 
 def test_way_length_is_measured_in_meters():

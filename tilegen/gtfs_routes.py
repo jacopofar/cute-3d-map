@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import click
+
 from gtfs import read_route_shapes
 from traffic import haversine_m
 

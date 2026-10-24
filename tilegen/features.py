@@ -15,9 +15,10 @@ from dataclasses import dataclass
 from math import atan2, cos, degrees, radians
 
 import shapely
+from shapely.geometry import LineString, Point
+
 from city import BuildingOverride
 from impute import impute
-from shapely.geometry import LineString, Point
 
 logger = logging.getLogger(__name__)
 

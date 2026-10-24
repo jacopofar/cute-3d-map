@@ -22,8 +22,9 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 import shapely
-from geo import TILE_ZOOM, coord_to_tile
 from shapely.ops import substring
+
+from geo import TILE_ZOOM, coord_to_tile
 
 # The parked cars use the moving cars' body; keep these in sync with
 # CAR_TRAFFIC in src/traffic.ts.

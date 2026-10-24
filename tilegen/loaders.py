@@ -14,6 +14,10 @@ from pathlib import Path
 
 import duckdb
 import shapely
+from shapely.geometry import LineString, MultiLineString, Point
+from shapely.geometry.base import BaseGeometry
+from shapely.prepared import prep
+
 from features import (
     ROAD_PRIORITY,
     ROAD_WIDTHS,
@@ -36,9 +40,6 @@ from parking import (
     ParkingWay,
     sidewalk_side,
 )
-from shapely.geometry import LineString, MultiLineString, Point
-from shapely.geometry.base import BaseGeometry
-from shapely.prepared import prep
 from sidewalks import SidewalkLine
 from traffic import (
     DRIVABLE_HIGHWAYS,

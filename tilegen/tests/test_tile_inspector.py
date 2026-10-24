@@ -2,6 +2,7 @@ import json
 
 import click
 import pytest
+
 import tile_inspector
 
 

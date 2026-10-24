@@ -1,6 +1,7 @@
 import json
 
 import pytest
+
 from city import CityError, CityProfile, load_city
 from features import BuildingOverride, to_building
 
@@ -53,6 +54,7 @@ def test_invalid_city_color_fails(tmp_path):
 
 def test_pipeline_applies_city_building_override():
     import shapely
+
     from pipeline import tile_to_geojson
 
     city = CityProfile(building_by_id={"way/1": BuildingOverride(color="#112233")})
