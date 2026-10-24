@@ -9,6 +9,7 @@ dependencies = [
     "duckdb>=1.5.6",
     # may require many system packages to be installed
     # (e.g. sudo dnf install gdal-devel proj-devel libarrow-glib-devel libarrow-dataset-devel libarrow-dataset-libs libarrow-flight-devel)
+    "pillow>=13.0.0",
     "quackosm>=0.19.0",
     "shapely>=2.2.0",
 ]

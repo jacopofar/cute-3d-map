@@ -227,6 +227,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
   A loop may carry `meta` (GTFS line/route/headsign); it survives the cache and
   the per-tile traffic block.
+- `tilegen/tile_inspector.py` — flat SVG/PNG inspector for an area of generated
+  tiles. Reads `public/tiles/{x}/{y}.json`, draws one logical color per
+  `cmtype` with no basemap or decoration; Pillow is only needed for PNG.
 - `tilegen/gtfs.py` — optional GTFS zip reader. Uses the feed's shapes as
   out-and-back bus/tram loops (route types 3/11 and 0), assigns vehicles with
   `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign
