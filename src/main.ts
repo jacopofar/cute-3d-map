@@ -1089,7 +1089,7 @@ class CoolMap {
     });
     const scheduleInitialReport = () => {
       if (!PERF_ENDPOINT) return;
-      window.setTimeout(() => this.reportPerf(), 8000);
+      window.setTimeout(() => this.reportPerf(), 12000);
     };
     if (document.readyState === "complete") scheduleInitialReport();
     else window.addEventListener("load", scheduleInitialReport, { once: true });
