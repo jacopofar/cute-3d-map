@@ -378,29 +378,18 @@ def _nearest_other_road(
     return nearest
 
 
-def clear_pieces(
+def _crossing_intervals(
     line: shapely.LineString,
     coords: list[tuple[float, float]],
     way_id: str,
     ways: list[ParkingWay],
     tree: shapely.STRtree,
-    pitch: float,
-    clearance: float = JUNCTION_TRIM,
-    endpoint_distance: float = JUNCTION_DISTANCE,
-    min_length: float | None = None,
-) -> list[list[tuple[float, float]]]:
-    """Split a parking row around every crossing road and trim its ends.
-
-    A row can cross a road in the middle even when neither endpoint is near one;
-    those crossings used to leave cars parked across the junction. Subtract an
-    8 m window around every intersection (and endpoint), then keep only pieces
-    long enough to hold at least one bay.
-    """
-    total = way_length(coords)
-    if total <= 0:
-        return []
+    clearance: float,
+    endpoint_distance: float,
+    total: float,
+) -> list[tuple[float, float]]:
+    """Intervals of a row to remove around crossing roads and near its ends."""
     intervals: list[tuple[float, float]] = []
-
     for index in tree.query(line):
         way = ways[index]
         if way.id == way_id:
@@ -441,26 +430,66 @@ def clear_pieces(
                             min(total, high + clearance),
                         )
                     )
-
     if _nearest_other_road(coords[0], way_id, ways, tree) <= endpoint_distance:
         intervals.append((0.0, min(total, clearance)))
     if _nearest_other_road(coords[-1], way_id, ways, tree) <= endpoint_distance:
         intervals.append((max(0.0, total - clearance), total))
+    return intervals
 
+
+def _merge_intervals(
+    intervals: list[tuple[float, float]], total: float
+) -> list[tuple[float, float]]:
+    """Merge overlapping removal windows, with a sentinel at the row end."""
     if not intervals:
-        return [coords]
-    intervals.sort()
+        return []
+    intervals = sorted(intervals)
     merged: list[tuple[float, float]] = []
     for start, end in intervals:
         if not merged or start > merged[-1][1]:
             merged.append((start, end))
         else:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return merged + [(total, total)]
 
+
+def clear_pieces(
+    line: shapely.LineString,
+    coords: list[tuple[float, float]],
+    way_id: str,
+    ways: list[ParkingWay],
+    tree: shapely.STRtree,
+    pitch: float,
+    clearance: float = JUNCTION_TRIM,
+    endpoint_distance: float = JUNCTION_DISTANCE,
+    min_length: float | None = None,
+) -> list[list[tuple[float, float]]]:
+    """Split a parking row around every crossing road and trim its ends.
+
+    A row can cross a road in the middle even when neither endpoint is near one;
+    those crossings used to leave cars parked across the junction. Subtract an
+    8 m window around every intersection (and endpoint), then keep only pieces
+    long enough to hold at least one bay.
+    """
+    total = way_length(coords)
+    if total <= 0:
+        return []
+    intervals = _crossing_intervals(
+        line,
+        coords,
+        way_id,
+        ways,
+        tree,
+        clearance,
+        endpoint_distance,
+        total,
+    )
+    if not intervals:
+        return [coords]
     minimum = max(4.0, pitch) if min_length is None else min_length
     pieces: list[list[tuple[float, float]]] = []
     cursor = 0.0
-    for start, end in merged + [(total, total)]:
+    for start, end in _merge_intervals(intervals, total):
         if start - cursor >= minimum:
             piece = substring(
                 line,
