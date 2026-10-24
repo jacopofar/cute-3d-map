@@ -587,9 +587,29 @@ export interface RooftopInfo {
 // and wall solids from the same feature. `kind` follows the two layer toggles.
 export interface BarrierInfo {
   kind: "fence" | "wall";
+  id?: string;
+  name?: string;
+  // the OSM sub-kind: the barrier value for a fence, the wall material for a wall
+  subtype?: string;
   coords: [number, number][];
   // west, south, east, north; precomputed for the car's collision reject
   bbox: [number, number, number, number];
+}
+
+// A generic OSM feature for click-picking. The layers that need richer info
+// keep their own interface (buildings, water, ...); this carries the simple
+// ones: a point, polylines or area rings, plus the id/name for the popup.
+export interface FeatureInfo {
+  id?: string;
+  name?: string;
+  // the tile's cmtype, e.g. "tree", "green", "rail", "aeroway"
+  kind: string;
+  // the semantic sub-kind: tree type, green style, rail kind, bridge class, ...
+  subtype?: string;
+  lon?: number;
+  lat?: number;
+  lines?: [number, number][][];
+  rings?: [number, number][][];
 }
 
 export interface TileObjects {
@@ -609,6 +629,8 @@ export interface TileObjects {
   traffic: TrafficLoop[];
   // fences and walls as lon/lat polylines, for the car's collision only
   barriers: BarrierInfo[];
+  // generic OSM features (trees, benches, parks, rail, ...) for click-picking
+  features: FeatureInfo[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
   // traffic signals only, for the glowing signal heads at night
@@ -622,6 +644,24 @@ export interface TileObjects {
   // street lamps, for the night glow
   lamps: LampSpot[];
 }
+
+// the cmtypes that share the generic FeatureInfo picker (aeroway is handled in
+// the feature loop because it also feeds the airplane layer)
+const FEATURE_INFO_KINDS = new Set([
+  "tree",
+  "tree_row",
+  "bench",
+  "green",
+  "cemetery",
+  "rail",
+  "park_path",
+  "power_tower",
+  "power_line",
+  "bridge",
+  "tunnel",
+  "gate",
+  "road_marking",
+]);
 
 function footprintCenter(
   info: BuildingInfo,
@@ -707,6 +747,7 @@ export async function objectsAt(
       meshes: [],
       buildings: [],
       barriers: [],
+      features: [],
       water: [],
       furniture: [],
       fountains: [],
@@ -737,6 +778,7 @@ export async function objectsAt(
       meshes: [],
       buildings: [],
       barriers: [],
+      features: [],
       water: [],
       furniture: [],
       fountains: [],
@@ -773,6 +815,7 @@ export async function objectsAt(
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
   const barriers: BarrierInfo[] = [];
+  const features: FeatureInfo[] = [];
   const water: WaterInfo[] = [];
   const furniture: FurnitureInfo[] = [];
   const fountains: FountainInfo[] = [];
@@ -812,6 +855,9 @@ export async function objectsAt(
       if (info.model) customModels.push(info);
     } else if (cmtype === "fence" || cmtype === "wall") {
       barriers.push(...barrierInfo(f, cmtype));
+    } else if (FEATURE_INFO_KINDS.has(cmtype)) {
+      const info = featureInfo(f);
+      if (info) features.push(info);
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
     } else if (cmtype === "furniture") {
@@ -844,12 +890,16 @@ export async function objectsAt(
     } else if (cmtype === "rooftop") {
       const info = rooftopInfo(f);
       if (info) rooftops.push(info);
-    } else if (cmtype === "aeroway" && f.properties?.aeroway === "runway") {
-      const runway = runwayInfo(f);
-      if (runway) runways.push(runway);
-    } else if (cmtype === "aeroway" && f.properties?.aeroway === "apron") {
-      const apron = apronInfo(f);
-      if (apron) aprons.push(apron);
+    } else if (cmtype === "aeroway") {
+      const info = featureInfo(f);
+      if (info) features.push(info);
+      if (f.properties?.aeroway === "runway") {
+        const runway = runwayInfo(f);
+        if (runway) runways.push(runway);
+      } else if (f.properties?.aeroway === "apron") {
+        const apron = apronInfo(f);
+        if (apron) aprons.push(apron);
+      }
     }
     geoJSONtoGeometries(f, originMeters, scaleFactor, imputedColors).forEach(
       ({ kind, geometries }) => {
@@ -980,6 +1030,7 @@ export async function objectsAt(
     meshes,
     buildings,
     barriers,
+    features,
     water,
     furniture,
     fountains,
@@ -1020,6 +1071,67 @@ function ringsBox(
   return [west, south, east, north];
 }
 
+function featureId(f: Geojson.Feature): string | undefined {
+  if (typeof f.id === "string") return f.id;
+  if (typeof f.id === "number") return String(f.id);
+  return undefined;
+}
+
+// The simple OSM layers share one info shape: a point, polylines or outer area
+// rings plus the ids the popup needs. Buildings, water, street furniture and
+// the other interactive props keep their richer dedicated interfaces.
+function featureInfo(f: Geojson.Feature): FeatureInfo | null {
+  const props = f.properties ?? {};
+  const kind = props.cmtype;
+  if (typeof kind !== "string") return null;
+  const info: FeatureInfo = {
+    id: featureId(f),
+    name: typeof props.name === "string" ? props.name : undefined,
+    kind,
+  };
+  if (kind === "tree" || kind === "tree_row") {
+    info.subtype = typeof props.type === "string" ? props.type : undefined;
+  } else if (kind === "green") {
+    info.subtype = typeof props.green === "string" ? props.green : undefined;
+  } else if (
+    kind === "rail" ||
+    kind === "park_path" ||
+    kind === "road_marking"
+  ) {
+    info.subtype = typeof props.kind === "string" ? props.kind : undefined;
+  } else if (kind === "bridge" || kind === "tunnel") {
+    info.subtype = typeof props.class === "string" ? props.class : undefined;
+  } else if (kind === "aeroway") {
+    info.subtype =
+      typeof props.aeroway === "string" ? props.aeroway : undefined;
+  }
+  const geom = f.geometry;
+  if (geom.type === "Point") {
+    const point = geom.coordinates as [number, number];
+    info.lon = point[0];
+    info.lat = point[1];
+  } else if (geom.type === "MultiPoint") {
+    const point = geom.coordinates[0] as [number, number] | undefined;
+    if (point) {
+      info.lon = point[0];
+      info.lat = point[1];
+    }
+  } else if (geom.type === "LineString") {
+    info.lines = [geom.coordinates as [number, number][]];
+  } else if (geom.type === "MultiLineString") {
+    info.lines = geom.coordinates as [number, number][][];
+  } else if (geom.type === "Polygon") {
+    info.rings = [geom.coordinates[0] as [number, number][]];
+  } else if (geom.type === "MultiPolygon") {
+    info.rings = geom.coordinates.map(
+      (polygon) => polygon[0] as [number, number][],
+    );
+  }
+  // a feature with none of the three shapes cannot be picked
+  if (info.lon === undefined && !info.lines && !info.rings) return null;
+  return info;
+}
+
 // the polylines of a fence/wall feature. A barrier closed into an area is its
 // outline, exactly what the fence band and wall solids are built from.
 function barrierInfo(
@@ -1039,11 +1151,22 @@ function barrierInfo(
       lines.push(...(polygon as [number, number][][]));
     }
   }
+  const props = f.properties ?? {};
+  const id = featureId(f);
+  const name = typeof props.name === "string" ? props.name : undefined;
+  const subtype =
+    kind === "wall"
+      ? typeof props.wall === "string"
+        ? props.wall
+        : undefined
+      : typeof props.barrier === "string"
+        ? props.barrier
+        : undefined;
   const infos: BarrierInfo[] = [];
   for (const coords of lines) {
     if (coords.length < 2) continue;
     const bbox = ringsBox([coords]);
-    if (bbox) infos.push({ kind, coords, bbox });
+    if (bbox) infos.push({ kind, id, name, subtype, coords, bbox });
   }
   return infos;
 }

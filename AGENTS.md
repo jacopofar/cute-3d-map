@@ -221,6 +221,14 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   debounce from ever firing). The car spawns on the nearest loaded car route and
   reports `drive-start` / `drive-stop` perf events. No road graph and no physics
   beyond the rectangle collision.
+- `src/feature_pick.ts` — the pure nearest-feature picker behind the click
+  popups: points by distance, lines by segment distance and areas by
+  containment. `geojson_data` keeps a generic `FeatureInfo` per tile for the
+  simple OSM layers (trees and tree rows, benches, parks, cemeteries, rail, park
+  paths, power towers and lines, bridges, tunnels, gates, road markings and
+  aeroways) and extends `BarrierInfo` with the id/name for fences and walls.
+  Roofs and church crosses route to the building below; a hidden layer is not
+  pickable. The generic popup is one label plus the OSM link.
 - `src/night_lights.ts` — the night light sources: street lamps (`lamps` tile
   block) and traffic-signal heads (`signals` from the signal Points). Warm lamp
   sprites plus a wider ground "pool", red/green signal sprites on the global 8 s
@@ -457,6 +465,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   Collision is the car's rectangle against building footprints and fence/wall
   lines, not a physics simulation; the car spawns on the nearest loaded car
   route. Entering and leaving report `drive-start` / `drive-stop` perf events.
+- **generic feature** — a simple OSM feature kept as a `FeatureInfo` (id, name,
+  kind, subtype, point/lines/rings) for click-picking: trees and tree rows,
+  benches, parks, cemeteries, rail, park paths, power towers and lines, bridges,
+  tunnels, gates, road markings and aeroways. Fences and walls live in
+  `BarrierInfo` but open the same popup; a roof or church cross selects the
+  carrying building. `featureAt` picks the nearest one in the hit tile.
 - **parking row / parked car** — a kerb line authored by tilegen with a style
   (parallel, perpendicular, fishbone), pitch, side and occupancy; clipped to the
   tile. The frontend places the occupied cars along it. The layer is static and

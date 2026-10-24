@@ -29,6 +29,7 @@ import type {
   BuildingInfo,
   ConstructionInfo,
   CrosswalkInfo,
+  FeatureInfo,
   FountainInfo,
   FurnitureInfo,
   MonumentInfo,
@@ -66,6 +67,12 @@ import {
   lineIntersectsRect,
   ringIntersectsRect,
 } from "./collision.ts";
+import {
+  barrierAt,
+  featureAt,
+  ringContains,
+  ringDistance,
+} from "./feature_pick.ts";
 import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
@@ -188,63 +195,55 @@ const FURNITURE_LABELS: Record<string, string> = {
   hydrant: "Fire hydrant",
 };
 
+// The mesh kinds that share the generic FeatureInfo picker, mapped to the
+// feature kinds to search. A tree row is drawn as trees, so a tree hit has to
+// consider both; a power wire is the mesh of a power_line feature.
+const FEATURE_PICK_KINDS: Record<string, string[]> = {
+  tree: ["tree", "tree_row"],
+  bench: ["bench"],
+  green: ["green"],
+  cemetery: ["cemetery"],
+  rail: ["rail"],
+  park_path: ["park_path"],
+  power_tower: ["power_tower"],
+  power_wire: ["power_line"],
+  bridge: ["bridge"],
+  tunnel: ["tunnel"],
+  gate: ["gate"],
+  aeroway: ["aeroway"],
+  road_marking: ["road_marking"],
+};
+
+// how far a hit may land from the feature and still count, in meters. A runway
+// is buffered to its half width, so its hit is far from the centreline; a flat
+// area is usually a containment hit and needs no slack.
+const FEATURE_PICK_RADIUS: Record<string, number> = {
+  tree: 5,
+  tree_row: 5,
+  bench: 3,
+  green: 5,
+  cemetery: 5,
+  rail: 6,
+  park_path: 5,
+  power_tower: 8,
+  power_line: 8,
+  bridge: 12,
+  tunnel: 8,
+  gate: 4,
+  aeroway: 40,
+  road_marking: 12,
+  fence: 4,
+  wall: 4,
+};
+
 function osmLink(id: string | undefined): string | null {
   if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
   const url = `https://www.openstreetmap.org/${id}`;
   return `${escapeHtml(id)} (<a href="${url}" target="_blank" rel="noopener">OSM</a>)`;
 }
 
-// ray-cast point-in-polygon, in model space
-function ringContains(
-  ring: [number, number][],
-  point: THREE.Vector3,
-  originMeters: [number, number],
-  scaleFactor: number,
-): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = toModelCoords(ring[i], originMeters, scaleFactor);
-    const b = toModelCoords(ring[j], originMeters, scaleFactor);
-    const crosses =
-      a[1] > point.y !== b[1] > point.y &&
-      point.x < ((b[0] - a[0]) * (point.y - a[1])) / (b[1] - a[1]) + a[0];
-    if (crosses) inside = !inside;
-  }
-  return inside;
-}
-
-// distance (m) from a model-space point to a ring, used as a picking fallback.
-// With closed=false it measures to an open polyline instead (a waterway
-// centreline), so the last point does not connect back to the first.
-function ringDistance(
-  ring: [number, number][],
-  point: THREE.Vector3,
-  originMeters: [number, number],
-  scaleFactor: number,
-  closed = true,
-): number {
-  let best = Infinity;
-  const count = ring.length;
-  const segments = closed ? count : count - 1;
-  for (let i = 0; i < segments; i++) {
-    const a = toModelCoords(ring[i], originMeters, scaleFactor);
-    const b = toModelCoords(ring[(i + 1) % count], originMeters, scaleFactor);
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const len2 = dx * dx + dy * dy;
-    const t =
-      len2 > 0
-        ? Math.max(
-            0,
-            Math.min(1, ((point.x - a[0]) * dx + (point.y - a[1]) * dy) / len2),
-          )
-        : 0;
-    const px = a[0] + t * dx;
-    const py = a[1] + t * dy;
-    best = Math.min(best, Math.hypot(point.x - px, point.y - py));
-  }
-  return best;
-}
+// ringContains / ringDistance live in feature_pick.ts: the generic picker and
+// the click handler share them
 
 // Milan
 // const tileCenter: [number, number] = [9.186, 45.497];
@@ -381,6 +380,8 @@ class CoolMap {
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
   // fence/wall lines per loaded tile, for the car's collision
   private loadedBarriers: { [key: string]: BarrierInfo[] } = {};
+  // generic OSM features (trees, benches, parks, rail, ...) per tile, for clicks
+  private loadedFeatures: { [key: string]: FeatureInfo[] } = {};
   // water features per loaded tile, for click-picking
   private loadedWater: { [key: string]: WaterInfo[] } = {};
   // street-furniture points per loaded tile, for click-picking
@@ -1204,6 +1205,7 @@ class CoolMap {
     this.loadedTraffic = {};
     this.loadedBuildings = {};
     this.loadedBarriers = {};
+    this.loadedFeatures = {};
     this.loadedWater = {};
     this.loadedFurniture = {};
     this.loadedFountains = {};
@@ -1278,7 +1280,27 @@ class CoolMap {
             kind === "transit_stop" ||
             kind === "metro_sign") &&
             mesh.visible) ||
-          kind === "terrace"
+          kind === "terrace" ||
+          // trees, cemeteries and painted markings have no visibility toggle;
+          // the rest are their own toggleable meshes
+          kind === "tree" ||
+          kind === "cemetery" ||
+          kind === "road_marking" ||
+          ((kind === "roof" ||
+            kind === "church" ||
+            kind === "bench" ||
+            kind === "green" ||
+            kind === "rail" ||
+            kind === "park_path" ||
+            kind === "power_tower" ||
+            kind === "power_wire" ||
+            kind === "bridge" ||
+            kind === "tunnel" ||
+            kind === "gate" ||
+            kind === "fence" ||
+            kind === "wall" ||
+            kind === "aeroway") &&
+            mesh.visible)
         ) {
           pickable.push(mesh);
         }
@@ -1385,6 +1407,39 @@ class CoolMap {
     if (hit.object.userData.kind === "rooftop") {
       const info = this.rooftopAt(tileKey, point, originMeters, scaleFactor);
       if (info) this.selectRooftop(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    // fences and walls carry their own per-tile lines (the car collision data)
+    const hitKind = hit.object.userData.kind as string | undefined;
+    if (hitKind === "fence" || hitKind === "wall") {
+      const info = barrierAt(
+        this.loadedBarriers[tileKey] ?? [],
+        point,
+        originMeters,
+        scaleFactor,
+        FEATURE_PICK_RADIUS[hitKind] ?? 4,
+      );
+      if (info) this.selectBarrier(info, event.lngLat);
+      else this.clearSelection();
+      return;
+    }
+    // the generic layers (trees, benches, parks, rail, power, ...) share one
+    // picker; the mesh kind maps to the feature kinds to search
+    const featureKinds = hitKind ? FEATURE_PICK_KINDS[hitKind] : undefined;
+    if (featureKinds) {
+      const limit = Math.max(
+        ...featureKinds.map((kind) => FEATURE_PICK_RADIUS[kind] ?? 6),
+      );
+      const info = featureAt(
+        this.loadedFeatures[tileKey] ?? [],
+        featureKinds,
+        point,
+        originMeters,
+        scaleFactor,
+        limit,
+      );
+      if (info) this.selectFeature(info, event.lngLat);
       else this.clearSelection();
       return;
     }
@@ -2012,6 +2067,106 @@ class CoolMap {
       .setLngLat(lngLat)
       .setHTML(lines.join("<br>"))
       .addTo(this.map);
+  }
+
+  // a generic OSM feature: points get a ring, areas and lines just the popup
+  private selectFeature(info: FeatureInfo, lngLat: LngLat) {
+    this.clearSelection();
+    if (info.lon !== undefined && info.lat !== undefined) {
+      const originMeters = epsg4326toEpsg3857(this.tileCenter);
+      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+      const [x, y] = toModelCoords(
+        [info.lon, info.lat],
+        originMeters,
+        scaleFactor,
+      );
+      const radius = info.kind === "tree" || info.kind === "bench" ? 1.5 : 3;
+      this.highlightPoint(x, y, radius);
+    }
+    const lines = [
+      info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
+      escapeHtml(this.featureLabel(info)),
+      osmLink(info.id),
+    ].filter(Boolean);
+    if (lines.length === 0) return;
+    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
+      .setLngLat(lngLat)
+      .setHTML(lines.join("<br>"))
+      .addTo(this.map);
+  }
+
+  // fences and walls are features too; reuse the generic popup
+  private selectBarrier(info: BarrierInfo, lngLat: LngLat) {
+    this.selectFeature(
+      {
+        id: info.id,
+        name: info.name,
+        kind: info.kind,
+        subtype: info.subtype,
+        lines: [info.coords],
+      },
+      lngLat,
+    );
+  }
+
+  private featureLabel(info: FeatureInfo): string {
+    switch (info.kind) {
+      case "tree":
+        return info.subtype === "conifer" ? "Conifer" : "Tree";
+      case "tree_row":
+        return "Tree row";
+      case "bench":
+        return "Bench";
+      case "green":
+        return info.subtype === "dense" ? "Park" : "Green area";
+      case "cemetery":
+        return "Cemetery";
+      case "rail":
+        return info.subtype === "tram" ? "Tram line" : "Railway";
+      case "park_path":
+        return info.subtype === "bike" ? "Cycle path" : "Footpath";
+      case "power_tower":
+        return "Power tower";
+      case "power_line":
+        return "Power line";
+      case "bridge":
+        return info.subtype === "railway" ? "Rail bridge" : "Bridge";
+      case "tunnel":
+        return "Tunnel portal";
+      case "gate":
+        return "Gate";
+      case "aeroway":
+        return info.subtype === "runway"
+          ? "Runway"
+          : info.subtype === "taxiway"
+            ? "Taxiway"
+            : info.subtype === "apron"
+              ? "Apron"
+              : "Helipad";
+      case "road_marking":
+        return info.subtype === "signal"
+          ? "Traffic signal marking"
+          : info.subtype === "give_way"
+            ? "Give-way line"
+            : "Stop line";
+      case "wall": {
+        const labels: Record<string, string> = {
+          retaining_wall: "Retaining wall",
+          city_wall: "City wall",
+          hoarding: "Hoarding",
+        };
+        return labels[info.subtype ?? ""] ?? "Wall";
+      }
+      case "fence": {
+        const labels: Record<string, string> = {
+          guard_rail: "Guard rail",
+          railing: "Railing",
+        };
+        return labels[info.subtype ?? ""] ?? "Fence";
+      }
+      default:
+        return info.kind.replace(/_/g, " ");
+    }
   }
 
   private vehicleAt(raycaster: THREE.Raycaster):
@@ -2692,6 +2847,7 @@ class CoolMap {
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
         delete this.loadedBarriers[k];
+        delete this.loadedFeatures[k];
         delete this.loadedWater[k];
         delete this.loadedFurniture[k];
         delete this.loadedFountains[k];
@@ -2754,6 +2910,7 @@ class CoolMap {
         meshes,
         buildings,
         barriers,
+        features,
         water,
         furniture,
         fountains,
@@ -2793,6 +2950,7 @@ class CoolMap {
       this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
       this.loadedBarriers[tileKey] = barriers;
+      this.loadedFeatures[tileKey] = features;
       this.loadedWater[tileKey] = water;
       this.loadedFurniture[tileKey] = furniture;
       this.loadedFountains[tileKey] = fountains;

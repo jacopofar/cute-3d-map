@@ -523,6 +523,21 @@ is allowed to drive out. A hidden fence or wall layer does not block. Entering
 and leaving the mode send `drive-start` / `drive-stop` events to the perf
 endpoint, when one is configured.
 
+### Clicking features
+
+Every OSM-derived layer opens its popup on click, not just buildings and water:
+trees and tree rows, benches, parks, cemeteries, fences and walls, gates,
+bridges, tunnel portals, rails, park paths, power towers and lines, runways and
+aprons, and the painted stop lines and lane arrows. A building's roof and a
+church cross open the building instead. Each popup shows the name (when mapped),
+a short kind label and the OSM link.
+
+The simple layers share one `FeatureInfo` shape (a point, polylines or outer
+rings) and `src/feature_pick.ts` picks the nearest one in the hit tile, so a
+click on a merged per-tile mesh never needs per-feature meshes. A hidden layer is
+not pickable. Sidewalks and street lamps are authored by the generator rather
+than mapped as individual features, so they stay out of the popup.
+
 ### Loop report
 
 Because loop length is the main tuning knob, the generator writes a report

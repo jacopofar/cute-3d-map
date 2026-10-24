@@ -14,6 +14,7 @@ export default defineConfig({
         "src/traffic_math.ts",
         "src/driving.ts",
         "src/collision.ts",
+        "src/feature_pick.ts",
         "src/elements3d/facade_layout.ts",
         "src/elements3d/roof_layout.ts",
         "src/elements3d/bridge_layout.ts",
