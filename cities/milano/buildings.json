@@ -5,14 +5,16 @@
       "facade": {
         "windows": false,
         "balconies": false
-      }
+      },
+      "roof_color": "#d8c7a6"
     },
     "relation/1918": {
       "color": "#a65f4a",
       "facade": {
         "windows": false,
         "balconies": false
-      }
+      },
+      "roof_color": "#a65f4a"
     }
   }
 }

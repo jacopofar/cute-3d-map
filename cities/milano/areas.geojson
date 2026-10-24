@@ -10,7 +10,8 @@
         "facade": {
           "windows": false,
           "balconies": false
-        }
+        },
+        "roof_color": "#d8c7a6"
       },
       "geometry": {
         "type": "Polygon",
@@ -769,7 +770,8 @@
         "facade": {
           "windows": false,
           "balconies": false
-        }
+        },
+        "roof_color": "#a65f4a"
       },
       "geometry": {
         "type": "Polygon",
@@ -865,7 +867,7 @@
       "properties": {
         "name": "ASST Grande Ospedale Metropolitano Niguarda",
         "color": "#f4f4f4",
-        "roof_color": "#ffffff"
+        "roof_color": "#f4f4f4"
       },
       "geometry": {
         "type": "Polygon",
