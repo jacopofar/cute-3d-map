@@ -173,3 +173,23 @@ body {
   color: #667;
   font-size: 11px;
 }
+
+/* small GLTF download affordance in the building popup */
+.gltf-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #667;
+  border-radius: 3px;
+  color: #334;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: middle;
+}
+.gltf-link:hover {
+  background: #eef;
+}

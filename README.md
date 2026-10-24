@@ -103,8 +103,8 @@ The project has two halves:
    so roofs are always there rather than zoom-gated. Footprints that are concave,
    have a courtyard, or have more than 8 corners stay flat: the ridge fan that
    builds the pitched shapes breaks up on those. There
-   is also a (commented out) GLTFExporter
-   path to download the current scene as a `.glb`.
+   Each building popup has a **G** button that downloads that building's walls
+   and roof as a `.glb` (Three.js `GLTFExporter`).
 
 ### Imputed tags
 
@@ -122,6 +122,7 @@ anything it cannot draw (e.g. `roof:shape=skillion`) to a flat roof.
 Clicking a building inspects it: the popup shows its name and address, height,
 wall color, roof shape and roof color (with a swatch), marks the values tilegen
 had to impute, and links to the feature's OSM page when the tile carries an id.
+The popup also has a **G** button that downloads the building as a `.glb`.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
 **roof shapes**, **water**, **church crosses**, **parked cars**, **lamp posts**
 and **imputed colors** on and off, with a question mark beside the last one
