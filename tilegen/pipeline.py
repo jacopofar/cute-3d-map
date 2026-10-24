@@ -72,6 +72,7 @@ from features import (
 )
 from geo import TILE_ZOOM, coord_to_tile, tile_lonlat_bounds
 from gtfs import load_gtfs_fleets
+from gtfs_routes import write_gtfs_route_report
 from impute import IMPUTED_FIELDS, Distribution
 from lamps import lamp_spots
 from loaders import (
@@ -558,6 +559,8 @@ def _traffic_layers(
     )
     if report_dir is not None:
         write_loop_report(fleets, report_dir, report_polygon, crossing_points)
+        if gtfs_path is not None:
+            write_gtfs_route_report(gtfs_path, report_dir)
     return traffic_by_tile
 
 

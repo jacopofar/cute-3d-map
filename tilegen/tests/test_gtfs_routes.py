@@ -1,6 +1,6 @@
 import json
 
-from gtfs_routes import geojson_collection, reverse_pairs
+from gtfs_routes import geojson_collection, reverse_pairs, write_gtfs_route_report
 
 
 def test_geojson_collection_is_a_feature_collection():
@@ -26,6 +26,32 @@ def test_geojson_collection_is_a_feature_collection():
     assert len(collection["features"]) == 1
     assert collection["features"][0]["geometry"]["type"] == "LineString"
     json.dumps(collection)  # must be serializable
+
+
+def test_write_gtfs_route_report_writes_both_files(tmp_path, monkeypatch):
+    shape = {
+        "shape_id": "a",
+        "route_id": "R",
+        "line": "1",
+        "route": "one",
+        "kind": "bus",
+        "route_type": "bus",
+        "color": None,
+        "trip_count": 1,
+        "directions": {"0": 1},
+        "headsigns": ["A"],
+        "coords": [(9.0, 45.0), (9.01, 45.0)],
+        "length_m": 786.0,
+        "closed": False,
+    }
+    monkeypatch.setattr("gtfs_routes.read_route_shapes", lambda _path: [shape])
+    geojson_path, summary_path = write_gtfs_route_report(
+        tmp_path / "feed.zip", tmp_path / "report"
+    )
+    assert geojson_path.exists()
+    assert summary_path.exists()
+    assert "FeatureCollection" in geojson_path.read_text()
+    assert "Shapes: 1" in summary_path.read_text()
 
 
 def test_reverse_pairs_marks_both_directions():

@@ -8,6 +8,10 @@ Usage:
 `--polygon-filter` expects a GeoJSON polygon to be used as a filter.
 If missing the whole data in the PBF file is used
 
+If `--gtfs` is supplied and the report is enabled, the report directory also
+gets `gtfs-routes.geojson` and `gtfs-routes.md` for inspecting the feed's
+directional and already-paired shapes.
+
 ## Traffic loop cache
 
 Building the vehicle loops is one of the slowest steps (tens of minutes for a

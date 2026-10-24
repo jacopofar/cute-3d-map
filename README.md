@@ -400,6 +400,10 @@ uv run gtfs_routes.py --gtfs ../gtfs.zip \
 
 Each feature carries the route, line, direction counts, headsigns, length,
 closed flag and `reverse_of` when another shape is its opposite direction.
+When tilegen itself is run with both `--gtfs` and `--report`, it writes
+`gtfs-routes.geojson` and `gtfs-routes.md` into the report directory
+automatically; the standalone command above is for inspecting a feed without
+rebuilding tiles.
 
 ### Power lines and pylons
 

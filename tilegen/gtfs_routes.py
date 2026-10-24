@@ -52,11 +52,6 @@ def summary(shapes: list[dict], pairs: dict[str, str]) -> str:
     blank = sum(1 for shape in shapes if "" in shape["directions"])
     closed = sum(1 for shape in shapes if shape["closed"])
     routes = {shape["route_id"] for shape in shapes if shape["route_id"]}
-    multi = sum(
-        1
-        for route_shapes in defaultdict(list, {route: [] for route in routes}).values()
-        if len(route_shapes) > 1
-    )
     route_shape_counts = Counter(
         shape["route_id"] for shape in shapes if shape["route_id"]
     )
@@ -125,6 +120,19 @@ def geojson_collection(shapes: list[dict], pairs: dict[str, str]) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
+def write_gtfs_route_report(gtfs_path: Path, report_dir: Path) -> tuple[Path, Path]:
+    """Write the GTFS route GeoJSON and summary into a tilegen report dir."""
+    shapes = read_route_shapes(gtfs_path)
+    pairs = reverse_pairs(shapes)
+    collection = geojson_collection(shapes, pairs)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    geojson_path = report_dir / "gtfs-routes.geojson"
+    summary_path = report_dir / "gtfs-routes.md"
+    geojson_path.write_text(json.dumps(collection, indent=2) + "\n")
+    summary_path.write_text(summary(shapes, pairs))
+    return geojson_path, summary_path
+
+
 @click.command()
 @click.option(
     "--gtfs",
@@ -150,6 +158,7 @@ def geojson_collection(shapes: list[dict], pairs: dict[str, str]) -> dict:
 )
 def main(gtfs_path: Path, output: Path, summary_path: Path) -> None:
     """Export GTFS route shapes and print their direction situation."""
+    # Keep the standalone CLI behaviour: explicit output paths win.
     shapes = read_route_shapes(gtfs_path)
     pairs = reverse_pairs(shapes)
     collection = geojson_collection(shapes, pairs)
