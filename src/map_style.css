@@ -193,3 +193,69 @@ body {
 .gltf-link:hover {
   background: #eef;
 }
+
+/* Car mode: a bottom-center pill toggles the chase camera, and a small HUD
+   above it shows the speed and the keys. The HUD ignores the pointer so a
+   click passes through to the map. */
+#drive-button {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+  color: #213547;
+  font: 600 13px sans-serif;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+#drive-button:hover {
+  background: #fff;
+}
+
+/* while driving the same button leaves the mode, so it reads as the active
+   control rather than a neutral one */
+#drive-button[aria-pressed="true"] {
+  background: #213547;
+  color: #fff;
+}
+
+#drive-hud {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: rgba(20, 25, 32, 0.66);
+  color: #fff;
+  font: 13px sans-serif;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+#drive-hud[hidden] {
+  display: none;
+}
+
+#drive-hud #drive-speed {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+#drive-hud .drive-hint {
+  color: #cdd4dc;
+  font-size: 11px;
+}

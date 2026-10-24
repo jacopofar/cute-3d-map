@@ -506,6 +506,23 @@ the layer only exists above zoom 17 and only for the 3x3 tiles around the
 centre: the fully loaded 7x7 window would be ~370k cars, almost all off-screen.
 The **parked cars** checkbox is a plain visibility switch.
 
+### Drive mode
+
+The **Drive** button at the bottom of the page drops a red car onto the nearest
+precomputed car route and hands it to WASD (the arrow keys work too): W/S
+accelerate, brake and reverse, A/D steer, and Escape leaves. The camera chases
+it at a fixed zoom and pitch, looking a little ahead of the car, so the map's
+own pan/zoom gestures are disabled while driving. A HUD shows the speed and the
+keys.
+
+The car is a small arcade model (`src/driving.ts`), not a simulation: speed and
+heading are integrated in substeps, and `src/collision.ts` tests the car's
+rectangle against building footprints and fence/wall lines from the loaded
+tiles. A blocked step slides along the free axis, and an already-overlapping car
+is allowed to drive out. A hidden fence or wall layer does not block. Entering
+and leaving the mode send `drive-start` / `drive-stop` events to the perf
+endpoint, when one is configured.
+
 ### Loop report
 
 Because loop length is the main tuning knob, the generator writes a report
