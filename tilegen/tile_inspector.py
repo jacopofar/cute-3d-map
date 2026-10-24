@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import click
+
 from geo import TILE_ZOOM, coord_to_tile
 
 Point = tuple[float, float]

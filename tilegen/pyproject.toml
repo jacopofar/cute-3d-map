@@ -48,3 +48,21 @@ source = [
 # a floor, not a goal: keep the pure modules covered while main.py's I/O shell
 # stays untested
 fail_under = 80
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "city",
+    "features",
+    "geo",
+    "gtfs",
+    "gtfs_routes",
+    "impute",
+    "lamps",
+    "loaders",
+    "main",
+    "parking",
+    "pipeline",
+    "sidewalks",
+    "tile_inspector",
+    "traffic",
+]

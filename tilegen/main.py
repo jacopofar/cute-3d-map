@@ -11,6 +11,9 @@ from pathlib import Path
 import click
 import quackosm as qosm
 import shapely
+from shapely.geometry.base import BaseGeometry
+
+from city import CityError
 from features import (  # noqa: F401 - re-exported for the existing API/tests
     _LEVEL_RE,
     _METERS_PER_DEGREE,
@@ -156,7 +159,6 @@ from pipeline import (  # noqa: F401 - re-exported for the existing API/tests
     tile_to_geojson,
     write_loop_report,
 )
-from shapely.geometry.base import BaseGeometry
 from sidewalks import SidewalkLine, sidewalk_centerlines  # noqa: F401
 from traffic import (
     road_oneway,  # noqa: F401 - re-exported for tests
@@ -172,6 +174,7 @@ logging.basicConfig(
 # data/ is local-only, so if the file is missing the report GeoJSON keeps every
 # loop instead of failing.
 DEFAULT_REPORT_POLYGON = Path("../data/milano_polygon.json")
+DEFAULT_CITY_DIR = Path(__file__).resolve().parent.parent / "cities" / "milano"
 
 
 def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -> Path:
@@ -244,6 +247,16 @@ def pbf_to_parquet(input_pbf: Path, borders_shape: BaseGeometry | None = None) -
     ),
 )
 @click.option(
+    "--city-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=DEFAULT_CITY_DIR,
+    show_default=False,
+    help=(
+        "City profile directory (city.json, buildings.json, vehicles.json); "
+        "defaults to cities/milano. Missing files keep the Milan defaults."
+    ),
+)
+@click.option(
     "--gtfs",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
@@ -279,6 +292,7 @@ def main(
     report: bool,
     report_dir: Path,
     report_polygon: Path | None,
+    city_dir: Path | None,
     gtfs: Path | None,
     cache: bool,
     cache_dir: Path,
@@ -300,20 +314,24 @@ def main(
             report_shape = shapely.from_geojson(polygon_path.read_text())
     gpq_path = pbf_to_parquet(input_pbf, borders_shape=borders_shape)
     print(f"Extracted: {gpq_path}")
-    parquet_to_tiles(
-        gpq_path,
-        output,
-        raw_output if raw else None,
-        borders_shape=borders_shape,
-        traffic=traffic,
-        parking=parking,
-        lamps=lamps,
-        report_dir=report_dir if report and traffic else None,
-        report_polygon=report_shape,
-        cache_dir=cache_dir,
-        use_cache=cache,
-        gtfs_path=gtfs,
-    )
+    try:
+        parquet_to_tiles(
+            gpq_path,
+            output,
+            raw_output if raw else None,
+            borders_shape=borders_shape,
+            traffic=traffic,
+            parking=parking,
+            lamps=lamps,
+            report_dir=report_dir if report and traffic else None,
+            report_polygon=report_shape,
+            cache_dir=cache_dir,
+            use_cache=cache,
+            gtfs_path=gtfs,
+            city_dir=city_dir,
+        )
+    except CityError as error:
+        raise click.ClickException(str(error)) from error
 
 
 if __name__ == "__main__":

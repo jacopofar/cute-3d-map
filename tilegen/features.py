@@ -15,8 +15,10 @@ from dataclasses import dataclass
 from math import atan2, cos, degrees, radians
 
 import shapely
-from impute import impute
 from shapely.geometry import LineString, Point
+
+from city import BuildingOverride
+from impute import impute
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +187,12 @@ def to_power_line(feature_id, tags, s, tile_box) -> list[dict]:
 
 
 def to_building(
-    feature_id, tags, s, distributions=None, solar_buildings=None
+    feature_id,
+    tags,
+    s,
+    distributions=None,
+    solar_buildings=None,
+    override: BuildingOverride | None = None,
 ) -> dict | None:
     """Build a building or building-part feature with imputed tags."""
     if s.geom_type == "Point":
@@ -199,6 +206,16 @@ def to_building(
     height = building_top(tags, base)
 
     values, sampled = impute(tags, feature_id, distributions or {})
+    if override is not None:
+        if override.color:
+            values["color"] = override.color
+            sampled = [field for field in sampled if field != "color"]
+        if override.roof_color:
+            values["roof_color"] = override.roof_color
+            sampled = [field for field in sampled if field != "roof_color"]
+        if override.roof_shape:
+            values["roof_shape"] = override.roof_shape
+            sampled = [field for field in sampled if field != "roof_shape"]
     properties = {
         "cmtype": "building",
         "height": height,
@@ -221,6 +238,7 @@ def to_building(
         # a sample from the dataset's own distribution (see tilegen/impute.py).
         # `imputed` names the fields that were sampled rather than tagged.
         **values,
+        "facade": override.facade if override else None,
         "imputed": sampled or None,
         # a building carrying mapped solar panels keeps a flat top so the
         # panels sit on it instead of disappearing inside a pitched roof

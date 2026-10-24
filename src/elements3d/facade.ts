@@ -355,6 +355,9 @@ export function tileFacadeDetail(
     // a curtain wall is glass end to end: windows, balconies and a door would
     // all be painted on the panes, so it gets none of this detail
     if (info.glass) continue;
+    const showWindows = info.facade?.windows !== false;
+    const showBalconies = info.facade?.balconies !== false;
+    if (!showWindows && !showBalconies) continue;
     const first = info.rings[0]?.[0];
     const edges: Edge[] = [];
     for (const ring of info.rings) {
@@ -394,18 +397,20 @@ export function tileFacadeDetail(
         for (let floor = 0; floor < bands.length; floor++) {
           const band = bands[floor];
           const lit = !buildingDark && lightRng() < LIT_WINDOW_FRACTION ? 1 : 0;
-          pushQuad(
-            windows,
-            along(edge, column.start),
-            along(edge, column.start + column.width),
-            band.start,
-            band.start + band.width,
-            edge.normal,
-            windowColor,
-            lit,
-            1,
-          );
-          if (columnBalconies.includes(floor)) {
+          if (showWindows) {
+            pushQuad(
+              windows,
+              along(edge, column.start),
+              along(edge, column.start + column.width),
+              band.start,
+              band.start + band.width,
+              edge.normal,
+              windowColor,
+              lit,
+              1,
+            );
+          }
+          if (showBalconies && columnBalconies.includes(floor)) {
             pushBalcony(
               balconies,
               edge,
@@ -424,7 +429,7 @@ export function tileFacadeDetail(
       base < 0.5 && longest && usableHeight > DOOR_HEIGHT + 0.1
         ? doorSpan(longest.length)
         : null;
-    if (longest && door) {
+    if (showWindows && longest && door) {
       pushQuad(
         windows,
         along(longest, door.start),

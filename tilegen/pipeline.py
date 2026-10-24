@@ -9,9 +9,13 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 import duckdb
 import shapely
+from shapely.geometry.base import BaseGeometry
+
+from city import CityProfile, load_city
 from features import (
     AEROWAY_AREA_KINDS,
     AEROWAY_LINE_KINDS,
@@ -91,7 +95,6 @@ from loaders import (
     terrace_positions_from_parquet,
 )
 from parking import parking_rows
-from shapely.geometry.base import BaseGeometry
 from sidewalks import sidewalk_centerlines
 from traffic import (
     CAR_CONFIG,
@@ -136,6 +139,7 @@ def _render_feature(
     road_data: dict[int, RoadData] | None,
     gate_bearings: dict[int, float] | None,
     solar_buildings: set[str] | None,
+    city: CityProfile | None,
 ) -> list:
     """Dispatch one OSM feature to its render builder(s).
 
@@ -151,7 +155,18 @@ def _render_feature(
         # becomes a portal
         return to_tunnel(feature_id, tags, s, tile_box)
     if "building" in tags or "building:part" in tags:
-        return [to_building(feature_id, tags, s, distributions, solar_buildings)]
+        return [
+            to_building(
+                feature_id,
+                tags,
+                s,
+                distributions,
+                solar_buildings,
+                city.building_override(feature_id, tags, cast(BaseGeometry, s))
+                if city
+                else None,
+            )
+        ]
     if tags.get("natural") == "tree":
         return [to_tree(feature_id, tags, s)]
     if tags.get("natural") == "tree_row":
@@ -228,6 +243,7 @@ def tile_to_geojson(
     road_data: dict[int, RoadData] | None = None,
     gate_bearings: dict[int, float] | None = None,
     solar_buildings: set[str] | None = None,
+    city: CityProfile | None = None,
 ) -> tuple[list, list]:
     """Build the render features and the raw-tag features for one tile.
 
@@ -262,6 +278,7 @@ def tile_to_geojson(
                 road_data,
                 gate_bearings,
                 solar_buildings,
+                city,
             )
         )
     return [feature for feature in render if feature is not None], raw
@@ -528,6 +545,7 @@ def _traffic_layers(
     use_cache: bool,
     report_dir: Path | None,
     report_polygon: BaseGeometry | None,
+    city: CityProfile | None,
 ) -> dict[tuple[int, int], list[dict]]:
     """Build every fleet and split its runs per tile."""
     logger.info("Building global traffic loops")
@@ -543,7 +561,7 @@ def _traffic_layers(
     logger.info(f"{len(crossing_points)} crossing points (signals and crossings)")
     fleets = load_or_build_fleets(ways_by_kind, configs, cache_dir, use_cache)
     if gtfs_path is not None:
-        gtfs_fleets = load_gtfs_fleets(gtfs_path)
+        gtfs_fleets = load_gtfs_fleets(gtfs_path, city=city)
         fleets.update(gtfs_fleets)
         logger.info(
             "GTFS paths: %s",
@@ -656,6 +674,7 @@ def _write_tile(
     traffic_loops: list[dict] | None,
     parking_here: list[dict] | None,
     lamps_here: list[list[float]] | None,
+    city: CityProfile | None,
 ) -> None:
     """Render and write one tile document (and its raw twin when requested)."""
     target_path = target_folder / str(x)
@@ -674,6 +693,7 @@ def _write_tile(
         road_data,
         gate_bearings,
         solar_buildings,
+        city,
     )
     if sidewalk_here:
         render.extend(sidewalk_here)
@@ -715,10 +735,12 @@ def parquet_to_tiles(
     cache_dir: Path = Path("cache"),
     use_cache: bool = True,
     gtfs_path: Path | None = None,
+    city_dir: Path | None = None,
 ) -> None:
     """Build every render tile from one parquet, including optional layers."""
     duckdb.load_extension("spatial")
     zoom = TILE_ZOOM
+    city = load_city(city_dir)
     distributions = building_distributions(input_parquet)
     terrace_positions = terrace_positions_from_parquet(input_parquet)
     level_report(input_parquet)
@@ -732,6 +754,7 @@ def parquet_to_tiles(
             use_cache,
             report_dir,
             report_polygon,
+            city,
         )
         if traffic
         else {}
@@ -780,4 +803,5 @@ def parquet_to_tiles(
             traffic_loops=traffic_by_tile.get((x, y)),
             parking_here=parking_by_tile.get((x, y)),
             lamps_here=lamp_by_tile.get((x, y)),
+            city=city,
         )

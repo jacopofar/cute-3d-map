@@ -1,13 +1,14 @@
 import json
 
 import duckdb
+import shapely
+from shapely.geometry.base import BaseGeometry
+
 import geo
 import impute
 import main
 import pipeline
-import shapely
 import traffic
-from shapely.geometry.base import BaseGeometry
 
 POLYGON = "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"
 

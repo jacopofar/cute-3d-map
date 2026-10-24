@@ -1,8 +1,9 @@
 import collections
 import random
 
-import impute
 import pytest
+
+import impute
 from impute import Distribution
 
 

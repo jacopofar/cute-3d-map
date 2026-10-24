@@ -529,7 +529,12 @@ Prerequisites: Node (with npm) and [uv](https://docs.astral.sh/uv/) for tilegen.
 
 Generate tiles with:
 
-    uv run main.py ../data/milano_20261016.pbf --polygon-filter ../data/milano_polygon.json --output ../public/tiles --no-raw
+```bash
+cd tilegen
+uv run main.py ../data/milano_20261016.pbf \
+  --polygon-filter ../data/milano_polygon.json \
+  --output ../public/tiles --no-raw
+```
 
 ```bash
 npm install
@@ -640,6 +645,24 @@ printed, so a run can be kept next to a commit. Two gotchas when comparing:
   (default 250 ms). Regressions in the *ratio* are what the test is for; the
   absolute numbers are for the human reading `perf-results`.
 
+## City profiles
+
+`tilegen` can read optional per-city overrides from a folder:
+
+```bash
+cd tilegen
+uv run main.py ../data/city.pbf \
+  --polygon-filter ../data/city_polygon.json \
+  --city-dir ../cities/milano \
+  --output ../public/tiles --no-raw
+```
+
+The folder may contain `city.json`, `buildings.json`, `areas.geojson`,
+`vehicles.json` and an `assets/` directory. Building colors, roof colors/shapes and per-building
+windows/balconies can be overridden by OSM id or exact name, or by polygons in
+`areas.geojson`; GTFS line colors can be overridden by line or route id. Missing files keep the Milan defaults.
+See `cities/README.md` for the schemas.
+
 ## Inspecting tiles
 
 `tilegen/tile_inspector.py` renders a flat SVG or PNG of an area directly from
@@ -666,29 +689,31 @@ filter the area, then from the `tilegen/` directory:
 
 ```bash
 cd tilegen
-uv run main.py ../data/milano_extract.osm.pbf --polygon-filter ../data/milano_polygon.json
+uv run main.py ../data/milano_20261016.pbf \
+  --polygon-filter ../data/milano_polygon.json \
+  --output ../public/tiles --no-raw
 ```
 
-This writes render-ready tiles to `tilegen/tiles/` and, alongside, "raw" tiles
-with all OSM tags to `tilegen/raw_tiles/` (useful for future renderers).
-Copy/move the `tiles/` output into `public/tiles/` so the frontend can fetch it,
-or write it there directly with `--output ../public/tiles` (and `--no-raw` to
-skip the raw tiles).
+The command above writes directly to `public/tiles/` and skips the raw-tag
+tiles. Without `--output`, the render tiles go to `tilegen/tiles/` and the raw
+tiles to `tilegen/raw_tiles/`; copy the render tiles into `public/tiles/` if you
+use that layout. Pass `--no-raw` to skip the raw tiles.
 
 By default the run also precomputes the vehicle routes (see "Precomputed
 traffic" above) and writes them into the tiles; pass `--no-traffic` to skip
 that step and emit only the geometry tiles. With traffic on it also writes the
 loop report into `tilegen/report/` (`--report-dir` to move it, `--no-report` to
-skip). Pass `--gtfs gtfs.zip` to use the GTFS feed for bus and tram routes; the
-file is optional and currently local-only.
+skip). Pass `--gtfs ../gtfs.zip` to use the GTFS feed for bus and tram routes;
+the file is optional and currently local-only. `--city-dir ../cities/milano`
+selects the city profile (it is the default when present); see "City profiles"
+above.
 
 `gtfs.zip` is ignored by git; keep it next to `pyproject.toml` and pass
 `--gtfs ../gtfs.zip` from `tilegen/` when rebuilding.
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
-works. Features currently handled: `building`, `natural=tree`,
-`natural=tree_row`, and `highway=traffic_signals` / `highway=crossing` (as
-points); everything else is skipped.
+works. The tile schema at the top of this README is the current list of emitted
+`cmtype` layers.
 
 `tilegen/` is checked by Ruff and [`ty`](https://docs.astral.sh/ty/) via
 pre-commit (config at the repo root). After `uv sync --group dev` in `tilegen/`,
