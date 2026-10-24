@@ -215,6 +215,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - `tilegen/` — Python (uv, ruff, ty) offline tile generator; output lands in
   `public/tiles/{x}/{y}.json`.
 - `tilegen/geo.py` — slippy-tile helpers shared by the generator.
+- `tilegen/city.py` — optional city profile loader/validator
+  (`cities/<name>/city.json`, `buildings.json`, `vehicles.json`). Applies
+  building color/roof/facade overrides and GTFS line colors; missing files keep
+  the Milan defaults.
 - `tilegen/features.py` — pure OSM-tag predicates and tile feature builders
   (`to_building`, `to_water`, `to_park_path`, ...). No parquet I/O; the loaders
   and pipeline import it.

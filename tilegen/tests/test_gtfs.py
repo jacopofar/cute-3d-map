@@ -1,5 +1,6 @@
 import zipfile
 
+from city import CityProfile
 from gtfs import load_gtfs_fleets, read_route_shapes
 
 ROUTES = """route_id,route_short_name,route_long_name,route_type,route_color
@@ -56,3 +57,5 @@ def test_gtfs_shapes_become_bus_and_tram_loops(tmp_path):
     assert bus_shape["line"] == "1"
     assert bus_shape["directions"] == {"": 1}
     assert bus_shape["closed"] is False
+    colored = load_gtfs_fleets(path, city=CityProfile(vehicle_by_line={"1": "f2c94c"}))
+    assert colored["bus"][0].vehicles[0]["color"] == "f2c94c"

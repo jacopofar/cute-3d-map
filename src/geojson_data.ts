@@ -462,6 +462,8 @@ export interface BuildingInfo {
   // a tagged curtain wall: no windows, balconies or door, and the walls get
   // their own glass material (see elements3d/glass.ts)
   glass?: boolean;
+  // optional city-profile flags; absent means the normal procedural detail
+  facade?: { windows?: boolean; balconies?: boolean };
 }
 
 // a street-furniture point, for click-picking + the OSM link
@@ -911,6 +913,10 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     religion: props.religion as string | undefined,
     // the flag, or the raw tags on a tile generated before it existed
     glass: isGlass(props),
+    facade:
+      props.facade && typeof props.facade === "object"
+        ? (props.facade as BuildingInfo["facade"])
+        : undefined,
   };
 }
 

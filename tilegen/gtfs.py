@@ -22,6 +22,7 @@ from itertools import pairwise
 from pathlib import Path
 
 import shapely
+from city import CityProfile
 from shapely.geometry import Point
 from shapely.ops import substring
 from traffic import Loop, TrafficConfig, assign_vehicles, haversine_m
@@ -337,6 +338,7 @@ def load_gtfs_fleets(
     path: Path,
     bus_config: TrafficConfig = BUS_GTFS_CONFIG,
     tram_config: TrafficConfig = TRAM_GTFS_CONFIG,
+    city: CityProfile | None = None,
 ) -> dict[str, list[Loop]]:
     """Build one-way bus/tram loops from a GTFS zip.
 
@@ -370,17 +372,13 @@ def load_gtfs_fleets(
             )
         if loop is not None:
             fleets[kind].append(loop)
+    colors = {shape["shape_id"]: shape.get("color") for shape in shapes}
     for kind, loops in fleets.items():
         assign_vehicles(loops, configs[kind])
         for loop in loops:
-            color = next(
-                (
-                    shape.get("color")
-                    for shape in shapes
-                    if loop.id.endswith(shape["shape_id"])
-                ),
-                None,
-            )
+            shape_id = loop.id.removeprefix(f"gtfs-{kind}-")
+            color = city.vehicle_color(loop.meta) if city else None
+            color = color or colors.get(shape_id)
             if color:
                 for vehicle in loop.vehicles:
                     vehicle["color"] = color

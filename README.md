@@ -640,6 +640,24 @@ printed, so a run can be kept next to a commit. Two gotchas when comparing:
   (default 250 ms). Regressions in the *ratio* are what the test is for; the
   absolute numbers are for the human reading `perf-results`.
 
+## City profiles
+
+`tilegen` can read optional per-city overrides from a folder:
+
+```bash
+cd tilegen
+uv run main.py ../data/city.pbf \
+  --polygon-filter ../data/city_polygon.json \
+  --city-dir ../cities/milano \
+  --output ../public/tiles --no-raw
+```
+
+The folder may contain `city.json`, `buildings.json`, `vehicles.json` and an
+`assets/` directory. Building colors, roof colors/shapes and per-building
+windows/balconies can be overridden by OSM id or exact name; GTFS line colors
+can be overridden by line or route id. Missing files keep the Milan defaults.
+See `cities/README.md` for the schemas.
+
 ## Inspecting tiles
 
 `tilegen/tile_inspector.py` renders a flat SVG or PNG of an area directly from

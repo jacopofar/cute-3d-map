@@ -44,6 +44,19 @@ describe("tileFacadeDetail", () => {
     expect(detail.windows!.getAttribute("color").count).toBe(position.count);
   });
 
+  it("honours per-building windows/balconies overrides", () => {
+    const noWindows = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building({ height: 30, facade: { windows: false, balconies: true } }),
+    ]);
+    expect(noWindows.windows).toBeNull();
+    expect(noWindows.balconies).not.toBeNull();
+    const noDetail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
+      building({ height: 30, facade: { windows: false, balconies: false } }),
+    ]);
+    expect(noDetail.windows).toBeNull();
+    expect(noDetail.balconies).toBeNull();
+  });
+
   it("returns empty groups when there is nothing to emit", () => {
     // a building too low for any window and any door
     const detail = tileFacadeDetail(ORIGIN_METERS, SCALE, [
@@ -255,7 +268,8 @@ describe("tileFacadeDetail", () => {
         Math.abs(color.getX(q) - DOOR.r) < 1e-6 &&
         Math.abs(color.getY(q) - DOOR.g) < 1e-6 &&
         Math.abs(color.getZ(q) - DOOR.b) < 1e-6;
-      for (let v = 0; v < 6; v++) expect(frame.getX(q + v)).toBe(isDoor ? 0 : 1);
+      for (let v = 0; v < 6; v++)
+        expect(frame.getX(q + v)).toBe(isDoor ? 0 : 1);
       if (!isDoor) windowQuads++;
     }
     expect(windowQuads).toBeGreaterThan(0);
