@@ -243,8 +243,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   runs with both `--gtfs` and `--report`, `pipeline._traffic_layers` calls this
   into the report directory automatically.
 - `tilegen/gtfs.py` — optional GTFS zip reader. Uses the feed's shapes as
-  out-and-back bus/tram loops (route types 3/11 and 0), assigns vehicles with
-  `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign
+  one-way bus/tram loops in the feed direction (route types 3/11 and 0), uses
+  `stop_times.txt` for segment travel times and stop dwell, assigns vehicles
+  with `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign
   metadata for the moving-vehicle popup. The feed is opt-in via `--gtfs`; the
   default OSM rail logic remains when it is absent.
 - `tilegen/features.py` walls/gates — `WALL_BARRIERS`, `GATE_BARRIERS`,
@@ -414,9 +415,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   eases down from 60 m out to ~15% of cruise and back over ~255 m, on green it
   nudges up and settles. Both bumps are smooth and return to zero, so the loop's
   path and timing are unchanged — nothing waits.
-- **GTFS path** — an out-and-back loop built from one GTFS `shapes.txt` shape;
-  route type 3/11 becomes a bus and type 0 a tram. The loop metadata names the
-  line, route and headsign.
+- **GTFS path** — a one-way loop built from one GTFS `shapes.txt` shape in its
+  feed direction; route type 3/11 becomes a bus and type 0 a tram. Stop times
+  set segment travel times and dwell. The loop metadata names the line, route
+  and headsign.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
 - **parking row / parked car** — a kerb line authored by tilegen with a style

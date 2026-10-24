@@ -216,6 +216,23 @@ def test_loops_to_tiles_shares_geometry_and_vehicles():
     assert entry["runs"][0]["t0"] == 0.0
 
 
+def test_scheduled_loop_keeps_stop_dwell():
+    loop = traffic.Loop(
+        id="gtfs-test",
+        segs=[[(9.18, 45.5), (9.181, 45.5)]],
+        seg_speeds=[10.0],
+        length=78.0,
+        period=15.0,
+        seg_times=[10.0],
+        seg_dwells=[5.0],
+        kind="bus",
+    )
+    runs = traffic.split_runs(loop, 15)
+    assert runs
+    assert runs[-1][2] == pytest.approx(15.0)
+    assert runs[-1][3][-1] == runs[-1][3][-2]
+
+
 def test_loop_metadata_survives_tiles_and_cache():
     _, loops = find(square_ways(9.18, 45.5, 0.001))
     loops[0].meta = {"line": "1", "type": "tram"}

@@ -10,7 +10,8 @@ If missing the whole data in the PBF file is used
 
 If `--gtfs` is supplied and the report is enabled, the report directory also
 gets `gtfs-routes.geojson` and `gtfs-routes.md` for inspecting the feed's
-directional and already-paired shapes.
+directional and already-paired shapes. GTFS shapes are used one-way in the feed
+direction; `stop_times.txt` supplies travel times and stop dwell.
 
 ## Traffic loop cache
 

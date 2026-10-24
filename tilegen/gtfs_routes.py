@@ -79,9 +79,9 @@ def summary(shapes: list[dict], pairs: dict[str, str]) -> str:
             "",
             "## Reading the result",
             "",
-            "Shapes with a reverse partner are already directional pairs; they should",
-            "not be mirrored again. Shapes without a partner and with a blank",
-            "direction_id are the ambiguous ones to inspect in the GeoJSON.",
+            "Shapes with a reverse partner are separate directional trips; they are",
+            "not mirrored. Shapes with a blank direction_id are the ambiguous ones to",
+            "inspect in the GeoJSON.",
         ]
     )
     return "\n".join(lines) + "\n"

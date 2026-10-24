@@ -463,11 +463,14 @@ is a stateless renderer that samples it. There is no runtime simulation.
   highways (up to 15k vehicles across the 1000 loops) and trains/trams on
   `railway=rail`/`tram` (spacing 800 m, orange).
 - With `--gtfs gtfs.zip`, the feed supplies the bus and tram paths instead:
-  `shapes.txt` becomes an out-and-back loop per shape, route type 3/11 is a
-  bus and type 0 a tram, and only `railway=rail` remains in the OSM train
-  fleet. The feed's route short name, long name and trip headsign travel with
-  the loop; clicking a moving bus/tram opens a popup with its line and
-  direction. The feed is optional and ignored without `--traffic`.
+  each `shapes.txt` shape is a one-way loop in its GTFS direction, route type
+  3/11 is a bus and type 0 a tram, and only `railway=rail` remains in the OSM
+  train fleet. `stop_times.txt` supplies segment travel times and a short dwell
+  at each stop; there is no synthetic return trip, so a vehicle pops at the end
+  of a shape and reappears at its start. The feed's route short name, long name
+  and trip headsign travel with the loop; clicking a moving bus/tram opens a
+  popup with its line and direction and starts following it. The feed is
+  optional and ignored without `--traffic`.
 - Vehicles slow down at **signals and crossings**, cosmetically only. The tiles
   carry the OSM `highway=traffic_signals` / `highway=crossing` nodes as points;
   the renderer matches them to each loop's vertices, turns the windows into
