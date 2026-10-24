@@ -165,12 +165,37 @@ function sampleRun(
   const lon = a[0] + (b[0] - a[0]) * t;
   const lat = a[1] + (b[1] - a[1]) * t;
   // heading in model space; angles are origin/scale independent, so a local
-  // equirectangular projection is enough
-  const cosLat = Math.cos((lat * Math.PI) / 180);
-  const heading = Math.atan2(
-    (b[1] - a[1]) * 110540,
-    (b[0] - a[0]) * cosLat * 111320,
-  );
+  // equirectangular projection is enough. A dwell keyframe repeats the same
+  // coordinate, so borrow the heading of the nearest moving segment.
+  let heading = 0;
+  let moved = false;
+  for (let j = i; j < run.coords.length; j++) {
+    const from = run.coords[j - 1];
+    const to = run.coords[j];
+    if (from[0] !== to[0] || from[1] !== to[1]) {
+      const cosLat = Math.cos((to[1] * Math.PI) / 180);
+      heading = Math.atan2(
+        (to[1] - from[1]) * 110540,
+        (to[0] - from[0]) * cosLat * 111320,
+      );
+      moved = true;
+      break;
+    }
+  }
+  if (!moved) {
+    for (let j = i - 1; j >= 1; j--) {
+      const from = run.coords[j - 1];
+      const to = run.coords[j];
+      if (from[0] !== to[0] || from[1] !== to[1]) {
+        const cosLat = Math.cos((to[1] * Math.PI) / 180);
+        heading = Math.atan2(
+          (to[1] - from[1]) * 110540,
+          (to[0] - from[0]) * cosLat * 111320,
+        );
+        break;
+      }
+    }
+  }
   return { lon, lat, heading };
 }
 

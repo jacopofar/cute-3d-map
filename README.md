@@ -387,6 +387,24 @@ park's footprint and to the tile, then drawn as narrow ground ribbons. A mapped
 otherwise walkways are light brown and cycleways brick red. `#park-paths-toggle`
 hides the layer. Mapped `footway=sidewalk` ways stay in the sidewalk layer.
 
+### Inspecting GTFS routes
+
+To inspect the optional feed before changing traffic logic, export its shapes:
+
+```bash
+cd tilegen
+uv run gtfs_routes.py --gtfs ../gtfs.zip \
+  --output ../reports/gtfs-routes.geojson \
+  --summary ../reports/gtfs-routes.md
+```
+
+Each feature carries the route, line, direction counts, headsigns, length,
+closed flag and `reverse_of` when another shape is its opposite direction.
+When tilegen itself is run with both `--gtfs` and `--report`, it writes
+`gtfs-routes.geojson` and `gtfs-routes.md` into the report directory
+automatically; the standalone command above is for inspecting a feed without
+rebuilding tiles.
+
 ### Power lines and pylons
 
 `power=tower` nodes become low-poly pylons, and `power=line` / `power=minor_line`
@@ -445,11 +463,14 @@ is a stateless renderer that samples it. There is no runtime simulation.
   highways (up to 15k vehicles across the 1000 loops) and trains/trams on
   `railway=rail`/`tram` (spacing 800 m, orange).
 - With `--gtfs gtfs.zip`, the feed supplies the bus and tram paths instead:
-  `shapes.txt` becomes an out-and-back loop per shape, route type 3/11 is a
-  bus and type 0 a tram, and only `railway=rail` remains in the OSM train
-  fleet. The feed's route short name, long name and trip headsign travel with
-  the loop; clicking a moving bus/tram opens a popup with its line and
-  direction. The feed is optional and ignored without `--traffic`.
+  each `shapes.txt` shape is a one-way loop in its GTFS direction, route type
+  3/11 is a bus and type 0 a tram, and only `railway=rail` remains in the OSM
+  train fleet. `stop_times.txt` supplies segment travel times and a short dwell
+  at each stop; there is no synthetic return trip, so a vehicle pops at the end
+  of a shape and reappears at its start. The feed's route short name, long name
+  and trip headsign travel with the loop; clicking a moving bus/tram opens a
+  popup with its line and direction and starts following it. The feed is
+  optional and ignored without `--traffic`.
 - Vehicles slow down at **signals and crossings**, cosmetically only. The tiles
   carry the OSM `highway=traffic_signals` / `highway=crossing` nodes as points;
   the renderer matches them to each loop's vertices, turns the windows into

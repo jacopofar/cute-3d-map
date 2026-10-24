@@ -208,6 +208,11 @@ class Loop:
     seg_speeds: list[float]  # m/s per seg, parallel to segs
     length: float
     period: float  # seconds for one lap (speeds vary along the loop)
+    # Optional explicit timing for a scheduled route (GTFS). When set,
+    # `seg_times[i]` is the travel time of `segs[i]` and `seg_dwells[i]` is the
+    # pause at its final stop; `period` is their sum.
+    seg_times: list[float] | None = None
+    seg_dwells: list[float] | None = None
     kind: str = "car"
     vehicles: list[dict] = field(default_factory=list)
     # optional display metadata (GTFS line/route/headsign); the frontend shows
@@ -693,7 +698,7 @@ def _tile_of_mid(
 
 
 def _timed_pieces(
-    seg: list[tuple[float, float]], speed: float, zoom: int, elapsed: float
+    seg: list[tuple[float, float]], duration: float, zoom: int, elapsed: float
 ) -> tuple[
     list[
         tuple[tuple[int, int], float, float, tuple[float, float], tuple[float, float]]
@@ -701,7 +706,7 @@ def _timed_pieces(
     float,
 ]:
     """Tile pieces of one seg, with their start/end seconds into the loop."""
-    seg_time = seg_length(seg) / speed if speed > 0 else 0.0
+    seg_time = max(0.0, duration)
     pieces: list[tuple[tuple[float, float], tuple[float, float]]] = []
     for a, b in pairwise(seg):
         pieces.extend(segment_pieces(a, b, zoom))
@@ -747,8 +752,30 @@ def split_runs(
     ] = []
     current: dict | None = None
     elapsed = 0.0
-    for seg, speed in zip(loop.segs, loop.seg_speeds):
-        pieces, elapsed = _timed_pieces(seg, speed, zoom, elapsed)
+    for index, (seg, speed) in enumerate(zip(loop.segs, loop.seg_speeds)):
+        duration = (
+            loop.seg_times[index]
+            if loop.seg_times is not None and index < len(loop.seg_times)
+            else (seg_length(seg) / speed if speed > 0 else 0.0)
+        )
+        pieces, elapsed = _timed_pieces(seg, duration, zoom, elapsed)
+        dwell = (
+            loop.seg_dwells[index]
+            if loop.seg_dwells is not None and index < len(loop.seg_dwells)
+            else 0.0
+        )
+        if dwell > 0 and seg:
+            stop = seg[-1]
+            pieces.append(
+                (
+                    coord_to_tile(stop[0], stop[1], zoom),
+                    elapsed,
+                    elapsed + dwell,
+                    stop,
+                    stop,
+                )
+            )
+            elapsed += dwell
         for tile, ta, tb, a, b in pieces:
             if (
                 current is not None
@@ -854,6 +881,8 @@ def loops_to_records(loops: list[Loop]) -> list[dict]:
             "period": loop.period,
             "seg_speeds": list(loop.seg_speeds),
             "segs": [[list(coord) for coord in seg] for seg in loop.segs],
+            "seg_times": loop.seg_times,
+            "seg_dwells": loop.seg_dwells,
             "vehicles": [dict(vehicle) for vehicle in loop.vehicles],
             "meta": loop.meta,
         }
@@ -870,6 +899,8 @@ def loops_from_records(records: list[dict]) -> list[Loop]:
             period=record["period"],
             seg_speeds=list(record["seg_speeds"]),
             segs=[[(coord[0], coord[1]) for coord in seg] for seg in record["segs"]],
+            seg_times=record.get("seg_times"),
+            seg_dwells=record.get("seg_dwells"),
             vehicles=[
                 {"phase": vehicle["phase"], "color": vehicle["color"]}
                 for vehicle in record["vehicles"]
