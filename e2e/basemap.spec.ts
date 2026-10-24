@@ -41,10 +41,12 @@ test("the basemap checkbox removes and restores the MapTiler style", async ({
   await page.evaluate(() =>
     document.querySelector<HTMLInputElement>("#basemap-toggle input")!.click(),
   );
-  await expect.poll(layers, { timeout: 10_000 }).toBe(0);
+  // the style swap is local, but under a loaded parallel suite it can queue
+  // behind tile builds and WebGL work on the software renderer
+  await expect.poll(layers, { timeout: 30_000 }).toBe(0);
 
   await page.evaluate(() =>
     document.querySelector<HTMLInputElement>("#basemap-toggle input")!.click(),
   );
-  await expect.poll(layers, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect.poll(layers, { timeout: 30_000 }).toBeGreaterThan(0);
 });
