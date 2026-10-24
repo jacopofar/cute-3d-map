@@ -457,6 +457,8 @@ export interface BuildingInfo {
   // OSM feature id ("way/1234", "relation/56"), for the OSM link
   id?: string;
   rings: [number, number][][];
+  // west, south, east, north; precomputed for the car's collision reject
+  bbox?: [number, number, number, number];
   height: number;
   // the bottom of the volume; building parts can start above the ground
   base?: number;
@@ -581,6 +583,15 @@ export interface RooftopInfo {
   rings?: [number, number][][];
 }
 
+// a fence or wall line for the car's collision; the tile draws the fence band
+// and wall solids from the same feature. `kind` follows the two layer toggles.
+export interface BarrierInfo {
+  kind: "fence" | "wall";
+  coords: [number, number][];
+  // west, south, east, north; precomputed for the car's collision reject
+  bbox: [number, number, number, number];
+}
+
 export interface TileObjects {
   meshes: THREE.Object3D[];
   buildings: BuildingInfo[];
@@ -596,6 +607,8 @@ export interface TileObjects {
   platforms: PlatformInfo[];
   rooftops: RooftopInfo[];
   traffic: TrafficLoop[];
+  // fences and walls as lon/lat polylines, for the car's collision only
+  barriers: BarrierInfo[];
   // signals/crossings as [lon, lat]; the renderer matches them to the routes
   crossings: [number, number][];
   // traffic signals only, for the glowing signal heads at night
@@ -693,6 +706,7 @@ export async function objectsAt(
     return {
       meshes: [],
       buildings: [],
+      barriers: [],
       water: [],
       furniture: [],
       fountains: [],
@@ -722,6 +736,7 @@ export async function objectsAt(
     return {
       meshes: [],
       buildings: [],
+      barriers: [],
       water: [],
       furniture: [],
       fountains: [],
@@ -757,6 +772,7 @@ export async function objectsAt(
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
+  const barriers: BarrierInfo[] = [];
   const water: WaterInfo[] = [];
   const furniture: FurnitureInfo[] = [];
   const fountains: FountainInfo[] = [];
@@ -794,6 +810,8 @@ export async function objectsAt(
       const info = buildingInfo(f);
       buildings.push(info);
       if (info.model) customModels.push(info);
+    } else if (cmtype === "fence" || cmtype === "wall") {
+      barriers.push(...barrierInfo(f, cmtype));
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
     } else if (cmtype === "furniture") {
@@ -961,6 +979,7 @@ export async function objectsAt(
   return {
     meshes,
     buildings,
+    barriers,
     water,
     furniture,
     fountains,
@@ -982,6 +1001,53 @@ export async function objectsAt(
   };
 }
 
+function ringsBox(
+  rings: [number, number][][],
+): [number, number, number, number] | undefined {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const ring of rings) {
+    for (const [lon, lat] of ring) {
+      if (lon < west) west = lon;
+      if (lon > east) east = lon;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+    }
+  }
+  if (!Number.isFinite(west)) return undefined;
+  return [west, south, east, north];
+}
+
+// the polylines of a fence/wall feature. A barrier closed into an area is its
+// outline, exactly what the fence band and wall solids are built from.
+function barrierInfo(
+  f: Geojson.Feature,
+  kind: "fence" | "wall",
+): BarrierInfo[] {
+  const geom = f.geometry;
+  const lines: [number, number][][] = [];
+  if (geom.type === "LineString") {
+    lines.push(geom.coordinates as [number, number][]);
+  } else if (geom.type === "MultiLineString") {
+    lines.push(...(geom.coordinates as [number, number][][]));
+  } else if (geom.type === "Polygon") {
+    lines.push(...(geom.coordinates as [number, number][][]));
+  } else if (geom.type === "MultiPolygon") {
+    for (const polygon of geom.coordinates) {
+      lines.push(...(polygon as [number, number][][]));
+    }
+  }
+  const infos: BarrierInfo[] = [];
+  for (const coords of lines) {
+    if (coords.length < 2) continue;
+    const bbox = ringsBox([coords]);
+    if (bbox) infos.push({ kind, coords, bbox });
+  }
+  return infos;
+}
+
 function buildingInfo(f: Geojson.Feature): BuildingInfo {
   const rings: [number, number][][] = [];
   const geom = f.geometry;
@@ -996,6 +1062,7 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
   return {
     id: typeof f.id === "string" ? f.id : undefined,
     rings,
+    bbox: ringsBox(rings),
     height: Number(props.height) > 0 ? Number(props.height) : 10,
     base: Number(props.base) > 0 ? Number(props.base) : 0,
     color: props.color as string | undefined,

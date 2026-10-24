@@ -12,6 +12,8 @@ export default defineConfig({
       include: [
         "src/daynight.ts",
         "src/traffic_math.ts",
+        "src/driving.ts",
+        "src/collision.ts",
         "src/elements3d/facade_layout.ts",
         "src/elements3d/roof_layout.ts",
         "src/elements3d/bridge_layout.ts",

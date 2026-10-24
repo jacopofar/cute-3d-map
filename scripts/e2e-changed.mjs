@@ -78,6 +78,7 @@ const rules = [
   ],
   [/parked_cars\.ts$|parking_layout\.ts$|traffic\.ts$/, () => ["e2e/parked_cars.spec.ts"]],
   [/elements3d\/water\.ts$/, () => ["e2e/water.spec.ts"]],
+  [/driving(_car)?\.ts$|collision\.ts$/, () => ["e2e/drive.spec.ts"]],
   [/elements3d\/green\.ts$/, () => ["e2e/green.spec.ts"]],
   [/elements3d\/bench\.ts$/, () => ["e2e/benches.spec.ts"]],
   [/elements3d\/church\.ts$/, () => ["e2e/church.spec.ts"]],
@@ -94,6 +95,7 @@ const rules = [
       "e2e/layers.spec.ts",
       "e2e/permalink.spec.ts",
       "e2e/basemap.spec.ts",
+      "e2e/drive.spec.ts",
     ],
   ],
 ];

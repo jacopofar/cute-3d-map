@@ -204,6 +204,23 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   culls separately. `#parked-cars-toggle` is a plain visibility switch. Uses a
   lit material (unlike the moving fleet's unlit basic one), so parked cars
   darken at night.
+- `src/driving.ts` / `src/driving_car.ts` / `src/collision.ts` — car mode, the
+  **Drive** button's free-driving car. `driving.ts` is the pure arcade model
+  (accelerate/brake, a speed-scaled bicycle turn, lon/lat integration in
+  substeps) and takes an optional `blocked` predicate: a blocked substep tries
+  the east and north axes separately, so the car slides along a wall instead of
+  sticking, and an already-overlapping car may drive out. `collision.ts` is the
+  pure geometry (the car rectangle, point-in-ring, segment/rectangle tests);
+  `driving_car.ts` owns the single mesh. `main.ts` supplies the obstacles from
+  the tile data: building footprint rings and fence/wall lines for the 3x3
+  tiles around the car, with precomputed bboxes; a hidden fence/wall layer does
+  not block and a building part based above the car is overhead. The camera
+  chases the car with MapLibre `jumpTo` (bearing = heading, fixed zoom/pitch,
+  looking a little ahead), so map gestures are disabled while driving and the
+  mode runs its own slower tile pass (the per-frame jump keeps the 150 ms move
+  debounce from ever firing). The car spawns on the nearest loaded car route and
+  reports `drive-start` / `drive-stop` perf events. No road graph and no physics
+  beyond the rectangle collision.
 - `src/night_lights.ts` — the night light sources: street lamps (`lamps` tile
   block) and traffic-signal heads (`signals` from the signal Points). Warm lamp
   sprites plus a wider ground "pool", red/green signal sprites on the global 8 s
@@ -433,6 +450,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and headsign.
 - **precomputed traffic** — the route renderer (`src/traffic.ts`,
   `tilegen/traffic.py`); there is no runtime simulation.
+- **car mode / drive car** — the free-driving car behind `#drive-button`.
+  `DriveState` is lon/lat + heading + speed; the chase camera sits above and
+  behind it and looks `DRIVE_LOOK_AHEAD` meters ahead at a fixed zoom/pitch.
+  The heading keeps the vehicle bodies' convention (radians CCW from east).
+  Collision is the car's rectangle against building footprints and fence/wall
+  lines, not a physics simulation; the car spawns on the nearest loaded car
+  route. Entering and leaving report `drive-start` / `drive-stop` perf events.
 - **parking row / parked car** — a kerb line authored by tilegen with a style
   (parallel, perpendicular, fishbone), pitch, side and occupancy; clipped to the
   tile. The frontend places the occupied cars along it. The layer is static and
@@ -466,5 +490,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and power lines are their own meshes, so those are plain visibility switches; the basemap checkbox swaps the MapTiler style
   for an empty style while keeping the 3D layer; imputed colors are baked into
   the geometry, so changing that one reloads the loaded tiles.
+- Car mode is not a checkbox: `#drive-button` at the bottom center enters and
+  leaves it, `#drive-hud` shows the speed and the keys, and Escape also leaves.
+  While driving, the map handlers are disabled and the button reports
+  `drive-start` / `drive-stop` events through the perf endpoint.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

@@ -25,6 +25,7 @@ import {
 } from "./geojson_data.ts";
 import type {
   ApronRing,
+  BarrierInfo,
   BuildingInfo,
   ConstructionInfo,
   CrosswalkInfo,
@@ -51,6 +52,20 @@ import {
 } from "./traffic.ts";
 import { ParkedCarLayer, type ParkedTile } from "./parked_cars.ts";
 import { NightLights, type NightLightTile } from "./night_lights.ts";
+import { DrivingCar } from "./driving_car.ts";
+import {
+  headingFromBearing,
+  headingToBearing,
+  pointAhead,
+  type DriveInput,
+  type DriveState,
+} from "./driving.ts";
+import {
+  boxesOverlap,
+  carRectangle,
+  lineIntersectsRect,
+  ringIntersectsRect,
+} from "./collision.ts";
 import { BloomPass } from "./bloom.ts";
 import { CloudLayer } from "./clouds.ts";
 import { PlaneLayer } from "./airplanes.ts";
@@ -99,6 +114,36 @@ const FACADE_TILE_MARGIN = 1;
 const FENCE_MIN_ZOOM = 18;
 // sidewalks are a street-level detail; the slabs are cheap but there are many
 const SIDEWALK_MIN_ZOOM = 16;
+// car mode: a chase camera, high enough to read the street but flat enough to
+// see the road ahead. The map center sits a little ahead of the car so the car
+// is in the lower half of the screen instead of dead center. Zoom 20 puts a
+// 2.7 m car at roughly 25 px, large enough to read as a car rather than a dot.
+const DRIVE_ZOOM = 20;
+const DRIVE_PITCH = 55;
+const DRIVE_LOOK_AHEAD = 18;
+// The camera jumps every frame, which keeps the map "moving", so the debounced
+// move handler never fires while driving. The tile pass runs on its own slower
+// clock instead, and the 2 km shadow cascade can afford to follow even less.
+const DRIVE_TILE_PASS_MS = 350;
+const DRIVE_SHADOW_MS = 1600;
+const DRIVE_HUD_MS = 100;
+// The car collides as a rectangle with a few centimeters of clearance, so the
+// paint does not graze a wall. A building part whose base is above this is an
+// overhead volume (a cantilevered floor) and does not block the car.
+const DRIVE_CAR_MARGIN = 0.15;
+const DRIVE_CLEARANCE = 1.6;
+// keys held for driving; arrow keys are offered next to WASD because they do
+// not collide with anything else on the page
+const DRIVE_KEY_SET = new Set([
+  "w",
+  "a",
+  "s",
+  "d",
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+]);
 
 // MapTiler basemap styles. The map opens on the day style and swaps to the dark
 // one at night, so the bright basemap does not clash with the dark 3D scene.
@@ -332,6 +377,8 @@ class CoolMap {
   private loadedTraffic: { [key: string]: TrafficLoop[] } = {};
   // building footprints per loaded tile, for click-picking
   private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
+  // fence/wall lines per loaded tile, for the car's collision
+  private loadedBarriers: { [key: string]: BarrierInfo[] } = {};
   // water features per loaded tile, for click-picking
   private loadedWater: { [key: string]: WaterInfo[] } = {};
   // street-furniture points per loaded tile, for click-picking
@@ -429,6 +476,29 @@ class CoolMap {
     phase: number;
   };
   private lastFollowAt = 0;
+  // car mode: the free-driving car, the keys currently held, and the map
+  // handlers we disabled on entry so exiting can put them back exactly
+  private driving?: DrivingCar;
+  private drivingActive = false;
+  private driveKeys = new Set<string>();
+  private lastDriveFrame = 0;
+  private lastDriveTilePass = 0;
+  private lastDriveShadow = 0;
+  private lastDriveHud = 0;
+  private driveTileTimer: ReturnType<typeof setTimeout> | undefined;
+  private driveInteractions?: {
+    dragPan: boolean;
+    dragRotate: boolean;
+    scrollZoom: boolean;
+    boxZoom: boolean;
+    doubleClickZoom: boolean;
+    touchZoomRotate: boolean;
+    touchPitch: boolean;
+    keyboard: boolean;
+  };
+  private driveButton?: HTMLButtonElement;
+  private driveHud?: HTMLElement;
+  private driveSpeed?: HTMLElement;
   private clouds?: CloudLayer;
   private airplanes?: PlaneLayer;
   // the scene lights, kept so the time-of-day model can drive them. They are
@@ -795,6 +865,7 @@ class CoolMap {
           coolMap.tramsTraffic.update(originMeters, scaleFactor, view);
         }
         coolMap.updateFollow();
+        coolMap.updateDriving(originMeters, scaleFactor);
         coolMap.updateClouds(originMeters, scaleFactor);
         // planes are placed from wall-clock time and the loaded runways
         coolMap.airplanes?.update(originMeters, scaleFactor, {
@@ -1079,6 +1150,24 @@ class CoolMap {
     this.map.on("click", (event) => this.onMapClick(event));
     this.map.on("dragstart", () => this.stopFollowing());
 
+    // car mode: the button toggles it, WASD drives, Escape leaves. The keys
+    // only act while the mode is on, so typing in the page is unaffected.
+    this.driveButton =
+      document.querySelector<HTMLButtonElement>("#drive-button") ?? undefined;
+    this.driveHud =
+      document.querySelector<HTMLElement>("#drive-hud") ?? undefined;
+    this.driveSpeed =
+      document.querySelector<HTMLElement>("#drive-speed") ?? undefined;
+    this.driveButton?.addEventListener("click", () => {
+      if (this.drivingActive) this.stopDriving();
+      else this.startDriving();
+    });
+    window.addEventListener("keydown", (event) => this.onDriveKeyDown(event));
+    window.addEventListener("keyup", (event) => this.onDriveKeyUp(event));
+    // a key held when the window loses focus would stay "down" forever
+    window.addEventListener("blur", () => this.driveKeys.clear());
+    this.applyDriveUi();
+
     document.addEventListener("change", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
@@ -1109,6 +1198,7 @@ class CoolMap {
     this.loadedTiles = {};
     this.loadedTraffic = {};
     this.loadedBuildings = {};
+    this.loadedBarriers = {};
     this.loadedWater = {};
     this.loadedFurniture = {};
     this.loadedFountains = {};
@@ -1143,6 +1233,9 @@ class CoolMap {
     // clicking the map is how the user stops following a vehicle, even when
     // inspect mode is off
     this.stopFollowing();
+    // while driving, the map belongs to the car: clicks must not open popups or
+    // yank the camera, and the drive button / Escape leaves the mode
+    if (this.drivingActive) return;
     if (!this.inspectEnabled) return;
     const canvas = this.map.getCanvas();
     // event.point is already in CSS pixels relative to the map canvas
@@ -2022,6 +2115,297 @@ class CoolMap {
     this.popup?.setLngLat([position.lon, position.lat]);
   }
 
+  // ---- car mode -----------------------------------------------------------
+  // The car is a pure lon/lat state advanced every frame by updateDriving; the
+  // camera chases it with jumpTo and the obstacle predicate comes from the
+  // loaded tiles. There is no road graph: this is a free joyride over the 3D
+  // city, not a driving simulation.
+
+  // Start on the nearest precomputed car route when one is loaded. A map center
+  // picked by the user can be inside a building, and a car under a roof is
+  // invisible; a road point also gives the car a sensible starting heading.
+  // Falls back to the map center when no route has loaded yet.
+  private driveSpawn(): { lon: number; lat: number; heading: number } {
+    const center = this.map.getCenter();
+    const cosLat = Math.cos((center.lat * Math.PI) / 180);
+    let best: { lon: number; lat: number; heading: number } | undefined;
+    let bestDeg2 = Infinity;
+    for (const loops of Object.values(this.loadedTraffic)) {
+      for (const loop of loops) {
+        if (loop.kind !== "car") continue;
+        for (const run of loop.runs) {
+          const coords = run.coords;
+          for (let i = 1; i < coords.length; i++) {
+            const [lon, lat] = coords[i];
+            const dLon = (lon - center.lng) * cosLat;
+            const dLat = lat - center.lat;
+            const d2 = dLon * dLon + dLat * dLat;
+            if (d2 >= bestDeg2) continue;
+            const [prevLon, prevLat] = coords[i - 1];
+            // a dwell keyframe repeats a coordinate; it has no heading
+            if (prevLon === lon && prevLat === lat) continue;
+            bestDeg2 = d2;
+            best = {
+              lon,
+              lat,
+              heading: Math.atan2(
+                (lat - prevLat) * 110_540,
+                (lon - prevLon) * cosLat * 111_320,
+              ),
+            };
+          }
+        }
+      }
+    }
+    // within ~300 m: farther than that and the map center is more honest than
+    // some road across the city
+    if (best && bestDeg2 <= (300 / 111_320) ** 2) return best;
+    return {
+      lon: center.lng,
+      lat: center.lat,
+      heading: headingFromBearing(this.map.getBearing()),
+    };
+  }
+
+  private startDriving() {
+    if (this.drivingActive) return;
+    this.stopFollowing();
+    this.clearSelection();
+    this.drivingActive = true;
+    this.driveKeys.clear();
+    if (!this.driving) this.driving = new DrivingCar(this.customLayer.scene);
+    const spawn = this.driveSpawn();
+    this.driving.start(spawn.lon, spawn.lat, spawn.heading);
+    // the map's own gestures would fight a camera that jumps every frame
+    this.driveInteractions = {
+      dragPan: this.map.dragPan.isEnabled(),
+      dragRotate: this.map.dragRotate.isEnabled(),
+      scrollZoom: this.map.scrollZoom.isEnabled(),
+      boxZoom: this.map.boxZoom.isEnabled(),
+      doubleClickZoom: this.map.doubleClickZoom.isEnabled(),
+      touchZoomRotate: this.map.touchZoomRotate.isEnabled(),
+      touchPitch: this.map.touchPitch.isEnabled(),
+      keyboard: this.map.keyboard.isEnabled(),
+    };
+    this.map.dragPan.disable();
+    this.map.dragRotate.disable();
+    this.map.scrollZoom.disable();
+    this.map.boxZoom.disable();
+    this.map.doubleClickZoom.disable();
+    this.map.touchZoomRotate.disable();
+    this.map.touchPitch.disable();
+    this.map.keyboard.disable();
+    const now = performance.now();
+    this.lastDriveFrame = now;
+    this.lastDriveTilePass = now;
+    this.lastDriveShadow = now;
+    this.lastDriveHud = 0;
+    this.map.jumpTo({ zoom: DRIVE_ZOOM, pitch: DRIVE_PITCH });
+    this.applyDriveUi();
+    this.reportPerf({ event: "drive-start" });
+  }
+
+  private stopDriving() {
+    if (!this.drivingActive) return;
+    this.drivingActive = false;
+    this.driveKeys.clear();
+    this.lastDriveFrame = 0;
+    this.driving?.stop();
+    const interactions = this.driveInteractions;
+    if (interactions) {
+      if (interactions.dragPan) this.map.dragPan.enable();
+      else this.map.dragPan.disable();
+      if (interactions.dragRotate) this.map.dragRotate.enable();
+      else this.map.dragRotate.disable();
+      if (interactions.scrollZoom) this.map.scrollZoom.enable();
+      else this.map.scrollZoom.disable();
+      if (interactions.boxZoom) this.map.boxZoom.enable();
+      else this.map.boxZoom.disable();
+      if (interactions.doubleClickZoom) this.map.doubleClickZoom.enable();
+      else this.map.doubleClickZoom.disable();
+      if (interactions.touchZoomRotate) this.map.touchZoomRotate.enable();
+      else this.map.touchZoomRotate.disable();
+      if (interactions.touchPitch) this.map.touchPitch.enable();
+      else this.map.touchPitch.disable();
+      if (interactions.keyboard) this.map.keyboard.enable();
+      else this.map.keyboard.disable();
+      this.driveInteractions = undefined;
+    }
+    this.applyDriveUi();
+    this.reportPerf({ event: "drive-stop" });
+    // the map is the user's again: run one last tile pass around the car
+    this.loadUnloadCoord(this.map.getCenter());
+    this.syncBuildingDetail();
+    this.refreshSunShadow();
+  }
+
+  private applyDriveUi() {
+    if (this.driveButton) {
+      this.driveButton.setAttribute("aria-pressed", String(this.drivingActive));
+      const label = this.driveButton.querySelector("#drive-button-label");
+      if (label)
+        label.textContent = this.drivingActive ? "Exit drive" : "Drive";
+    }
+    if (this.driveHud) this.driveHud.hidden = !this.drivingActive;
+  }
+
+  private onDriveKeyDown(event: KeyboardEvent) {
+    if (!this.drivingActive) return;
+    const key = event.key.toLowerCase();
+    if (key === "escape") {
+      event.preventDefault();
+      this.stopDriving();
+      return;
+    }
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        /^(input|textarea|select)$/i.test(target.tagName))
+    ) {
+      return;
+    }
+    if (!DRIVE_KEY_SET.has(key)) return;
+    // keep the arrows from scrolling the page and the map from panning
+    event.preventDefault();
+    this.driveKeys.add(key);
+  }
+
+  private onDriveKeyUp(event: KeyboardEvent) {
+    this.driveKeys.delete(event.key.toLowerCase());
+  }
+
+  private driveInput(): DriveInput {
+    const keys = this.driveKeys;
+    return {
+      forward: keys.has("w") || keys.has("arrowup"),
+      backward: keys.has("s") || keys.has("arrowdown"),
+      left: keys.has("a") || keys.has("arrowleft"),
+      right: keys.has("d") || keys.has("arrowright"),
+    };
+  }
+
+  // Advance the car and put the chase camera where the car is heading. Runs
+  // from the render callback, so it shares the frame clock with everything
+  // else. The tile window needs its own update: jumpTo fires "move" every
+  // frame, which keeps the 150 ms debounce from ever settling.
+  private updateDriving(originMeters: [number, number], scaleFactor: number) {
+    if (!this.drivingActive || !this.driving) return;
+    const now = performance.now();
+    const dt = this.lastDriveFrame > 0 ? (now - this.lastDriveFrame) / 1000 : 0;
+    this.lastDriveFrame = now;
+    const state = this.driving.update(
+      this.driveInput(),
+      dt,
+      originMeters,
+      scaleFactor,
+      (candidate) => this.driveBlocked(candidate),
+    );
+    const ahead = pointAhead(
+      state.lon,
+      state.lat,
+      state.heading,
+      DRIVE_LOOK_AHEAD,
+    );
+    this.map.jumpTo({
+      center: ahead,
+      bearing: headingToBearing(state.heading),
+      pitch: DRIVE_PITCH,
+      zoom: DRIVE_ZOOM,
+    });
+    // Run the tile pass after the render task, like the move debounce does, so
+    // a projection origin reset lands between frames instead of mid-render.
+    if (
+      now - this.lastDriveTilePass >= DRIVE_TILE_PASS_MS &&
+      this.driveTileTimer === undefined
+    ) {
+      this.lastDriveTilePass = now;
+      this.driveTileTimer = setTimeout(() => {
+        this.driveTileTimer = undefined;
+        if (!this.drivingActive) return;
+        this.loadUnloadCoord(this.map.getCenter());
+        this.syncBuildingDetail();
+        const at = performance.now();
+        if (at - this.lastDriveShadow >= DRIVE_SHADOW_MS) {
+          this.lastDriveShadow = at;
+          this.refreshSunShadow();
+        }
+      }, 0);
+    }
+    if (now - this.lastDriveHud >= DRIVE_HUD_MS) {
+      this.lastDriveHud = now;
+      if (this.driveSpeed) {
+        const kmh = Math.round(Math.abs(state.speed) * 3.6);
+        this.driveSpeed.textContent =
+          state.speed < -0.1 ? `R ${kmh} km/h` : `${kmh} km/h`;
+      }
+    }
+  }
+
+  // Whether the car's rectangle would overlap a building or a fence/wall at
+  // `state`. The car only ever touches the tile it is in and the ring around
+  // it, so those nine tiles are enough; each obstacle also has a precomputed
+  // bbox, which rejects almost all of them before the edge tests.
+  private driveBlocked(state: DriveState): boolean {
+    const [cx, cy] = getTileIndex({ lng: state.lon, lat: state.lat });
+    const rect = carRectangle(
+      state.lon,
+      state.lat,
+      state.heading,
+      CAR_TRAFFIC.length,
+      CAR_TRAFFIC.width,
+      DRIVE_CAR_MARGIN,
+    );
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        const key = `${x}_${y}`;
+        for (const building of this.loadedBuildings[key] ?? []) {
+          if (!building.bbox || !boxesOverlap(rect.box, building.bbox)) {
+            continue;
+          }
+          // a high building part floats over the street; the car drives under
+          if ((building.base ?? 0) > DRIVE_CLEARANCE) continue;
+          if (building.rings.some((ring) => ringIntersectsRect(ring, rect))) {
+            return true;
+          }
+        }
+        for (const barrier of this.loadedBarriers[key] ?? []) {
+          // a hidden barrier must not block: the layer checkbox is the truth
+          if (barrier.kind === "fence" && !this.fencesEnabled) continue;
+          if (barrier.kind === "wall" && !this.wallsEnabled) continue;
+          if (!boxesOverlap(rect.box, barrier.bbox)) continue;
+          if (lineIntersectsRect(barrier.coords, rect)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // read-only collision probe for the e2e test: whether a car at this position
+  // and heading would hit a building or a visible barrier
+  collisionAt(lon: number, lat: number, heading = 0): boolean {
+    return this.driveBlocked({ lon, lat, heading, speed: 0 });
+  }
+
+  // read-only state for the e2e test (like lightingState() and stats())
+  driveState(): {
+    active: boolean;
+    lon: number;
+    lat: number;
+    heading: number;
+    speed: number;
+  } {
+    const state = this.driving?.current;
+    const center = this.map.getCenter();
+    return {
+      active: this.drivingActive,
+      lon: state?.lon ?? center.lng,
+      lat: state?.lat ?? center.lat,
+      heading: state?.heading ?? 0,
+      speed: state?.speed ?? 0,
+    };
+  }
+
   private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
     this.clearSelection();
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
@@ -2302,6 +2686,7 @@ class CoolMap {
         });
         delete this.loadedTraffic[k];
         delete this.loadedBuildings[k];
+        delete this.loadedBarriers[k];
         delete this.loadedWater[k];
         delete this.loadedFurniture[k];
         delete this.loadedFountains[k];
@@ -2363,6 +2748,7 @@ class CoolMap {
       const {
         meshes,
         buildings,
+        barriers,
         water,
         furniture,
         fountains,
@@ -2401,6 +2787,7 @@ class CoolMap {
       meshes.forEach((m) => this.customLayer.scene.add(m));
       this.loadedTraffic[tileKey] = traffic;
       this.loadedBuildings[tileKey] = buildings;
+      this.loadedBarriers[tileKey] = barriers;
       this.loadedWater[tileKey] = water;
       this.loadedFurniture[tileKey] = furniture;
       this.loadedFountains[tileKey] = fountains;
