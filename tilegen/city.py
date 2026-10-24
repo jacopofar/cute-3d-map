@@ -13,6 +13,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from shapely.geometry import shape
+from shapely.geometry.base import BaseGeometry
+
 logger = logging.getLogger(__name__)
 
 COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
@@ -64,17 +67,30 @@ class CityProfile:
     building_by_name: dict[str, BuildingOverride] | None = None
     vehicle_by_line: dict[str, str] | None = None
     vehicle_by_route: dict[str, str] | None = None
+    area_overrides: list[tuple[BaseGeometry, BuildingOverride]] | None = None
     asset_base: str | None = None
 
-    def building_override(self, feature_id, tags) -> BuildingOverride | None:
-        """City override by OSM id first, then by exact OSM name."""
+    def building_override(
+        self, feature_id, tags, geometry: BaseGeometry | None = None
+    ) -> BuildingOverride | None:
+        """City override by OSM id, exact name, then containing area."""
         by_id = self.building_by_id or {}
         override = by_id.get(str(feature_id))
         if override is not None:
             return override
         name = tags.get("name")
         if name:
-            return (self.building_by_name or {}).get(str(name))
+            override = (self.building_by_name or {}).get(str(name))
+            if override is not None:
+                return override
+        if geometry is not None:
+            point = geometry.representative_point()
+            # Later area features win, so a small, specific polygon can be
+            # placed after a broad district one.
+            for area, area_override in self.area_overrides or []:
+                if area.contains(point):
+                    override = area_override
+            return override
         return None
 
     def vehicle_color(self, meta: dict | None) -> str | None:
@@ -163,6 +179,44 @@ def _vehicle_maps(document: object) -> tuple[dict[str, str], dict[str, str]]:
     )
 
 
+def _area_features(
+    document: object, path: Path
+) -> list[tuple[BaseGeometry, BuildingOverride]]:
+    if isinstance(document, dict) and document.get("type") == "FeatureCollection":
+        features = document.get("features")
+    elif isinstance(document, list):
+        features = document
+    elif isinstance(document, dict) and document.get("type") == "Feature":
+        features = [document]
+    else:
+        raise CityError(f"{path}: expected a GeoJSON FeatureCollection or array")
+    if not isinstance(features, list):
+        raise CityError(f"{path}: features must be an array")
+    areas: list[tuple[BaseGeometry, BuildingOverride]] = []
+    for index, feature in enumerate(features):
+        if not isinstance(feature, dict):
+            raise CityError(f"{path}.features[{index}]: expected an object")
+        geom = feature.get("geometry")
+        if not isinstance(geom, dict):
+            raise CityError(f"{path}.features[{index}]: missing geometry")
+        try:
+            area = shape(geom)
+        except (TypeError, ValueError, KeyError) as error:
+            raise CityError(f"{path}.features[{index}]: {error}") from error
+        if area.geom_type not in ("Polygon", "MultiPolygon") or area.is_empty:
+            raise CityError(f"{path}.features[{index}]: expected a polygon")
+        props = feature.get("properties") or {}
+        if not isinstance(props, dict):
+            raise CityError(f"{path}.features[{index}].properties: expected an object")
+        areas.append(
+            (
+                area,
+                _building_override(props, f"{path}.features[{index}].properties"),
+            )
+        )
+    return areas
+
+
 def load_city(directory: Path | None) -> CityProfile:
     """Load an optional city directory; a missing/empty directory means Milan defaults."""
     if directory is None:
@@ -178,6 +232,12 @@ def load_city(directory: Path | None) -> CityProfile:
     vehicles_by_line, vehicles_by_route = _vehicle_maps(
         _read_json(directory / "vehicles.json", {})
     )
+    area_path = directory / "areas.geojson"
+    if not area_path.exists():
+        area_path = directory / "areas.json"
+    areas = _area_features(
+        _read_json(area_path, {"type": "FeatureCollection", "features": []}), area_path
+    )
     profile = CityProfile(
         name=str(city.get("name") or "Milan"),
         directory=directory,
@@ -185,12 +245,14 @@ def load_city(directory: Path | None) -> CityProfile:
         building_by_name=building_names,
         vehicle_by_line=vehicles_by_line,
         vehicle_by_route=vehicles_by_route,
+        area_overrides=areas,
         asset_base=city.get("asset_base"),
     )
     logger.info(
-        "city profile %s: %d building overrides, %d line colors",
+        "city profile %s: %d building overrides, %d area overrides, %d line colors",
         profile.name,
         len(buildings) + len(building_names),
+        len(areas),
         len(vehicles_by_line) + len(vehicles_by_route),
     )
     return profile

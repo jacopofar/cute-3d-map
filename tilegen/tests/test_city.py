@@ -6,11 +6,13 @@ from city import CityError, CityProfile, load_city
 from features import BuildingOverride, to_building
 
 
-def _write_city(path, city=None, buildings=None, vehicles=None):
+def _write_city(path, city=None, buildings=None, vehicles=None, areas=None):
     path.mkdir(exist_ok=True)
     (path / "city.json").write_text(json.dumps(city or {"name": "Test"}))
     (path / "buildings.json").write_text(json.dumps(buildings or {}))
     (path / "vehicles.json").write_text(json.dumps(vehicles or {}))
+    if areas is not None:
+        (path / "areas.geojson").write_text(json.dumps(areas))
 
 
 def test_empty_city_keeps_defaults():
@@ -44,6 +46,36 @@ def test_city_building_and_vehicle_overrides(tmp_path):
     assert by_name is not None
     assert by_name.color == "#445566"
     assert profile.vehicle_color({"line": "1"}) == "f2c94c"
+
+
+def test_area_override_applies_by_polygon(tmp_path):
+    import shapely
+
+    _write_city(
+        tmp_path,
+        areas={
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"color": "#f4f4f4", "roof_color": "#ffffff"},
+                    "geometry": json.loads(
+                        shapely.to_geojson(shapely.box(9.0, 45.0, 9.01, 45.01))
+                    ),
+                }
+            ],
+        },
+    )
+    profile = load_city(tmp_path)
+    inside = profile.building_override(
+        "way/2", {}, shapely.box(9.002, 45.002, 9.003, 45.003)
+    )
+    assert inside is not None
+    assert inside.color == "#f4f4f4"
+    assert (
+        profile.building_override("way/3", {}, shapely.box(9.1, 45.1, 9.11, 45.11))
+        is None
+    )
 
 
 def test_invalid_city_color_fails(tmp_path):

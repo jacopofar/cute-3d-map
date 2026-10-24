@@ -657,10 +657,10 @@ uv run main.py ../data/city.pbf \
   --output ../public/tiles --no-raw
 ```
 
-The folder may contain `city.json`, `buildings.json`, `vehicles.json` and an
-`assets/` directory. Building colors, roof colors/shapes and per-building
-windows/balconies can be overridden by OSM id or exact name; GTFS line colors
-can be overridden by line or route id. Missing files keep the Milan defaults.
+The folder may contain `city.json`, `buildings.json`, `areas.geojson`,
+`vehicles.json` and an `assets/` directory. Building colors, roof colors/shapes and per-building
+windows/balconies can be overridden by OSM id or exact name, or by polygons in
+`areas.geojson`; GTFS line colors can be overridden by line or route id. Missing files keep the Milan defaults.
 See `cities/README.md` for the schemas.
 
 ## Inspecting tiles

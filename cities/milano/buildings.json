@@ -1,4 +1,18 @@
 {
-  "by_id": {},
-  "by_name": {}
+  "by_id": {
+    "relation/18017026": {
+      "color": "#d8c7a6",
+      "facade": {
+        "windows": false,
+        "balconies": false
+      }
+    },
+    "relation/1918": {
+      "color": "#a65f4a",
+      "facade": {
+        "windows": false,
+        "balconies": false
+      }
+    }
+  }
 }

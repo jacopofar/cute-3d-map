@@ -9,6 +9,7 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 import duckdb
 import shapely
@@ -161,7 +162,9 @@ def _render_feature(
                 s,
                 distributions,
                 solar_buildings,
-                city.building_override(feature_id, tags) if city else None,
+                city.building_override(feature_id, tags, cast(BaseGeometry, s))
+                if city
+                else None,
             )
         ]
     if tags.get("natural") == "tree":

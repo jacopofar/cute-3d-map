@@ -37,6 +37,33 @@ explicit `by_id` / `by_name` form:
 Supported fields: `color`, `roof_color`, `roof_shape`, `facade.windows`,
 `facade.balconies`. City values win over OSM tags and imputed values.
 
+## `areas.geojson`
+
+A GeoJSON `FeatureCollection` (or a bare array of features) whose polygons apply
+the same building fields to every building whose representative point falls
+inside them. Later features win, so a small landmark polygon can follow a broad
+district polygon.
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Ospedale Niguarda",
+        "color": "#f4f4f4",
+        "roof_color": "#ffffff"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[9.18, 45.50], [9.19, 45.50], [9.19, 45.51], [9.18, 45.50]]]
+      }
+    }
+  ]
+}
+```
+
 ## `vehicles.json`
 
 ```json
@@ -48,6 +75,15 @@ Supported fields: `color`, `roof_color`, `roof_shape`, `facade.windows`,
 
 A city line color wins over the feed's route color, which wins over the fleet
 default.
+
+## Milan profile
+
+- `buildings.json` makes the Duomo beige and Castello Sforzesco brick, with no
+  windows or balconies.
+- `areas.geojson` repeats those overrides as polygons so the Duomo and castle
+  building parts inherit them, and paints the Niguarda hospital buildings white
+  from the hospital polygon.
+- `vehicles.json` is empty until specific line liveries are added.
 
 ## GLTF assets
 
