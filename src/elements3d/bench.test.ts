@@ -3,14 +3,18 @@ import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
 import { epsg4326toEpsg3857 } from "../geojson_data";
-import { bench, benchFacing } from "./bench";
+import { bench, benchFacing, benchWood } from "./bench";
 
 const ORIGIN: [number, number] = [9.18, 45.5];
 const SCALE = Math.cos((2 * Math.PI * ORIGIN[1]) / 360);
 const ORIGIN_METERS = epsg4326toEpsg3857(ORIGIN);
 
-function benchFeature(direction?: number, id = "node/1"): Geojson.Feature {
-  const properties: Record<string, unknown> = { cmtype: "bench" };
+function benchFeature(
+  direction?: number,
+  id = "node/1",
+  extra: Record<string, unknown> = {},
+): Geojson.Feature {
+  const properties: Record<string, unknown> = { cmtype: "bench", ...extra };
   if (direction !== undefined) properties.direction = direction;
   return {
     type: "Feature",
@@ -39,6 +43,72 @@ describe("benchFacing", () => {
     expect(benchFacing(benchFeature(undefined, "node/42"))).toBe(first);
     // and different ids generally differ
     expect(benchFacing(benchFeature(undefined, "node/43"))).not.toBe(first);
+  });
+});
+
+describe("benchWood", () => {
+  it("uses an OSM colour when it is a CSS color", () => {
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "green" }),
+      ).getHex(),
+    ).toBe(0x008000);
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "#123456" }),
+      ).getHex(),
+    ).toBe(0x123456);
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "light_blue" }),
+      ).getHex(),
+    ).toBe(0xadd8e6);
+  });
+
+  it("keeps the wooden brown for a missing or unusable value", () => {
+    expect(benchWood(benchFeature()).getHex()).toBe(0xa9703c);
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "not a colour" }),
+      ).getHex(),
+    ).toBe(0xa9703c);
+    expect(
+      benchWood(benchFeature(undefined, "node/1", { colour: "" })).getHex(),
+    ).toBe(0xa9703c);
+  });
+
+  it("falls back to color and prefers colour", () => {
+    expect(
+      benchWood(benchFeature(undefined, "node/1", { color: "blue" })).getHex(),
+    ).toBe(0x0000ff);
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "green", color: "blue" }),
+      ).getHex(),
+    ).toBe(0x008000);
+  });
+
+  it("takes the first part of a multi-colour value", () => {
+    expect(
+      benchWood(
+        benchFeature(undefined, "node/1", { colour: "red; white" }),
+      ).getHex(),
+    ).toBe(0xff0000);
+  });
+
+  it("tints the merged geometry with the OSM colour", () => {
+    const [geometry] = bench(
+      ORIGIN_METERS,
+      SCALE,
+      benchFeature(undefined, "node/1", { colour: "#123456" }),
+    );
+    const color = geometry.getAttribute("color");
+    // the seat is built first, so its vertices carry the wood tint; Color keeps
+    // the components in linear space, hence the comparison through a Color
+    const wood = new THREE.Color("#123456");
+    expect(color.getX(0)).toBeCloseTo(wood.r, 5);
+    expect(color.getY(0)).toBeCloseTo(wood.g, 5);
+    expect(color.getZ(0)).toBeCloseTo(wood.b, 5);
   });
 });
 

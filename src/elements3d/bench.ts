@@ -28,9 +28,37 @@ const LEG_SIZE = 0.06;
 const LEG_INSET = 0.1;
 
 // warm mid brown: the vertex color is multiplied by the lighting and ACES tone
-// mapping, so a darker wood ends up near black
+// mapping, so a darker wood ends up near black. OSM `colour` overrides it when
+// the tag is a color the frontend understands.
 const WOOD = new THREE.Color("#a9703c");
 const METAL = new THREE.Color("#3b3f45");
+
+function parsedBenchColor(value: unknown): THREE.Color | undefined {
+  if (typeof value !== "string") return undefined;
+  // a semicolon separates the parts of a multi-colored object; the bench seat
+  // is the part the wood tint should follow
+  const text = value.split(";")[0].trim().toLowerCase();
+  if (!text) return undefined;
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/.test(text)) {
+    return new THREE.Color(text);
+  }
+  const names = THREE.Color.NAMES as Record<string, number>;
+  // OSM sometimes writes "light blue" or "light_blue"; the CSS map has no space
+  const named = names[text] ?? names[text.replace(/[_\s]+/g, "")];
+  return named === undefined ? undefined : new THREE.Color(named);
+}
+
+/**
+ * The wood tint for a bench: OSM's `colour` (or the occasional `color`) when it
+ * is a simple CSS name or short hex value, else the default warm brown. Strict
+ * parsing keeps a free-text value from turning the wood white.
+ */
+export function benchWood(f: Geojson.Feature): THREE.Color {
+  const props = f.properties as { colour?: unknown; color?: unknown } | null;
+  return (
+    parsedBenchColor(props?.colour) ?? parsedBenchColor(props?.color) ?? WOOD
+  );
+}
 
 /**
  * The direction the bench faces, in radians. OSM's `direction` tag is already
@@ -70,6 +98,7 @@ export function bench(
   // a bench with no direction keeps its facing from the data; rotate the whole
   // local build around Z, then move it onto the feature point
   const facing = benchFacing(f);
+  const wood = benchWood(f);
 
   const parts: THREE.BufferGeometry[] = [];
   const place = (part: THREE.BufferGeometry, color: THREE.Color) => {
@@ -81,7 +110,7 @@ export function bench(
 
   const seat = new THREE.BoxGeometry(WIDTH, DEPTH, SEAT_THICKNESS);
   seat.translate(0, 0, SEAT_HEIGHT);
-  place(seat, WOOD);
+  place(seat, wood);
 
   // the backrest sits on the far side from the facing direction (local -Y)
   const back = new THREE.BoxGeometry(WIDTH, BACK_THICKNESS, BACK_HEIGHT);
@@ -90,7 +119,7 @@ export function bench(
     -DEPTH / 2 + BACK_THICKNESS / 2,
     SEAT_HEIGHT + BACK_HEIGHT / 2,
   );
-  place(back, WOOD);
+  place(back, wood);
 
   for (const sx of [-1, 1]) {
     for (const sy of [-1, 1]) {

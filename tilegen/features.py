@@ -604,7 +604,14 @@ def to_bench(feature_id, tags, s) -> dict | None:
         # one stray Polygon bench (and anything odder) must not abort the tile
         logger.warning(f"non-point/line bench?? {feature_id} ({s.geom_type})")
         return None
-    properties = {"cmtype": "bench", "direction": direction}
+    properties = {
+        "cmtype": "bench",
+        "direction": direction,
+        # OSM's `colour` is the usual key; `color` also shows up in the wild.
+        # The frontend validates both and falls back to its wooden brown.
+        "colour": tags.get("colour"),
+        "color": tags.get("color"),
+    }
     return {
         "type": "feature",
         "id": feature_id,

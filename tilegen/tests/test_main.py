@@ -407,6 +407,21 @@ def test_to_bench_point_keeps_the_direction():
     assert plain["properties"] == {"cmtype": "bench"}
 
 
+def test_to_bench_keeps_osm_colours():
+    f = main.to_bench(
+        16,
+        {"amenity": "bench", "colour": "green", "color": "#123456"},
+        geom("POINT (9.18 45.5)"),
+    )
+    assert f is not None
+    # both spellings travel to the frontend, which validates them
+    assert f["properties"] == {
+        "cmtype": "bench",
+        "colour": "green",
+        "color": "#123456",
+    }
+
+
 def test_to_bench_line_collapses_to_the_midpoint():
     line = geom("LINESTRING (9.18 45.5, 9.19 45.5)")
     f = main.to_bench(13, {"amenity": "bench"}, line)
