@@ -7,9 +7,11 @@ import {
   ScaleControl,
 } from "maplibre-gl";
 import * as THREE from "three";
+import type Geojson from "geojson";
 import "./maplibre_setup";
 
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { building } from "./elements3d/building.ts";
 // import {VRButton} from 'three/addons/webxr/VRButton.js';
 
 import type { CustomLayerInterface, LngLat } from "maplibre-gl";
@@ -1946,6 +1948,7 @@ class CoolMap {
         ? `Roof color: ${swatch(info.roofColor)}${escapeHtml(info.roofColor)}${mark("roof_color")}`
         : null,
       osmLink(info.id),
+      `<a href="#" data-gltf class="gltf-link" title="Download GLTF">G</a>`,
       `<a href="#" data-zoom>Zoom to building</a>`,
     ].filter(Boolean);
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
@@ -1959,6 +1962,75 @@ class CoolMap {
       clickEvent.preventDefault();
       this.zoomToBuilding(info);
     });
+    const gltfLink = this.popup
+      .getElement()
+      ?.querySelector("[data-gltf]") as HTMLElement | null;
+    gltfLink?.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      void this.downloadBuildingGLTF(info);
+    });
+  }
+
+  private async downloadBuildingGLTF(info: BuildingInfo) {
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const feature: Geojson.Feature = {
+      type: "Feature",
+      id: info.id,
+      properties: {
+        color: info.color,
+        height: info.height,
+        base: info.base,
+        roof_shape: info.roofShape,
+        roof_color: info.roofColor,
+        solar: info.solar,
+        building: info.building,
+        religion: info.religion,
+        glass: info.glass,
+      },
+      geometry: info.geometry ?? {
+        type: "Polygon",
+        coordinates: info.rings,
+      },
+    };
+    const parts = building(originMeters, scaleFactor, feature);
+    const group = new THREE.Group();
+    group.name = info.name ?? info.id ?? "building";
+    const material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.85,
+      metalness: 0,
+    });
+    for (const part of parts) {
+      group.add(new THREE.Mesh(part.walls, material));
+      if (part.roof) group.add(new THREE.Mesh(part.roof, material));
+    }
+    try {
+      const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        new GLTFExporter().parse(
+          group,
+          (result) => {
+            if (result instanceof ArrayBuffer) resolve(result);
+            else reject(new Error("GLTF exporter returned JSON, not binary"));
+          },
+          reject,
+          { binary: true },
+        );
+      });
+      const safe =
+        (info.id ?? info.name ?? "building").replace(/[^a-z0-9._-]+/gi, "_") ||
+        "building";
+      const url = URL.createObjectURL(
+        new Blob([buffer], { type: "model/gltf-binary" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${safe}.glb`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.warn("building GLTF export failed", error);
+    }
   }
 
   private zoomToBuilding(info: BuildingInfo) {

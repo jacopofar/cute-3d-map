@@ -161,6 +161,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   emits tunnel ends as portal Points; the underground part is not drawn. Each is
   its own per-tile mesh (kinds `bridge` and `tunnel`), so the single "bridges &
   tunnels" checkbox is a visibility switch.
+- `src/main.ts` building popup — the **G** button exports the clicked building's
+  walls and roof as a `.glb` via Three.js `GLTFExporter`; `BuildingInfo` keeps
+  the source geometry for an exact footprint.
 - `src/elements3d/roof_layout.ts` / `roof.ts` — the roof over each footprint,
   drawn as its own mesh per tile (kind `roof`) so the roof-shapes checkbox is a
   visibility switch. The shape comes from the tile's `roof_shape`; the layout is
