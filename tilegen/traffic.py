@@ -692,6 +692,30 @@ def _tile_of_mid(
     return coord_to_tile((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, zoom)
 
 
+def _timed_pieces(
+    seg: list[tuple[float, float]], speed: float, zoom: int, elapsed: float
+) -> tuple[
+    list[
+        tuple[tuple[int, int], float, float, tuple[float, float], tuple[float, float]]
+    ],
+    float,
+]:
+    """Tile pieces of one seg, with their start/end seconds into the loop."""
+    seg_time = seg_length(seg) / speed if speed > 0 else 0.0
+    pieces: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for a, b in pairwise(seg):
+        pieces.extend(segment_pieces(a, b, zoom))
+    subtotal = sum(haversine_m(a, b) for a, b in pieces) or 1.0
+    acc = 0.0
+    timed = []
+    for a, b in pieces:
+        ta = elapsed + seg_time * acc / subtotal
+        acc += haversine_m(a, b)
+        tb = elapsed + seg_time * acc / subtotal
+        timed.append((_tile_of_mid(a, b, zoom), ta, tb, a, b))
+    return timed, elapsed + seg_time
+
+
 def split_runs(
     loop: Loop, zoom: int
 ) -> list[
@@ -710,7 +734,8 @@ def split_runs(
     (times[0] is 0). Speed is constant along an edge, so a run split inside one
     stays linear in time; the client samples by time. The first run starts at
     t0 = 0 and the last ends at t1 = period, so the seam at t = 0/period is two
-    runs, resolved by the client's half-open interval."""
+    runs, resolved by the client's half-open interval.
+    """
     runs: list[
         tuple[
             tuple[int, int],
@@ -723,17 +748,8 @@ def split_runs(
     current: dict | None = None
     elapsed = 0.0
     for seg, speed in zip(loop.segs, loop.seg_speeds):
-        seg_time = seg_length(seg) / speed if speed > 0 else 0.0
-        pieces: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        for a, b in pairwise(seg):
-            pieces.extend(segment_pieces(a, b, zoom))
-        subtotal = sum(haversine_m(a, b) for a, b in pieces) or 1.0
-        acc = 0.0
-        for a, b in pieces:
-            ta = elapsed + seg_time * acc / subtotal
-            acc += haversine_m(a, b)
-            tb = elapsed + seg_time * acc / subtotal
-            tile = _tile_of_mid(a, b, zoom)
+        pieces, elapsed = _timed_pieces(seg, speed, zoom, elapsed)
+        for tile, ta, tb, a, b in pieces:
             if (
                 current is not None
                 and current["tile"] == tile
@@ -758,7 +774,6 @@ def split_runs(
                     "coords": [a, b],
                     "times": [0.0, tb - ta],
                 }
-        elapsed += seg_time
     if current is not None and len(current["coords"]) >= 2:
         runs.append(
             (

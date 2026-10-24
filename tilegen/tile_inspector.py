@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -91,36 +91,12 @@ DRAW_ORDER = {
     "crossing": 29,
     "tunnel": 30,
 }
-POINT_KINDS = {
-    "tree",
-    "furniture",
-    "fountain",
-    "transit_stop",
-    "terrace",
-    "playground",
-    "monument",
-    "power_tower",
-    "traffic_signal",
-    "crossing",
-    "tunnel",
-}
-LINE_KINDS = {
-    "tree_row",
-    "park_path",
-    "power_line",
-    "wall",
-    "gate",
-    "fence",
-    "crosswalk",
-    "road_marking",
-    "rail",
-    "bridge",
-    "aeroway",
-}
 
 
 @dataclass
 class Shape:
+    """A flat drawable: polygon rings, a polyline, or one or more points."""
+
     kind: str
     color: str
     points: list[Point]
@@ -129,6 +105,7 @@ class Shape:
 
 
 def parse_bbox(text: str) -> tuple[float, float, float, float]:
+    """Parse and validate a ``min_lon,min_lat,max_lon,max_lat`` string."""
     values = [float(part.strip()) for part in text.split(",")]
     if len(values) != 4:
         raise click.BadParameter("expected min_lon,min_lat,max_lon,max_lat")
@@ -155,6 +132,7 @@ def world_point(lon: float, lat: float) -> Point:
 
 
 def tile_range(bbox: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
+    """The inclusive tile range covered by a lon/lat bbox."""
     min_lon, min_lat, max_lon, max_lat = bbox
     min_x, min_y = coord_to_tile(min_lon, max_lat, TILE_ZOOM)
     max_x, max_y = coord_to_tile(max_lon, min_lat, TILE_ZOOM)
@@ -198,6 +176,7 @@ def _positions(coords: Iterable[Sequence[float]]) -> list[Point]:
 
 
 def feature_shapes(feature: dict) -> list[Shape]:
+    """Turn one GeoJSON feature into the flat shapes the renderers consume."""
     cmtype, color = style_for(feature)
     geom = feature.get("geometry") or {}
     kind = geom.get("type")
@@ -222,6 +201,31 @@ def feature_shapes(feature: dict) -> list[Shape]:
     return []
 
 
+def _projection(
+    bbox: tuple[float, float, float, float], width: int
+) -> tuple[int, Callable[[float, float], Point]]:
+    """Return the output height and a lon/lat -> pixel projector."""
+    min_world = world_point(bbox[0], bbox[3])
+    max_world = world_point(bbox[2], bbox[1])
+    span_x = max_world[0] - min_world[0]
+    span_y = max_world[1] - min_world[1]
+    height = max(1, round(width * span_y / span_x))
+    scale = width / span_x
+
+    def project(lon: float, lat: float) -> Point:
+        x, y = world_point(lon, lat)
+        return (x - min_world[0]) * scale, (y - min_world[1]) * scale
+
+    return height, project
+
+
+def _ordered(features: list[dict]) -> list[dict]:
+    return sorted(
+        features,
+        key=lambda f: DRAW_ORDER.get((f.get("properties") or {}).get("cmtype"), 99),
+    )
+
+
 def _svg_path(rings: list[Ring], project) -> str:
     commands: list[str] = []
     for ring in rings:
@@ -242,26 +246,13 @@ def render_svg(
     width: int = 1600,
     legend: bool = False,
 ) -> str:
-    min_world = world_point(bbox[0], bbox[3])
-    max_world = world_point(bbox[2], bbox[1])
-    span_x = max_world[0] - min_world[0]
-    span_y = max_world[1] - min_world[1]
-    height = max(1, round(width * span_y / span_x))
-    scale = width / span_x
-
-    def project(lon: float, lat: float) -> Point:
-        x, y = world_point(lon, lat)
-        return (x - min_world[0]) * scale, (y - min_world[1]) * scale
-
+    """Render features as a standalone flat SVG document."""
+    height, project = _projection(bbox, width)
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#f5f4ef"/>',
     ]
-    ordered = sorted(
-        features,
-        key=lambda f: DRAW_ORDER.get((f.get("properties") or {}).get("cmtype"), 99),
-    )
-    for feature in ordered:
+    for feature in _ordered(features):
         for shape in feature_shapes(feature):
             if shape.kind == "polygon" and shape.rings:
                 parts.append(
@@ -330,30 +321,17 @@ def render_png(
     width: int = 1600,
     legend: bool = False,
 ) -> bytes:
+    """Render features as a PNG; requires Pillow."""
     try:
         from PIL import Image, ImageDraw
     except ImportError as error:  # pragma: no cover - optional dependency
         raise click.ClickException(
             "PNG output needs Pillow: run `uv add pillow` in tilegen/"
         ) from error
-    min_world = world_point(bbox[0], bbox[3])
-    max_world = world_point(bbox[2], bbox[1])
-    span_x = max_world[0] - min_world[0]
-    span_y = max_world[1] - min_world[1]
-    height = max(1, round(width * span_y / span_x))
-    scale = width / span_x
-
-    def project(lon: float, lat: float) -> Point:
-        x, y = world_point(lon, lat)
-        return (x - min_world[0]) * scale, (y - min_world[1]) * scale
-
+    height, project = _projection(bbox, width)
     image = Image.new("RGB", (width, height), "#f5f4ef")
     draw = ImageDraw.Draw(image)
-    ordered = sorted(
-        features,
-        key=lambda f: DRAW_ORDER.get((f.get("properties") or {}).get("cmtype"), 99),
-    )
-    for feature in ordered:
+    for feature in _ordered(features):
         for shape in feature_shapes(feature):
             if shape.kind == "polygon" and shape.rings:
                 if not shape.rings[0]:

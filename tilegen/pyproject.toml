@@ -27,11 +27,22 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 # coverage is on by default so `uv run pytest` reports it every time
-addopts = "--cov=geo --cov=impute --cov=lamps --cov=main --cov=parking --cov=traffic --cov-report=term-missing"
+addopts = "--cov=features --cov=geo --cov=gtfs --cov=impute --cov=lamps --cov=main --cov=parking --cov=sidewalks --cov=tile_inspector --cov=traffic --cov-report=term-missing"
 
 [tool.coverage.run]
 # the DuckDB/PBF I/O in main.py is not unit-tested; the pure logic is
-source = ["geo", "impute", "lamps", "main", "parking", "traffic"]
+source = [
+    "features",
+    "geo",
+    "gtfs",
+    "impute",
+    "lamps",
+    "main",
+    "parking",
+    "sidewalks",
+    "tile_inspector",
+    "traffic",
+]
 
 [tool.coverage.report]
 # a floor, not a goal: keep the pure modules covered while main.py's I/O shell

@@ -4,6 +4,7 @@ import duckdb
 import geo
 import impute
 import main
+import pipeline
 import shapely
 import traffic
 from shapely.geometry.base import BaseGeometry
@@ -1604,7 +1605,7 @@ def test_load_or_build_fleets_reuses_the_cache(tmp_path, monkeypatch):
         calls["n"] += 1
         return real_build(ways_by_kind, configs)
 
-    monkeypatch.setattr(main, "build_fleets", counting_build)
+    monkeypatch.setattr(pipeline, "build_fleets", counting_build)
 
     first = main.load_or_build_fleets(ways, configs, tmp_path, use_cache=True)
     assert calls["n"] == 1
@@ -1625,7 +1626,7 @@ def test_load_or_build_fleets_without_cache_always_builds(tmp_path, monkeypatch)
         calls["n"] += 1
         return real_build(ways_by_kind, configs)
 
-    monkeypatch.setattr(main, "build_fleets", counting_build)
+    monkeypatch.setattr(pipeline, "build_fleets", counting_build)
 
     main.load_or_build_fleets(ways, configs, tmp_path, use_cache=False)
     main.load_or_build_fleets(ways, configs, tmp_path, use_cache=False)
