@@ -3,13 +3,18 @@ This is the component that can read a PBF file and generate the data tiles for t
 
 Usage:
 
-    uv run main.py data.pbf --polygon-filter polygon.json
+```bash
+uv run main.py data.pbf \
+  --polygon-filter polygon.json \
+  --city-dir ../cities/milano \
+  --output ../public/tiles --no-raw
+```
 
-`--polygon-filter` expects a GeoJSON polygon to be used as a filter.
-If missing the whole data in the PBF file is used
-
-Use `--city-dir ../cities/milano` to load optional building/vehicle overrides;
-see `cities/README.md`.
+`--polygon-filter` expects a GeoJSON polygon to be used as a filter; if missing,
+the whole PBF is used. `--city-dir` loads optional building/vehicle overrides
+from `cities/<name>/` and defaults to `cities/milano` when present; see
+`cities/README.md`. `--output` defaults to `tiles/`, and `--raw` is on by
+default unless you pass `--no-raw`.
 
 If `--gtfs` is supplied and the report is enabled, the report directory also
 gets `gtfs-routes.geojson` and `gtfs-routes.md` for inspecting the feed's
