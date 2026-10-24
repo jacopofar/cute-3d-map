@@ -543,6 +543,10 @@ npm install
 # map tiles are served from MapTiler, you need a (free) API key
 echo "VITE_MAPTILER_KEY=your_key" > .env
 
+# optional: send performance reports to this endpoint; leave it unset to
+# disable reporting entirely
+echo "PERF_ENDPOINT=https://example.com/t/perf" >> .env
+
 npm run dev          # dev server
 npm run build        # tsc + production build
 npm run preview      # serve the production build

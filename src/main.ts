@@ -273,6 +273,13 @@ function checkboxStates(): Record<string, boolean> {
   return states;
 }
 
+// Build-time opt-in: without an endpoint the reporting path is a no-op and no
+// request leaves the page. Both names are accepted so an existing .env with
+// either spelling keeps working.
+const PERF_ENDPOINT = String(
+  import.meta.env.PERF_ENDPOINT ?? import.meta.env.VITE_PERF_ENDPOINT ?? "",
+).trim();
+
 const CHECKBOX_COOKIE = "map-checkboxes";
 const CHECKBOX_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
@@ -1081,6 +1088,7 @@ class CoolMap {
       this.reportPerf({ event: "toggle" });
     });
     const scheduleInitialReport = () => {
+      if (!PERF_ENDPOINT) return;
       window.setTimeout(() => this.reportPerf(), 8000);
     };
     if (document.readyState === "complete") scheduleInitialReport();
@@ -3042,6 +3050,7 @@ class CoolMap {
   }
 
   private recordFrame(now: number) {
+    if (!PERF_ENDPOINT) return;
     this.frameTimes.push(now);
     const cutoff = now - 2000;
     while (this.frameTimes.length > 1 && this.frameTimes[0] < cutoff) {
@@ -3064,9 +3073,10 @@ class CoolMap {
   }
 
   private reportPerf(extra: Record<string, unknown> = {}) {
+    if (!PERF_ENDPOINT) return;
     // diagnostics must never break the map: a missing collector or an offline
     // page is a no-op, not an unhandled rejection
-    void fetch("/t/perf", {
+    void fetch(PERF_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(this.perfPayload(extra)),
