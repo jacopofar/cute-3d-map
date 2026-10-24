@@ -387,6 +387,20 @@ park's footprint and to the tile, then drawn as narrow ground ribbons. A mapped
 otherwise walkways are light brown and cycleways brick red. `#park-paths-toggle`
 hides the layer. Mapped `footway=sidewalk` ways stay in the sidewalk layer.
 
+### Inspecting GTFS routes
+
+To inspect the optional feed before changing traffic logic, export its shapes:
+
+```bash
+cd tilegen
+uv run gtfs_routes.py --gtfs ../gtfs.zip \
+  --output ../reports/gtfs-routes.geojson \
+  --summary ../reports/gtfs-routes.md
+```
+
+Each feature carries the route, line, direction counts, headsigns, length,
+closed flag and `reverse_of` when another shape is its opposite direction.
+
 ### Power lines and pylons
 
 `power=tower` nodes become low-poly pylons, and `power=line` / `power=minor_line`

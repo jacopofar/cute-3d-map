@@ -17,7 +17,7 @@ import csv
 import io
 import math
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from itertools import pairwise
 from pathlib import Path
 
@@ -207,6 +207,57 @@ def _loop(
         kind=kind,
         meta=meta,
     )
+
+
+def read_route_shapes(path: Path) -> list[dict]:
+    """Route shapes with their trips and direction metadata, for inspection.
+
+    Only bus/tram routes are returned; metro shapes are intentionally outside
+    the traffic layer this feed drives.
+    """
+    with zipfile.ZipFile(path) as archive:
+        routes = _read_routes(archive)
+        shape_info = _read_shape_info(archive, routes)
+        shapes = _read_shapes(archive, set(shape_info))
+        trips: dict[str, list[dict]] = defaultdict(list)
+        for row in _rows(archive, "trips.txt"):
+            shape_id = row.get("shape_id")
+            if shape_id in shapes:
+                trips[shape_id].append(row)
+    result: list[dict] = []
+    for shape_id, points in shapes.items():
+        info = shape_info[shape_id]
+        kind = next(iter(info["kinds"]))
+        meta = info["meta"][kind]
+        directions = Counter(row.get("direction_id") or "" for row in trips[shape_id])
+        result.append(
+            {
+                "shape_id": shape_id,
+                "kind": kind,
+                "route_id": meta.get("route_id"),
+                "line": meta.get("line"),
+                "route": meta.get("route"),
+                "route_type": meta.get("type"),
+                "color": info.get("color"),
+                "trip_count": len(trips[shape_id]),
+                "directions": dict(directions),
+                "headsigns": sorted(
+                    {
+                        row.get("trip_headsign") or ""
+                        for row in trips[shape_id]
+                        if row.get("trip_headsign")
+                    }
+                ),
+                "coords": points,
+                "length_m": round(
+                    sum(haversine_m(a, b) for a, b in pairwise(points)), 1
+                ),
+                "closed": bool(
+                    len(points) > 1 and haversine_m(points[0], points[-1]) < 30
+                ),
+            }
+        )
+    return result
 
 
 def load_gtfs_fleets(

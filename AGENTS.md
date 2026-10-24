@@ -237,6 +237,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - `tilegen/tile_inspector.py` — flat SVG/PNG inspector for an area of generated
   tiles. Reads `public/tiles/{x}/{y}.json`, draws one logical color per
   `cmtype` with no basemap or decoration; Pillow is only needed for PNG.
+- `tilegen/gtfs_routes.py` — diagnostic exporter for GTFS route shapes. Writes
+  one GeoJSON feature per bus/tram shape with direction counts, headsigns,
+  length, closed flag and reverse-pair id, plus a Markdown summary.
 - `tilegen/gtfs.py` — optional GTFS zip reader. Uses the feed's shapes as
   out-and-back bus/tram loops (route types 3/11 and 0), assigns vehicles with
   `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign

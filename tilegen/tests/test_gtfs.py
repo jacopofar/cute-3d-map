@@ -1,6 +1,6 @@
 import zipfile
 
-from gtfs import load_gtfs_fleets
+from gtfs import load_gtfs_fleets, read_route_shapes
 from traffic import haversine_m
 
 ROUTES = """route_id,route_short_name,route_long_name,route_type,route_color
@@ -54,3 +54,9 @@ def test_gtfs_shapes_become_bus_and_tram_loops(tmp_path):
     assert bus.vehicles
     assert fleets["tram"][0].meta is not None
     assert fleets["tram"][0].meta["line"] == "2"
+    shapes = read_route_shapes(path)
+    assert len(shapes) == 2
+    bus_shape = next(shape for shape in shapes if shape["kind"] == "bus")
+    assert bus_shape["line"] == "1"
+    assert bus_shape["directions"] == {"": 1}
+    assert bus_shape["closed"] is False
