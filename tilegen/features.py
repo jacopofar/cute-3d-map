@@ -246,6 +246,13 @@ def to_building(
             True if solar_buildings and str(feature_id) in solar_buildings else None
         ),
     }
+    if override is not None and override.model is not None:
+        properties["model"] = {
+            "file": override.model.file,
+            "scale": override.model.scale,
+            "rotation": override.model.rotation,
+            "offset": list(override.model.offset),
+        }
     return {
         "type": "feature",
         "id": feature_id,

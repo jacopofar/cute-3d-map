@@ -48,6 +48,42 @@ def test_city_building_and_vehicle_overrides(tmp_path):
     assert profile.vehicle_color({"line": "1"}) == "f2c94c"
 
 
+def test_model_override_is_validated(tmp_path):
+    _write_city(
+        tmp_path,
+        buildings={
+            "by_id": {
+                "way/1": {
+                    "model": {
+                        "file": "assets/model.glb",
+                        "scale": 1.2,
+                        "rotation": 15,
+                        "offset": [1, 2, 3],
+                    }
+                }
+            }
+        },
+    )
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "model.glb").write_bytes(b"glTF")
+    profile = load_city(tmp_path)
+    override = profile.building_override("way/1", {})
+    assert override is not None
+    assert override.model is not None
+    assert override.model.file == "assets/model.glb"
+    assert override.model.scale == 1.2
+    assert override.model.offset == (1.0, 2.0, 3.0)
+
+
+def test_missing_model_asset_fails(tmp_path):
+    _write_city(
+        tmp_path,
+        buildings={"by_id": {"way/1": {"model": {"file": "assets/missing.glb"}}}},
+    )
+    with pytest.raises(CityError, match="missing model asset"):
+        load_city(tmp_path)
+
+
 def test_area_override_applies_by_polygon(tmp_path):
     import shapely
 

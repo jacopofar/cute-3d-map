@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type Geojson from "geojson";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
@@ -175,6 +176,9 @@ export function geoJSONtoGeometries(
     return [];
   }
   if (f.properties.cmtype === "building") {
+    // a city-profile model replaces the generated volume; keep the BuildingInfo
+    // for picking and let objectsAt load the asset
+    if (f.properties.model) return [];
     // the roof comes back as its own kind, so it can be switched off on its own
     const parts = building(originMeters, scaleFactor, f, imputedColors);
     // a curtain wall goes to its own kind so it can carry the glass material;
@@ -439,6 +443,13 @@ export interface TrafficLoop {
 }
 
 // a building footprint for click-picking + info (outer rings only)
+export interface CustomModelInfo {
+  asset: string;
+  scale?: number;
+  rotation?: number;
+  offset?: [number, number, number];
+}
+
 export interface BuildingInfo {
   // OSM feature id ("way/1234", "relation/56"), for the OSM link
   id?: string;
@@ -468,6 +479,8 @@ export interface BuildingInfo {
   geometry?: Geojson.Geometry;
   // mapped solar panels force the roof flat
   solar?: boolean;
+  // a city-profile GLTF that replaces the generated volume
+  model?: CustomModelInfo;
 }
 
 // a street-furniture point, for click-picking + the OSM link
@@ -594,6 +607,70 @@ export interface TileObjects {
   lamps: LampSpot[];
 }
 
+function footprintCenter(
+  info: BuildingInfo,
+  originMeters: [number, number],
+  scaleFactor: number,
+): [number, number] {
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const ring of info.rings) {
+    for (const [lon, lat] of ring) {
+      minLon = Math.min(minLon, lon);
+      minLat = Math.min(minLat, lat);
+      maxLon = Math.max(maxLon, lon);
+      maxLat = Math.max(maxLat, lat);
+    }
+  }
+  if (!Number.isFinite(minLon)) return [0, 0];
+  return toModelCoords(
+    [(minLon + maxLon) / 2, (minLat + maxLat) / 2],
+    originMeters,
+    scaleFactor,
+  );
+}
+
+async function loadBuildingModel(
+  info: BuildingInfo,
+  x: number,
+  y: number,
+  originMeters: [number, number],
+  scaleFactor: number,
+): Promise<THREE.Object3D | null> {
+  const model = info.model;
+  if (!model?.asset) return null;
+  try {
+    const gltf = await new GLTFLoader().loadAsync(`tiles/${model.asset}`);
+    const group = gltf.scene;
+    const scale = Math.max(0.01, Number(model.scale) || 1);
+    group.scale.setScalar(scale);
+    group.rotation.z = ((Number(model.rotation) || 0) * Math.PI) / 180;
+    group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(group);
+    const center = box.getCenter(new THREE.Vector3());
+    const [targetX, targetY] = footprintCenter(info, originMeters, scaleFactor);
+    const offset = model.offset ?? [0, 0, 0];
+    group.position.x += targetX - center.x + offset[0];
+    group.position.y += targetY - center.y + offset[1];
+    group.position.z += (info.base ?? 0) - box.min.z + offset[2];
+    const userData = {
+      kind: "custom_model",
+      tileKey: `${x}_${y}`,
+      buildingId: info.id,
+    };
+    group.userData = userData;
+    group.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) child.userData = userData;
+    });
+    return group;
+  } catch (error) {
+    console.warn(`failed to load building model ${model.asset}`, error);
+    return null;
+  }
+}
+
 export async function objectsAt(
   viewOrigin: [number, number],
   x: number,
@@ -690,6 +767,7 @@ export async function objectsAt(
   const rooftops: RooftopInfo[] = [];
   const crossings: [number, number][] = [];
   const signals: [number, number][] = [];
+  const customModels: BuildingInfo[] = [];
   const runways: RunwayLine[] = [];
   const aprons: ApronRing[] = [];
   myGeoJSON.features.forEach((f) => {
@@ -710,7 +788,9 @@ export async function objectsAt(
       return;
     }
     if (cmtype === "building") {
-      buildings.push(buildingInfo(f));
+      const info = buildingInfo(f);
+      buildings.push(info);
+      if (info.model) customModels.push(info);
     } else if (cmtype === "water") {
       water.push(waterInfo(f));
     } else if (cmtype === "furniture") {
@@ -758,6 +838,16 @@ export async function objectsAt(
   });
 
   const meshes: THREE.Object3D[] = [];
+  for (const info of customModels) {
+    const model = await loadBuildingModel(
+      info,
+      x,
+      y,
+      originMeters,
+      scaleFactor,
+    );
+    if (model) meshes.push(model);
+  }
   for (const [kind, geometries] of Object.entries(byKind)) {
     const merged = BufferGeometryUtils.mergeGeometries(geometries);
     if (merged) {
@@ -919,6 +1009,10 @@ function buildingInfo(f: Geojson.Feature): BuildingInfo {
     glass: isGlass(props),
     geometry: geom,
     solar: props.solar === true,
+    model:
+      props.model && typeof props.model === "object"
+        ? (props.model as CustomModelInfo)
+        : undefined,
     facade:
       props.facade && typeof props.facade === "object"
         ? (props.facade as BuildingInfo["facade"])

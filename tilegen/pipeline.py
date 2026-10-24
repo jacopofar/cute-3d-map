@@ -7,6 +7,7 @@ CLI in ``main.py`` only selects inputs and calls ``parquet_to_tiles``.
 
 import json
 import logging
+import shutil
 from collections import defaultdict
 from pathlib import Path
 from typing import cast
@@ -699,6 +700,16 @@ def _write_tile(
         render.extend(sidewalk_here)
     if rooftop_here:
         render.extend(rooftop_here)
+    if city is not None and city.directory is not None:
+        for feature in render:
+            model = feature.get("properties", {}).get("model")
+            if not isinstance(model, dict) or "file" not in model:
+                continue
+            source = city.directory / model.pop("file")
+            asset_dir = target_path / f"{y}_assets"
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, asset_dir / source.name)
+            model["asset"] = f"{x}/{y}_assets/{source.name}"
     # Compact JSON (indent=2 put every coordinate on its own line and dominated
     # the payload); empty tiles get no file.
     if render or traffic_loops or parking_here or lamps_here:

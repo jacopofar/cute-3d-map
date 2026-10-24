@@ -35,7 +35,27 @@ explicit `by_id` / `by_name` form:
 ```
 
 Supported fields: `color`, `roof_color`, `roof_shape`, `facade.windows`,
-`facade.balconies`. City values win over OSM tags and imputed values.
+`facade.balconies`, and `model`. City values win over OSM tags and imputed
+values.
+
+`model` replaces the generated volume with a GLTF asset. The path is relative to
+the city directory and is copied into the tile's `{y}_assets/` folder:
+
+```json
+{
+  "way/89444196": {
+    "model": {
+      "file": "assets/pirelli_uv_basic.glb",
+      "scale": 1.0,
+      "rotation": 0.0,
+      "offset": [0, 0, 0]
+    }
+  }
+}
+```
+
+The frontend centers the asset on the building footprint, applies `scale` and
+`rotation` (degrees around Z), and uses `offset` in model meters.
 
 ## `areas.geojson`
 
@@ -83,8 +103,6 @@ default.
 - `areas.geojson` repeats those overrides as polygons so the Duomo and castle
   building parts inherit them, and paints the Niguarda hospital buildings white
   from the hospital polygon.
+- `buildings.json` replaces the Pirelli tower (`way/89444196`) with
+  `assets/pirelli_uv_basic.glb`.
 - `vehicles.json` is empty until specific line liveries are added.
-
-## GLTF assets
-
-`assets/` is reserved for a later pass; tilegen does not load GLTF yet.
