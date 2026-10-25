@@ -1,9 +1,10 @@
+import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
 import { epsg4326toEpsg3857 } from "../projection";
-import { pitch } from "./pitch";
+import { pitch, pitchFloodlights } from "./pitch";
 
 const ORIGIN: [number, number] = [9.18, 45.5];
 const SCALE = Math.cos((2 * Math.PI * ORIGIN[1]) / 360);
@@ -14,6 +15,7 @@ function pitchFeature(
   sport: string | undefined,
   width = 60,
   height = 40,
+  surface?: string,
 ): Geojson.Feature {
   const degPerMeter = 1 / (111_320 * SCALE);
   const latDegPerMeter = 1 / 111_320;
@@ -35,7 +37,7 @@ function pitchFeature(
         ],
       ],
     },
-    properties: { cmtype: "green", green: "grass", sport },
+    properties: { cmtype: "green", green: "grass", sport, surface },
   } as unknown as Geojson.Feature;
 }
 
@@ -70,6 +72,10 @@ function trackFeature(): Geojson.Feature {
     properties: { cmtype: "green", green: "track", sport: "athletics" },
   } as unknown as Geojson.Feature;
 }
+
+// the coordinates as the tile builder sees them: rings of lon/lat pairs
+const coordinatesOf = (f: Geojson.Feature) =>
+  (f.geometry as unknown as { coordinates: [number, number][][] }).coordinates;
 
 describe("pitch", () => {
   it("gives a soccer pitch paint and a goal frame, but no surface tint", () => {
@@ -194,6 +200,70 @@ describe("pitch", () => {
         expect(cross).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("tints a court by its mapped surface, and the tag beats the sport", () => {
+    // concrete basketball courts are the common Milan case: gray, not the red
+    // rubber an untagged court gets
+    const concrete = pitch(
+      ORIGIN_METERS,
+      SCALE,
+      pitchFeature("basketball", 40, 30, "concrete"),
+    );
+    const gray = new THREE.Color("#8d8a84");
+    const tint = concrete.surface[0].getAttribute("color");
+    expect(tint.getX(0)).toBeCloseTo(gray.r, 3);
+    expect(tint.getY(0)).toBeCloseTo(gray.g, 3);
+    expect(tint.getZ(0)).toBeCloseTo(gray.b, 3);
+
+    // clay is clay
+    const clay = pitch(
+      ORIGIN_METERS,
+      SCALE,
+      pitchFeature("basketball", 40, 30, "clay"),
+    );
+    const red = new THREE.Color("#a8503a");
+    expect(clay.surface[0].getAttribute("color").getX(0)).toBeCloseTo(red.r, 3);
+  });
+
+  it("leaves a court that sits on grass the lawn's colour", () => {
+    // surface=grass removes the sport's tint instead of replacing it: one part
+    // fewer than the same court with a colour, the rest (the net) unchanged
+    const build = (surface: string) =>
+      pitch(ORIGIN_METERS, SCALE, pitchFeature("tennis", 40, 30, surface))
+        .surface.length;
+    const clay = build("clay");
+    expect(build("grass")).toBe(clay - 1);
+    // and an unknown tag falls back to the sport
+    expect(build("lava")).toBe(clay);
+  });
+
+  it("puts four floodlight masts just outside a big pitch", () => {
+    const f = pitchFeature("soccer", 120, 80);
+    const ring = (f.geometry as GeoJSON.Polygon).coordinates[0];
+    const masts = pitchFloodlights("soccer", coordinatesOf(f));
+    expect(masts).toHaveLength(4);
+    // the masts stand outside the ring, so their span is wider on both axes
+    const lons = ring.map((point) => point[0]);
+    const lats = ring.map((point) => point[1]);
+    expect(Math.min(...masts.map((m) => m[0]))).toBeLessThan(Math.min(...lons));
+    expect(Math.max(...masts.map((m) => m[0]))).toBeGreaterThan(
+      Math.max(...lons),
+    );
+    expect(Math.min(...masts.map((m) => m[1]))).toBeLessThan(Math.min(...lats));
+    expect(Math.max(...masts.map((m) => m[1]))).toBeGreaterThan(
+      Math.max(...lats),
+    );
+  });
+
+  it("does not floodlight a tennis court or a small pitch", () => {
+    const tennis = pitchFeature("tennis", 40, 30);
+    const small = pitchFeature("soccer", 40, 30);
+    const big = pitchFeature("soccer", 120, 80);
+    expect(pitchFloodlights("tennis", coordinatesOf(tennis))).toHaveLength(0);
+    expect(pitchFloodlights("soccer", coordinatesOf(small))).toHaveLength(0);
+    expect(pitchFloodlights("hockey", coordinatesOf(big))).toHaveLength(0);
+    expect(pitchFloodlights("soccer", undefined)).toHaveLength(0);
   });
 
   it("refuses a footprint too small to lay a field on", () => {

@@ -26,7 +26,12 @@ import { gate, gateMaterial } from "./elements3d/gate";
 import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
 import { parkPath, parkPathMaterial } from "./elements3d/park_path";
 import { lane, laneMaterial } from "./elements3d/lane";
-import { pitch, pitchMaterial, pitchPaintMaterial } from "./elements3d/pitch";
+import {
+  pitch,
+  pitchFloodlights,
+  pitchMaterial,
+  pitchPaintMaterial,
+} from "./elements3d/pitch";
 import {
   powerTower,
   powerTowerMaterial,
@@ -660,6 +665,9 @@ export interface TileObjects {
   parking: ParkedCar[];
   // street lamps, for the night glow
   lamps: LampSpot[];
+  // the floodlight masts of the pitches in this tile, for the night glow; the
+  // pitch layout computes them, so they need no tile data
+  floodlights: [number, number][];
 }
 
 // the cmtypes that share the generic FeatureInfo picker (aeroway is handled in
@@ -783,6 +791,7 @@ export async function objectsAt(
       aprons: [],
       parking: [],
       lamps: [],
+      floodlights: [],
     };
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
@@ -814,6 +823,7 @@ export async function objectsAt(
       aprons: [],
       parking: [],
       lamps: [],
+      floodlights: [],
     };
   }
   if (!response.ok) {
@@ -828,6 +838,7 @@ export async function objectsAt(
     myGeoJSON as unknown as { parking?: [number, number, number][] },
   );
   const lamps = lampsIn(myGeoJSON as unknown as { lamps?: [number, number][] });
+  const floodlights: [number, number][] = [];
 
   const byKind: Record<string, THREE.BufferGeometry[]> = {};
   const buildings: BuildingInfo[] = [];
@@ -851,6 +862,14 @@ export async function objectsAt(
   const aprons: ApronRing[] = [];
   myGeoJSON.features.forEach((f) => {
     const cmtype = f.properties?.cmtype;
+    if (cmtype === "green") {
+      floodlights.push(
+        ...pitchFloodlights(
+          f.properties?.sport,
+          (f.geometry as { coordinates?: [number, number][][] })?.coordinates,
+        ),
+      );
+    }
     if (cmtype === "traffic_signal" || cmtype === "crossing") {
       // not rendered, but the renderer detects when a car passes one and adds
       // a cosmetic speed bump
@@ -1003,6 +1022,7 @@ export async function objectsAt(
     aprons,
     parking,
     lamps,
+    floodlights,
   };
 }
 

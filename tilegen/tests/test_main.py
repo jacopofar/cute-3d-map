@@ -295,6 +295,42 @@ def test_crosswalk_carries_the_road_bearing_and_width():
     )
 
 
+def test_a_pitch_carries_its_surface_so_the_court_can_be_tinted():
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    pitch = geom(
+        "POLYGON ((9.0 45.0, 9.004 45.0, 9.004 45.0025, 9.0 45.0025, 9.0 45.0))"
+    )
+
+    clay = main.to_green(
+        "way/1",
+        {"leisure": "pitch", "sport": "tennis", "surface": "Clay"},
+        pitch,
+        tile_box,
+    )
+    assert clay is not None
+    # raw and lowercased: the frontend owns the colour table, not tilegen
+    assert clay["properties"]["surface"] == "clay"
+
+    # a running track has a surface too (tartan is the usual one)
+    track_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    track = geom("POLYGON ((9.0 45.0, 9.008 45.0, 9.008 45.004, 9.0 45.004, 9.0 45.0))")
+    tartan = main.to_green(
+        "way/2",
+        {"leisure": "track", "sport": "athletics", "surface": "tartan"},
+        track,
+        track_box,
+    )
+    assert tartan is not None
+    assert tartan["properties"]["surface"] == "tartan"
+
+    # parks and untagged pitches have nothing to tint
+    park = main.to_green(
+        "way/3", {"leisure": "park", "surface": "grass"}, pitch, tile_box
+    )
+    assert park is not None
+    assert "surface" not in park["properties"]
+
+
 def test_a_pitch_carries_its_sport_for_the_frontend_to_paint():
     tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
     pitch = geom(

@@ -1,7 +1,11 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../projection";
+import {
+  epsg3857toEpsg4326,
+  epsg4326toEpsg3857,
+  toModelCoords,
+} from "../projection";
 import { applyVertexColor } from "./vertex_color";
 import { BoxBuilder } from "./box_builder";
 import {
@@ -24,6 +28,22 @@ import {
  * cheap line material.
  */
 
+// What the `surface` tag says about the colour: `known` false means the tag is
+// absent or says nothing about colour, so the sport's guess applies.
+function surfaceTint(surface: unknown): {
+  known: boolean;
+  color: string | null;
+} {
+  if (typeof surface !== "string") return { known: false, color: null };
+  for (const part of surface.split(";")) {
+    const tag = part.trim().toLowerCase();
+    const color = SURFACE_BY_TAG[tag];
+    if (color) return { known: true, color };
+    if (PLAIN_SURFACE.has(tag)) return { known: true, color: null };
+  }
+  return { known: false, color: null };
+}
+
 // The surface sits just above the green plane (-0.02) and the paint above it;
 // both stay under the park paths (0.03) and the lane paint (0.04).
 const SURFACE_Z = 0.01;
@@ -40,6 +60,34 @@ const SURFACE_COLORS: Record<string, string> = {
   beachvolleyball: "#c9b085",
   athletics: "#9c4128", // tartan
 };
+
+// The mapped `surface` beats the sport's guess: a basketball court tagged
+// concrete is gray, not the reddish rubber most outdoor courts are, and a hard
+// tennis court is not clay. Only a quarter of the pitches tag it, so the sport
+// table above stays the default.
+const SURFACE_BY_TAG: Record<string, string> = {
+  clay: "#a8503a",
+  ground: "#8a6a4a", // dirt
+  earth: "#8a6a4a",
+  gravel: "#8f8a7c",
+  concrete: "#8d8a84",
+  asphalt: "#6c6f72",
+  paving_stones: "#8d8a84",
+  tartan: "#9c4128",
+  rubber: "#95503a",
+  acrylic: "#3f6b85",
+  hard: "#3f6b85",
+  sand: "#c9b085",
+};
+
+// a surface that is ground already: the green layer's lawn is the right colour,
+// so the tag removes the sport's tint instead of replacing it
+const PLAIN_SURFACE = new Set([
+  "grass",
+  "artificial_turf",
+  "turf",
+  "synthetic",
+]);
 
 const GOAL_FRAME = new THREE.Color("#f4f4ef");
 const BOARD = new THREE.Color("#e9e7e0");
@@ -302,6 +350,55 @@ function ringSurface(
   return position.count >= 3 ? geometry : null;
 }
 
+// Sports whose ground is big enough to be floodlit with corner masts. The paint
+// is a frontend pass, so the masts are too: no tile data, no rebuild.
+const LIT_SPORTS = new Set([
+  "soccer",
+  "rugby",
+  "rugby_union",
+  "rugby_league",
+  "athletics",
+]);
+
+// a mown field under 60 m is a training area, not a floodlit ground
+const MIN_LIT_LENGTH = 60;
+
+// the masts stand a couple of meters outside the touchline
+const MAST_INSET = 2.5;
+
+/**
+ * The four floodlight masts of a pitch, as lon/lat, for the night lights. Empty
+ * for the sports and the sizes that have none. The layout works in meters, so
+ * the ring is projected first and the masts are projected back. The layout works in
+ * meters, so the ring is projected first and the masts are projected back.
+ */
+export function pitchFloodlights(
+  sport: unknown,
+  rings: readonly (readonly [number, number][])[] | undefined,
+): [number, number][] {
+  const kind = pitchSportOf(sport);
+  if (!kind || !LIT_SPORTS.has(kind)) return [];
+  const ring = rings?.[0];
+  if (!ring || ring.length < 4) return [];
+  const meters = ring.map((point) => epsg4326toEpsg3857([point[0], point[1]]));
+  // metres with a scale of 1 is the same frame the geometry uses
+  const frame = pitchFrame(meters, kind);
+  if (!frame || frame.length * frame.scale < MIN_LIT_LENGTH) return [];
+  const halfLength = frame.length / 2 + MAST_INSET;
+  const halfWidth = frame.width / 2 + MAST_INSET;
+  const masts: [number, number][] = [];
+  for (const along of [-1, 1]) {
+    for (const across of [-1, 1]) {
+      masts.push(
+        epsg3857toEpsg4326(
+          pitchPoint(frame, along * halfLength, across * halfWidth),
+        ),
+      );
+    }
+  }
+  return masts;
+}
+
 /**
  * The pitch geometry of one feature: the court surface and its props in one
  * mesh, the markings in one LineSegments. Both empty for a green that is not a
@@ -313,7 +410,7 @@ export function pitch(
   scaleFactor: number,
   f: Geojson.Feature,
 ): PitchGeometries {
-  const props = f.properties as { sport?: unknown } | null;
+  const props = f.properties as { sport?: unknown; surface?: unknown } | null;
   const sport = pitchSportOf(props?.sport);
   if (!sport) return { surface: [], paint: [] };
   const rings = pitchRings(originMeters, scaleFactor, f);
@@ -322,7 +419,8 @@ export function pitch(
   if (!frame) return { surface: [], paint: [] };
 
   const parts: THREE.BufferGeometry[] = [];
-  const tint = SURFACE_COLORS[sport];
+  const mapped = surfaceTint(props?.surface);
+  const tint = mapped.known ? mapped.color : (SURFACE_COLORS[sport] ?? null);
   if (tint) {
     const surface =
       sport === "athletics"

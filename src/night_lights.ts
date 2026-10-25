@@ -39,6 +39,17 @@ const LAMP_POOL_SIZE = 42;
 const LAMP_GLOW_INTENSITY = 3;
 const LAMP_POOL_INTENSITY = 1.8;
 
+// Pitch floodlights: one cool white mast at each corner of a big pitch and a
+// wide pool of light over the court. Cooler and brighter than the sodium street
+// lamps, which is what makes a lit ground read as a stadium rather than a car
+// park with more lamps.
+const FLOOD_COLOR = 0xdfe9ff;
+const FLOOD_GLOW_SIZE = 30;
+const FLOOD_POOL_SIZE = 130;
+const FLOOD_GLOW_INTENSITY = 3.2;
+const FLOOD_POOL_INTENSITY = 1.35;
+const FLOOD_HEIGHT = 13;
+
 let sharedGlow: THREE.Texture | undefined;
 
 function glowTexture(): THREE.Texture {
@@ -76,6 +87,7 @@ export interface NightLightTile {
   key: string;
   lamps: NightSpot[];
   signals: NightSpot[];
+  floods: NightSpot[];
 }
 
 function lonOf(spot: NightSpot): number {
@@ -158,11 +170,15 @@ function diffTiles(
 interface ResidentNightTile {
   lamps: NightSpot[];
   signals: NightSpot[];
+  floods: NightSpot[];
   glow: THREE.Points | null;
   pool: THREE.Points | null;
   signalGlow: THREE.Points | null;
+  floodGlow: THREE.Points | null;
+  floodPool: THREE.Points | null;
   lampPosts: THREE.InstancedMesh | null;
   signalPosts: THREE.InstancedMesh | null;
+  floodPosts: THREE.InstancedMesh | null;
   // the axis of each signal, aligned with signalGlow's vertices
   axes: number[];
 }
@@ -174,8 +190,11 @@ export class NightLights {
   private readonly lampGlowMaterial: THREE.PointsMaterial;
   private readonly lampPoolMaterial: THREE.PointsMaterial;
   private readonly signalMaterial: THREE.PointsMaterial;
+  private readonly floodGlowMaterial: THREE.PointsMaterial;
+  private readonly floodPoolMaterial: THREE.PointsMaterial;
   private readonly postGeometry: THREE.BufferGeometry;
   private readonly postMaterial: THREE.MeshBasicMaterial;
+  private readonly mastGeometry: THREE.BufferGeometry;
   private readonly dummy = new THREE.Object3D();
   private readonly capacity: number;
   private originMeters: [number, number] = [0, 0];
@@ -183,6 +202,7 @@ export class NightLights {
   private originKnown = false;
   private phase = -1;
   private lampsEnabled = true;
+  private floodlightsEnabled = true;
   private night = 0;
   private zoom = 20;
 
@@ -192,6 +212,8 @@ export class NightLights {
     this.lampGlowMaterial = glowMaterial(LAMP_GLOW_SIZE, 1);
     this.lampPoolMaterial = glowMaterial(LAMP_POOL_SIZE, 0.32);
     this.signalMaterial = glowMaterial(9, 1);
+    this.floodGlowMaterial = glowMaterial(FLOOD_GLOW_SIZE, 1);
+    this.floodPoolMaterial = glowMaterial(FLOOD_POOL_SIZE, 0.3);
     // pole + a small head, so the glows sit on something instead of floating
     const pole = new THREE.BoxGeometry(0.16, 0.16, 4.2);
     pole.translate(0, 0, 2.1);
@@ -200,6 +222,13 @@ export class NightLights {
     this.postGeometry =
       BufferGeometryUtils.mergeGeometries([pole, head]) ?? pole;
     this.postMaterial = new THREE.MeshBasicMaterial({ color: 0x1d2128 });
+    // a floodlight mast: a thin pole with the lamp bank on top
+    const mast = new THREE.BoxGeometry(0.3, 0.3, FLOOD_HEIGHT);
+    mast.translate(0, 0, FLOOD_HEIGHT / 2);
+    const bank = new THREE.BoxGeometry(2.4, 0.8, 0.5);
+    bank.translate(0, 0, FLOOD_HEIGHT + 0.1);
+    this.mastGeometry =
+      BufferGeometryUtils.mergeGeometries([mast, bank]) ?? mast;
   }
 
   /** The resident tiles and the draw calls they own, for stats. */
@@ -214,8 +243,11 @@ export class NightLights {
         tile.glow,
         tile.pool,
         tile.signalGlow,
+        tile.floodGlow,
+        tile.floodPool,
         tile.lampPosts,
         tile.signalPosts,
+        tile.floodPosts,
       ]) {
         if (mesh) total += 1;
       }
@@ -245,7 +277,11 @@ export class NightLights {
 
     const wanted = new Map<string, NightLightTile>();
     for (const tile of tiles) {
-      if (tile.lamps.length > 0 || tile.signals.length > 0) {
+      if (
+        tile.lamps.length > 0 ||
+        tile.signals.length > 0 ||
+        tile.floods.length > 0
+      ) {
         wanted.set(tile.key, tile);
       }
     }
@@ -254,7 +290,11 @@ export class NightLights {
     for (const key of diff.kept) {
       const entry = this.tiles.get(key)!;
       const tile = wanted.get(key)!;
-      if (entry.lamps === tile.lamps && entry.signals === tile.signals) {
+      if (
+        entry.lamps === tile.lamps &&
+        entry.signals === tile.signals &&
+        entry.floods === tile.floods
+      ) {
         continue;
       }
       // a reloaded tile handed us fresh arrays: rebuild just this tile
@@ -271,16 +311,23 @@ export class NightLights {
     const glow = this.makeLampGlow(tile);
     const pool = this.makeLampPool(tile);
     const signalGlow = this.makeSignalGlow(tile);
+    const floodGlow = this.makeFloodGlow(tile);
+    const floodPool = this.makeFloodPool(tile);
     const lampPosts = this.makePosts("lamppost", tile.key, tile.lamps);
     const signalPosts = this.makePosts("signal_post", tile.key, tile.signals);
+    const floodPosts = this.makeMasts(tile.key, tile.floods);
     this.tiles.set(tile.key, {
       lamps: tile.lamps,
       signals: tile.signals,
+      floods: tile.floods,
       glow,
       pool,
       signalGlow,
+      floodGlow,
+      floodPool,
       lampPosts,
       signalPosts,
+      floodPosts,
       axes: tile.signals.map((spot) => hashSpot(lonOf(spot), latOf(spot)) % 2),
     });
     if (tile.signals.length > 0) this.phase = -1;
@@ -354,6 +401,75 @@ export class NightLights {
     );
   }
 
+  private makeFloodGlow(tile: NightLightTile): THREE.Points | null {
+    if (tile.floods.length === 0) return null;
+    const color = new THREE.Color(FLOOD_COLOR);
+    const colors = new Float32Array(tile.floods.length * 3);
+    for (let i = 0; i < tile.floods.length; i++) {
+      colors[i * 3] = color.r * FLOOD_GLOW_INTENSITY;
+      colors[i * 3 + 1] = color.g * FLOOD_GLOW_INTENSITY;
+      colors[i * 3 + 2] = color.b * FLOOD_GLOW_INTENSITY;
+    }
+    return this.points(
+      this.positionsOf(tile.floods, FLOOD_HEIGHT + 0.2),
+      colors,
+      this.floodGlowMaterial,
+      "floodlight",
+      tile.key,
+    );
+  }
+
+  private makeFloodPool(tile: NightLightTile): THREE.Points | null {
+    if (tile.floods.length === 0) return null;
+    const color = new THREE.Color(FLOOD_COLOR);
+    const colors = new Float32Array(tile.floods.length * 3);
+    for (let i = 0; i < tile.floods.length; i++) {
+      colors[i * 3] = color.r * FLOOD_POOL_INTENSITY;
+      colors[i * 3 + 1] = color.g * FLOOD_POOL_INTENSITY;
+      colors[i * 3 + 2] = color.b * FLOOD_POOL_INTENSITY;
+    }
+    return this.points(
+      this.positionsOf(tile.floods, 0.3),
+      colors,
+      this.floodPoolMaterial,
+      "floodlight_pool",
+      tile.key,
+    );
+  }
+
+  // the masts: the same instanced posts, on the taller geometry
+  private makeMasts(
+    tileKey: string,
+    spots: NightSpot[],
+  ): THREE.InstancedMesh | null {
+    if (spots.length === 0) return null;
+    const capacity = Math.min(this.capacity, spots.length);
+    const masts = new THREE.InstancedMesh(
+      this.mastGeometry,
+      this.postMaterial,
+      capacity,
+    );
+    for (let i = 0; i < capacity; i++) {
+      const m = toModelCoords(
+        [lonOf(spots[i]), latOf(spots[i])],
+        this.originMeters,
+        this.scaleFactor,
+      );
+      this.dummy.position.set(m[0], m[1], 0);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.setScalar(1);
+      this.dummy.updateMatrix();
+      masts.setMatrixAt(i, this.dummy.matrix);
+    }
+    masts.count = capacity;
+    masts.frustumCulled = false;
+    masts.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    masts.instanceMatrix.needsUpdate = true;
+    masts.userData = { kind: "floodlight_mast", tile: tileKey };
+    this.scene.add(masts);
+    return masts;
+  }
+
   private points(
     positions: number[],
     colors: Float32Array,
@@ -411,12 +527,18 @@ export class NightLights {
   private removeTile(key: string): void {
     const tile = this.tiles.get(key);
     if (!tile) return;
-    for (const points of [tile.glow, tile.pool, tile.signalGlow]) {
+    for (const points of [
+      tile.glow,
+      tile.pool,
+      tile.signalGlow,
+      tile.floodGlow,
+      tile.floodPool,
+    ]) {
       if (!points) continue;
       points.geometry.dispose();
       points.removeFromParent();
     }
-    for (const posts of [tile.lampPosts, tile.signalPosts]) {
+    for (const posts of [tile.lampPosts, tile.signalPosts, tile.floodPosts]) {
       if (!posts) continue;
       // the post geometry and material are shared, so dispose only this
       // mesh's instance buffers
@@ -443,6 +565,13 @@ export class NightLights {
     this.applyVisibility();
   }
 
+  // the pitch floodlights belong to the pitches layer: hiding the courts hides
+  // the light they are playing under
+  setFloodlightsEnabled(enabled: boolean): void {
+    this.floodlightsEnabled = enabled;
+    this.applyVisibility();
+  }
+
   private applyVisibility(): void {
     const detailed = this.zoom >= NIGHT_LIGHT_MIN_ZOOM;
     const dark = this.night > 0.2;
@@ -454,6 +583,10 @@ export class NightLights {
     this.lampGlowMaterial.size = LAMP_GLOW_SIZE * (0.45 + 0.55 * zoomFactor);
     this.lampPoolMaterial.opacity = 0.32 * (0.2 + 0.8 * zoomFactor);
     this.lampPoolMaterial.size = LAMP_POOL_SIZE * (0.5 + 0.5 * zoomFactor);
+    this.floodGlowMaterial.opacity = 0.25 + 0.75 * zoomFactor;
+    this.floodGlowMaterial.size = FLOOD_GLOW_SIZE * (0.5 + 0.5 * zoomFactor);
+    this.floodPoolMaterial.opacity = 0.3 * (0.25 + 0.75 * zoomFactor);
+    this.floodPoolMaterial.size = FLOOD_POOL_SIZE * (0.55 + 0.45 * zoomFactor);
 
     for (const tile of this.tiles.values()) {
       if (tile.glow) {
@@ -467,6 +600,15 @@ export class NightLights {
       }
       if (tile.signalGlow) tile.signalGlow.visible = detailed && dark;
       if (tile.signalPosts) tile.signalPosts.visible = detailed;
+      if (tile.floodGlow) {
+        tile.floodGlow.visible = detailed && dark && this.floodlightsEnabled;
+      }
+      if (tile.floodPool) {
+        tile.floodPool.visible = detailed && dark && this.floodlightsEnabled;
+      }
+      if (tile.floodPosts) {
+        tile.floodPosts.visible = detailed && this.floodlightsEnabled;
+      }
     }
   }
 

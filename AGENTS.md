@@ -164,11 +164,16 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   which sits in the corner of the footprint the area's centroid leans away from
   (`ANCHORED`), with the foul lines along the square's edges, the fence as the
   quarter circle between them and the diamond and mound inside. `pitch.ts`
-  adds a clay/rubber/sand surface for the sports that are not grass, the goals
+  adds a clay/rubber/sand surface for the sports that are not grass (a mapped
+  `surface` tag beats the sport's guess: concrete basketball courts are gray,
+  not red rubber), the goals
   (posts and crossbar, 3 m on a small pitch, rugby's 5.6 m H), the basketball
   hoops (pole, board, rim) and the tennis, padel and volleyball nets. A baseball
   or softball footprint is capped in scale (`MAX_SCALE`), since OSM sometimes
-  maps the whole sports centre rather than the field. A `leisure=track` mapped for
+  maps the whole sports centre rather than the field. `pitchFloodlights` gives
+  the night lights four mast positions for the grounds big enough to have them
+  (soccer, rugby and athletics over 60 m), so this pass is a night pass too. A
+  `leisure=track` mapped for
   athletics or running is the same pass: tilegen emits it as a green with
   `green: "track"` and the `athletics` sport, the tartan is the ring itself
   (infield hole and all, not a fitted rectangle) and the paint is nine
@@ -325,12 +330,17 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   Roofs and church crosses route to the building below; a hidden layer is not
   pickable. The generic popup is one label plus the OSM link.
 - `src/night_lights.ts` — the night light sources: street lamps (`lamps` tile
-  block) and traffic-signal heads (`signals` from the signal Points). Warm lamp
+  block), traffic-signal heads (`signals` from the signal Points) and the pitch
+  floodlights (`TileObjects.floodlights`, computed by the pitch pass). Warm lamp
   sprites plus a wider ground "pool", red/green signal sprites on the global 8 s
-  light, all on a thin instanced post. One draw call per layer; visible at night
-  above `NIGHT_LIGHT_MIN_ZOOM` (15), and only for the 3x3 centre tiles. The
-  `#lampposts-toggle` checkbox hides the lamps/pools/posts only; signal heads
-  stay.
+  light, all on a thin instanced post. The floodlights are the cooler, brighter
+  set: a 13 m mast with its lamp bank on top at each corner of a lit ground, a
+  glow on each and a wide pool per mast, which spreads the light over the court
+  instead of leaving a spotlight in the middle. One draw call per layer; visible
+  at night above `NIGHT_LIGHT_MIN_ZOOM` (15), and only for the 3x3 centre tiles.
+  The `#lampposts-toggle` checkbox hides the lamps/pools/posts only (signal heads
+  and floodlights stay); the floodlights follow `#pitches-toggle`, since they are
+  the light the court is played under.
 - `src/perf.ts` — frame timing (`PerfReporter`, a two-second fps window), the
   fire-and-forget perf POST (`VITE_PERF_ENDPOINT`, a no-op when unset) and
   `sceneStats`: the read-only counters the benchmark and the e2e read back.
@@ -504,7 +514,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   markings and the goals, hoops and nets are their own per-tile kinds (`pitch`
   and `pitch_paint`), so `#pitches-toggle` hides the court and leaves the lawn.
   `sport` may be a ";" list, and the frontend paints the first entry it has a
-  layout for; hockey, handball, cricket and the rest stay flat green.
+  layout for; hockey, handball, cricket and the rest stay flat green. The court's
+  colour comes from the sport unless the tile carries a `surface` the frontend
+  knows (clay, concrete, asphalt, tartan, rubber, acrylic/hard, sand, gravel,
+  dirt); `grass` and `artificial_turf` mean "no tint, the lawn is right". A pitch
+  big enough to be floodlit hands the night layer four mast positions.
 - **track** — a `leisure=track` mapped for athletics or running, emitted as a
   green with `green: "track"` and the `athletics` sport. Its polygon is the
   tartan ring (the infield is a hole), so the pitch pass fills the ring rather
@@ -616,6 +630,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   tile. The frontend places the occupied cars along it. The layer is static and
   gated like the facade detail; lamps are deliberately not part of this
   authoring pass.
+- **floodlight** — the four corner masts of a lit pitch, computed from the pitch
+  frame (no tile data): a 13 m mast with its lamp bank at each corner, a cool
+  white glow on each and a wide pool of light on the ground. Only the grounds big
+  enough to have one (soccer, rugby and athletics over 60 m) get them, they
+  follow `#pitches-toggle`, and they appear with the street lamps at night above
+  zoom 15 for the 3x3 centre tiles.
 - **street lamp / signal head** — the night light sources. Lamps are
   `[lon, lat]` in a tile's top-level `lamps` block; a signal head is a
   `traffic_signal` Point. Both are additive sprites on a thin instanced post,

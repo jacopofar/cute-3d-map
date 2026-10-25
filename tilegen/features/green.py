@@ -168,6 +168,20 @@ def track_green(tags) -> str | None:
     return "track" if sports & TRACK_SPORTS else None
 
 
+def pitch_surface(tags) -> str | None:
+    """The mapped `surface` of a pitch or track, passed through raw.
+
+    The frontend has one colour table for the tags it knows (clay, concrete,
+    asphalt, tartan, sand) and falls back to the sport's guess for the rest, so
+    an unknown value costs nothing and needs no rebuild."""
+    if tags.get("leisure") not in ("pitch", "track"):
+        return None
+    value = tags.get("surface")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip().lower()
+
+
 def pitch_sport(tags) -> str | None:
     """The `sport` of a pitch, passed through for the frontend to paint.
 
@@ -199,6 +213,7 @@ def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
         "cmtype": "green",
         "green": kind,
         "sport": pitch_sport(tags),
+        "surface": pitch_surface(tags),
         "name": tags.get("name"),
     }
     return {

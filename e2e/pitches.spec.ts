@@ -109,6 +109,62 @@ test("a running track paints its lanes and names itself in the popup", async ({
   expect(errors).toEqual([]);
 });
 
+test("a floodlit ground lights up at night, and its checkbox takes the light with it", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`/${TRACK}`);
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
+
+  // the time slider is how the spec forces night
+  await page.evaluate(() => {
+    const slider = document.querySelector<HTMLInputElement>("#time-slider");
+    if (!slider) throw new Error("no #time-slider");
+    slider.value = "21.5";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  const floods = () =>
+    page.evaluate(() => {
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+      const out = { total: 0, visible: false, masts: 0 };
+      map.scene.traverse((object) => {
+        const kind = object.userData?.kind;
+        if (kind === "floodlight" || kind === "floodlight_pool") {
+          out.total += 1;
+          out.visible ||= object.visible;
+        } else if (kind === "floodlight_mast") {
+          out.masts += 1;
+        }
+      });
+      return out;
+    });
+  await expect
+    .poll(async () => (await floods()).visible, { timeout: 30_000 })
+    .toBe(true);
+  expect((await floods()).masts).toBeGreaterThan(0);
+
+  // the floodlights belong to the court: hiding the pitches hides the light,
+  // and the street lamps are a different row
+  await page.click("#layer-menu-button");
+  await page.click("#pitches-toggle input");
+  await expect
+    .poll(async () => (await floods()).visible, { timeout: 15_000 })
+    .toBe(false);
+  await page.click("#pitches-toggle input");
+  await expect
+    .poll(async () => (await floods()).visible, { timeout: 15_000 })
+    .toBe(true);
+
+  expect(errors).toEqual([]);
+});
+
 test("pitches draw their court and paint, and the checkbox hides just those", async ({
   page,
 }) => {

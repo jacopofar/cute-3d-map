@@ -69,6 +69,8 @@ class GreenProperties(TypedDict, total=False):
     green: str
     # a sports pitch: the `sport` tag, passed through for the frontend's paint
     sport: str
+    # the mapped `surface`, so the court can be tinted by what it is made of
+    surface: str
     name: str
 
 

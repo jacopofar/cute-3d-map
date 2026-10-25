@@ -81,6 +81,7 @@ from features import (  # noqa: F401 - re-exported for the existing API/tests
     parse_length,
     parse_level,
     pitch_sport,
+    pitch_surface,
     portal_angle,
     power_wire_height,
     road_width,

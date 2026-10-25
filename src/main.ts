@@ -1341,6 +1341,8 @@ class CoolMap implements MapDebug {
       // the markings are unreadable from further out; the green stays
       visible: () =>
         this.pitchesEnabled && this.map.getZoom() >= PITCH_MIN_ZOOM,
+      // the floodlights are part of the court's look
+      after: () => this.applyNightLightsVisibility(),
     },
     {
       id: "fence",
@@ -1540,10 +1542,11 @@ class CoolMap implements MapDebug {
         const key = `${x}_${y}`;
         const lamps = this.tiles.get(key)?.objects.lamps ?? [];
         const signals = this.tiles.get(key)?.objects.signals ?? [];
-        if (lamps.length > 0 || signals.length > 0) {
+        const floods = this.tiles.get(key)?.objects.floodlights ?? [];
+        if (lamps.length > 0 || signals.length > 0 || floods.length > 0) {
           // the raw per-tile arrays are the identity the layer diffs on, so do
           // not copy them here
-          tiles.push({ key, lamps, signals });
+          tiles.push({ key, lamps, signals, floods });
         }
       }
     }
@@ -1555,6 +1558,9 @@ class CoolMap implements MapDebug {
 
   private applyNightLightsVisibility() {
     this.nightLights?.setLampsEnabled(this.lamppostsEnabled);
+    // a court's floodlights go with the court, so the pitches checkbox drives
+    // them instead of a row of their own
+    this.nightLights?.setFloodlightsEnabled(this.pitchesEnabled);
     this.nightLights?.setVisible(this.light.night, this.map.getZoom());
   }
 

@@ -22,6 +22,31 @@ export function epsg4326toEpsg3857(
   return [x, y];
 }
 
+// EPSG:3857 meters back to WGS84 degrees, the inverse of the approximation
+// above. Only the night lights need it: they are handed lon/lat spots, but the
+// pitch layout works in meters.
+export function epsg3857toEpsg4326(
+  coordinates: [number, number],
+): [number, number] {
+  const lon = (coordinates[0] / 20037508.34) * 180;
+  const latRad =
+    2 * Math.atan(Math.exp((coordinates[1] / 20037508.34) * Math.PI)) -
+    Math.PI / 2;
+  return [lon, (latRad * 180) / Math.PI];
+}
+
+// Model coordinates back to lon/lat, the inverse of `toModelCoords`.
+export function fromModelCoords(
+  coord: [number, number],
+  originMeters: [number, number],
+  scaleFactor: number,
+): [number, number] {
+  return epsg3857toEpsg4326([
+    coord[0] / scaleFactor + originMeters[0],
+    coord[1] / scaleFactor + originMeters[1],
+  ]);
+}
+
 // Model coordinates are meters relative to the projection origin, squeezed by
 // cos(latitude) so a degree of longitude is not stretched wider than a degree
 // of latitude on screen.
