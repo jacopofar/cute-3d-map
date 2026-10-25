@@ -24,6 +24,13 @@ import {
   toModelCoords,
 } from "./projection.ts";
 import { objectsAt } from "./geojson_data.ts";
+import { escapeHtml, osmLink } from "./ui/html.ts";
+import {
+  checkboxStates,
+  savedCheckbox,
+  restoreCheckboxStates,
+  saveCheckboxStates,
+} from "./ui/checkboxes.ts";
 import type {
   ApronRing,
   BarrierInfo,
@@ -172,19 +179,7 @@ const BASEMAP_NIGHT_AT = 0.5;
 // over a daylight scene would only wash out the roofs
 const BLOOM_NIGHT_AT = 0.35;
 
-const HTML_ENTITIES: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => HTML_ENTITIES[c] ?? c);
-}
-
-// the OSM page for a feature id like "way/1234" (tilegen writes those ids as-is)
+// what the furniture popup calls each mapped kind
 const FURNITURE_LABELS: Record<string, string> = {
   bollard: "Bollard",
   bin: "Waste basket",
@@ -280,6 +275,14 @@ const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {
   custom_model: "when-visible",
 };
 
+// One per-tile layer whose checkbox is a plain visibility switch.
+interface LayerSwitch {
+  id: string;
+  kinds: string[];
+  visible: () => boolean;
+  after?: () => void;
+}
+
 // One entry per mesh kind that resolves to a point feature: `at` searches the
 // tile data around the hit point, `select` opens the popup for what it found.
 // The pair is type-checked at the `picker()` call and erased to `unknown`
@@ -308,12 +311,6 @@ function picker<T>(
     at: at.bind(owner),
     select: (info, lngLat) => select.call(owner, info as T, lngLat),
   };
-}
-
-function osmLink(id: string | undefined): string | null {
-  if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
-  const url = `https://www.openstreetmap.org/${id}`;
-  return `${escapeHtml(id)} (<a href="${url}" target="_blank" rel="noopener">OSM</a>)`;
 }
 
 // ringContains / ringDistance live in feature_pick.ts: the generic picker and
@@ -398,16 +395,6 @@ function webGPUSupported(): boolean {
 
 // The layers menu owns every checkbox, but the night and inspect switches are
 // outside it; collect all of them by id so the report always matches the DOM.
-function checkboxStates(): Record<string, boolean> {
-  const states: Record<string, boolean> = {};
-  document
-    .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
-    .forEach((input, index) => {
-      const label = input.closest("label");
-      states[label?.id || input.id || `checkbox-${index}`] = input.checked;
-    });
-  return states;
-}
 
 // Build-time opt-in: without an endpoint the reporting path is a no-op and no
 // request leaves the page. Both names are accepted so an existing .env with
@@ -415,49 +402,6 @@ function checkboxStates(): Record<string, boolean> {
 const PERF_ENDPOINT = String(
   import.meta.env.PERF_ENDPOINT ?? import.meta.env.VITE_PERF_ENDPOINT ?? "",
 ).trim();
-
-const CHECKBOX_COOKIE = "map-checkboxes";
-const CHECKBOX_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
-
-function readCheckboxCookie(): Record<string, boolean> {
-  const prefix = `${CHECKBOX_COOKIE}=`;
-  const entry = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(prefix));
-  if (!entry) return {};
-  try {
-    const parsed: unknown = JSON.parse(
-      decodeURIComponent(entry.slice(prefix.length)),
-    );
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        ([key, value]) => key.length > 0 && typeof value === "boolean",
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function restoreCheckboxStates() {
-  for (const [id, checked] of Object.entries(readCheckboxCookie())) {
-    const label = document.getElementById(id);
-    const input = label?.querySelector<HTMLInputElement>(
-      'input[type="checkbox"]',
-    );
-    if (input) input.checked = checked;
-  }
-}
-
-function saveCheckboxStates() {
-  const value = encodeURIComponent(JSON.stringify(checkboxStates()));
-  const secure = location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${CHECKBOX_COOKIE}=${value}; Max-Age=${CHECKBOX_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
-}
 
 class CoolMap {
   tileCenter: [number, number];
@@ -611,7 +555,7 @@ class CoolMap {
   constructor(tileCenter: [number, number], zoomLevel: number = 16) {
     // A saved day/night switch wins over the solar seed, so the first basemap
     // is the one the user last chose instead of a frame of the other one.
-    const savedNight = readCheckboxCookie()["night-toggle"];
+    const savedNight = savedCheckbox("night-toggle");
     if (savedNight !== undefined) {
       this.timeOfDay = savedNight ? NIGHT_HOUR : DAY_HOUR;
       this.lighting = lightingAt(this.timeOfDay);
@@ -1106,57 +1050,57 @@ class CoolMap {
     });
     wireToggle("#roof-shapes-toggle", (on) => {
       this.roofShapesEnabled = on;
-      this.applyRoofVisibility();
+      this.applyLayer("roof");
     });
     wireToggle("#water-toggle", (on) => {
       this.waterEnabled = on;
-      this.applyWaterVisibility();
+      this.applyLayer("water");
     });
     wireToggle("#basemap-toggle", (on) => {
       this.setBasemapEnabled(on);
     });
     wireToggle("#sidewalks-toggle", (on) => {
       this.sidewalksEnabled = on;
-      this.applySidewalkVisibility();
+      this.applyLayer("sidewalk");
     });
     wireToggle("#walls-toggle", (on) => {
       this.wallsEnabled = on;
-      this.applyWallVisibility();
+      this.applyLayer("wall");
     });
     wireToggle("#rooftop-toggle", (on) => {
       this.rooftopsEnabled = on;
-      this.applyRooftopVisibility();
+      this.applyLayer("rooftop");
     });
     wireToggle("#power-lines-toggle", (on) => {
       this.powerLinesEnabled = on;
-      this.applyPowerVisibility();
+      this.applyLayer("power");
     });
     wireToggle("#park-paths-toggle", (on) => {
       this.parkPathsEnabled = on;
-      this.applyParkPathVisibility();
+      this.applyLayer("park_path");
     });
     wireToggle("#bloom-toggle", (on) => {
       this.bloomEnabled = on;
     });
     wireToggle("#benches-toggle", (on) => {
       this.benchesEnabled = on;
-      this.applyBenchVisibility();
+      this.applyLayer("bench");
     });
     wireToggle("#churches-toggle", (on) => {
       this.churchesEnabled = on;
-      this.applyChurchVisibility();
+      this.applyLayer("church");
     });
     wireToggle("#parks-toggle", (on) => {
       this.parksEnabled = on;
-      this.applyGreenVisibility();
+      this.applyLayer("green");
     });
     wireToggle("#airplanes-toggle", (on) => {
       this.airplanesEnabled = on;
-      this.applyAirplaneVisibility();
+      this.applyLayer("airplanes");
     });
     wireToggle("#fences-toggle", (on) => {
       this.fencesEnabled = on;
-      this.applyFenceVisibility();
+      this.applyLayer("fence");
     });
     wireToggle("#parked-cars-toggle", (on) => {
       this.parkedCarsEnabled = on;
@@ -1168,11 +1112,11 @@ class CoolMap {
     });
     wireToggle("#bridges-toggle", (on) => {
       this.bridgesEnabled = on;
-      this.applyBridgeVisibility();
+      this.applyLayer("bridge");
     });
     wireToggle("#transit-toggle", (on) => {
       this.transitEnabled = on;
-      this.applyTransitVisibility();
+      this.applyLayer("transit");
     });
     wireToggle("#imputed-colors-toggle", (on) => {
       if (on === this.imputedColorsEnabled) return;
@@ -2789,8 +2733,9 @@ class CoolMap {
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
-      this.applyPowerVisibility();
-      this.applyParkPathVisibility();
+      // a tile can arrive after its checkbox was toggled, so it picks up the
+      // current switches here (this covers the power and park-path layers too)
+      this.applyTileVisibility();
       this.refreshSunShadow();
     } catch (e) {
       // leave the tile out of the store so a later move retries it
@@ -2888,152 +2833,102 @@ class CoolMap {
     }
   }
 
-  // roofs are their own mesh per tile, so this is just visibility too
-  private applyRoofVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "roof") {
-        mesh.visible = this.roofShapesEnabled;
+  // Every per-tile layer whose checkbox is a plain visibility switch: the mesh
+  // kinds it owns, when it should be drawn, and anything else that follows the
+  // same switch (the airplane layer has both tarmac meshes and planes). One row
+  // per layer replaced an `apply...Visibility` method each, which is where the
+  // checkboxes kept drifting out of step with the meshes.
+  private readonly layerSwitches: LayerSwitch[] = [
+    { id: "roof", kinds: ["roof"], visible: () => this.roofShapesEnabled },
+    { id: "water", kinds: ["water"], visible: () => this.waterEnabled },
+    { id: "bench", kinds: ["bench"], visible: () => this.benchesEnabled },
+    { id: "church", kinds: ["church"], visible: () => this.churchesEnabled },
+    { id: "green", kinds: ["green"], visible: () => this.parksEnabled },
+    { id: "rooftop", kinds: ["rooftop"], visible: () => this.rooftopsEnabled },
+    {
+      id: "park_path",
+      kinds: ["park_path"],
+      visible: () => this.parkPathsEnabled,
+    },
+    {
+      id: "power",
+      kinds: ["power_tower", "power_wire"],
+      visible: () => this.powerLinesEnabled,
+    },
+    {
+      id: "wall",
+      kinds: ["wall", "gate"],
+      visible: () => this.wallsEnabled,
+    },
+    {
+      id: "bridge",
+      kinds: ["bridge", "tunnel"],
+      visible: () => this.bridgesEnabled,
+    },
+    {
+      id: "transit",
+      kinds: ["transit_stop", "metro_sign", "platform", "rail"],
+      visible: () => this.transitEnabled,
+    },
+    {
+      id: "sidewalk",
+      kinds: ["sidewalk"],
+      visible: () =>
+        this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM,
+    },
+    {
+      id: "fence",
+      kinds: ["fence"],
+      // the geometry is in the tile either way (it is cheap), only the drawing
+      // waits for the zoom
+      visible: () => this.fencesEnabled && this.map.getZoom() >= FENCE_MIN_ZOOM,
+    },
+    {
+      id: "airplanes",
+      kinds: ["aeroway"],
+      visible: () => this.airplanesEnabled,
+      after: () => this.airplanes?.setEnabled(this.airplanesEnabled),
+    },
+  ];
+
+  // kind -> layer, so a visibility pass is one map lookup per mesh rather than
+  // a scan of every switch
+  private kindToLayer?: Map<string, LayerSwitch>;
+
+  private layerForKind(): Map<string, LayerSwitch> {
+    if (!this.kindToLayer) {
+      this.kindToLayer = new Map();
+      for (const layer of this.layerSwitches) {
+        for (const kind of layer.kinds) this.kindToLayer.set(kind, layer);
       }
-    });
+    }
+    return this.kindToLayer;
   }
 
-  // water is a per-tile mesh as well, so its checkbox is a visibility switch
-  private applyWaterVisibility() {
+  // re-apply one layer after its checkbox changed
+  private applyLayer(id: string) {
+    const layer = this.layerSwitches.find((candidate) => candidate.id === id);
+    if (!layer) return;
+    const on = layer.visible();
     this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "water") {
-        mesh.visible = this.waterEnabled;
-      }
-    });
-  }
-
-  // benches are a per-tile mesh too
-  private applyBenchVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "bench") {
-        mesh.visible = this.benchesEnabled;
-      }
-    });
-  }
-
-  // rooftop accessories are their own per-tile mesh, so the checkbox is a
-  // plain visibility switch
-  private applyRooftopVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "rooftop") {
-        mesh.visible = this.rooftopsEnabled;
-      }
-    });
-  }
-
-  private applyParkPathVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "park_path") {
-        mesh.visible = this.parkPathsEnabled;
-      }
-    });
-  }
-
-  private applyPowerVisibility() {
-    this.forEachMesh((mesh) => {
-      const kind = mesh.userData.kind;
-      if (kind === "power_tower" || kind === "power_wire") {
-        mesh.visible = this.powerLinesEnabled;
-      }
-    });
-  }
-
-  private applyWallVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "wall" || mesh.userData.kind === "gate") {
-        mesh.visible = this.wallsEnabled;
-      }
-    });
-  }
-
-  private applySidewalkVisibility() {
-    const on = this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM;
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "sidewalk") mesh.visible = on;
-    });
-  }
-
-  private applyTransitVisibility() {
-    this.forEachMesh((mesh) => {
-      const kind = mesh.userData.kind;
-      if (
-        kind === "transit_stop" ||
-        kind === "metro_sign" ||
-        kind === "platform" ||
-        kind === "rail"
-      ) {
-        mesh.visible = this.transitEnabled;
-      }
-    });
-  }
-
-  private applyBridgeVisibility() {
-    this.forEachMesh((mesh) => {
-      const kind = mesh.userData.kind;
-      if (kind === "bridge" || kind === "tunnel") {
-        mesh.visible = this.bridgesEnabled;
-      }
-    });
-  }
-
-  // fences are a per-tile mesh too, gated on the zoom: the geometry is in the
-  // tile either way (it is cheap), only the drawing waits for the zoom
-  private applyFenceVisibility() {
-    const on = this.fencesEnabled && this.map.getZoom() >= FENCE_MIN_ZOOM;
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "fence") {
+      if (layer.kinds.includes(mesh.userData.kind as string)) {
         mesh.visible = on;
       }
     });
+    layer.after?.();
   }
 
-  // ... and so is the church ornament: only the crosses go away, the walls are
-  // plain buildings
-  private applyChurchVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "church") {
-        mesh.visible = this.churchesEnabled;
-      }
-    });
-  }
-
-  // ... and so is the green layer
-  private applyGreenVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "green") {
-        mesh.visible = this.parksEnabled;
-      }
-    });
-  }
-
-  // the airplane checkbox switches both the tarmac meshes and the plane layer
-  private applyAirplaneVisibility() {
-    this.forEachMesh((mesh) => {
-      if (mesh.userData.kind === "aeroway") {
-        mesh.visible = this.airplanesEnabled;
-      }
-    });
-    this.airplanes?.setEnabled(this.airplanesEnabled);
-  }
-
-  // the per-tile layers whose checkbox is just a visibility switch
+  // re-apply every one of them; also the pass that runs after a tile loads, so
+  // a tile arriving late picks up the current switches
   private applyTileVisibility() {
-    this.applyRoofVisibility();
-    this.applyWaterVisibility();
-    this.applyBenchVisibility();
-    this.applyChurchVisibility();
-    this.applyGreenVisibility();
-    this.applyAirplaneVisibility();
-    this.applyFenceVisibility();
-    this.applyBridgeVisibility();
-    this.applyTransitVisibility();
-    this.applySidewalkVisibility();
-    this.applyWallVisibility();
-    this.applyRooftopVisibility();
+    const index = this.layerForKind();
+    const on = new Map<LayerSwitch, boolean>();
+    for (const layer of this.layerSwitches) on.set(layer, layer.visible());
+    this.forEachMesh((mesh) => {
+      const layer = index.get(mesh.userData.kind as string);
+      if (layer) mesh.visible = on.get(layer) ?? false;
+    });
+    for (const layer of this.layerSwitches) layer.after?.();
   }
 
   private disposeDetail(detail: TileRecord["detail"]): void {

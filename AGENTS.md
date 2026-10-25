@@ -49,18 +49,24 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
   `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
-  center (`loadUnloadCoord`), debounced 150 ms. Every loaded tile is one
-  `TileRecord` in the `tiles` map: the merged meshes in the scene plus
-  everything the pickers, the drive collision and the moving layers read back,
-  so a layer is one field, not a map of its own. The map carries its view in a
-  `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre reads and writes it)
-  and the projection origin is seeded from wherever the map opens. The scene
-  lights, sun shadows (a 2 km cascade following the view, received only by the
-  ground catcher), sky/fog, the dawn/dusk grade and the night-light visibility
-  are driven from `applyLighting()`.
+  center (`loadUnloadCoord`), debounced 150 ms. The per-tile layers whose
+  checkbox is a plain visibility switch are rows in `layerSwitches` (mesh
+  kinds, when to draw, anything else that follows the same switch). Every
+  loaded tile is one `TileRecord` in the `tiles` map: the merged meshes in the
+  scene plus everything the pickers, the drive collision and the moving layers
+  read back, so a layer is one field, not a map of its own. The map carries
+  its view in a `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre
+  reads and writes it) and the projection origin is seeded from wherever the
+  map opens. The scene lights, sun shadows (a 2 km cascade following the
+  view, received only by the ground catcher), sky/fog, the dawn/dusk grade and
+  the night-light visibility are driven from `applyLighting()`.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
+- `src/ui/html.ts` — `escapeHtml` and the OSM link the click popups are built
+  from. `src/ui/checkboxes.ts` — the layer checkboxes' state, remembered in one
+  cookie keyed by the label id, with `restoreCheckboxStates` /
+  `saveCheckboxStates` / `savedCheckbox` as the whole surface.
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
   squeeze). It lives on its own so the geometry builders, the pickers and their
