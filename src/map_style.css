@@ -91,6 +91,10 @@ body {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  /* the list has outgrown a laptop viewport: scroll it instead of letting the
+     last rows (imputed colors, the help mark) fall off the bottom edge */
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
 }
 
 #layer-menu-panel[hidden] {
