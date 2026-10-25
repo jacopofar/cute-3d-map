@@ -100,6 +100,8 @@ const FENCE_MIN_ZOOM = 18;
 const HOVER_THROTTLE_MS = 80;
 // sidewalks are a street-level detail; the slabs are cheap but there are many
 const SIDEWALK_MIN_ZOOM = 16;
+// lane paint only reads once the road is wide enough on screen to carry it
+const LANE_MIN_ZOOM = 16;
 // One per-tile layer whose checkbox is a plain visibility switch.
 interface LayerSwitch {
   id: string;
@@ -203,6 +205,8 @@ class CoolMap implements MapDebug {
   private waterEnabled = true;
   // benches are their own per-tile mesh too
   private benchesEnabled = true;
+  // lane paint: per-tile line sets, gated on the zoom
+  private lanesEnabled = true;
   // the church cross is a per-tile mesh as well: the toggle hides the ornament,
   // the church walls stay buildings (its stony look is baked into them)
   private churchesEnabled = true;
@@ -1300,6 +1304,14 @@ class CoolMap implements MapDebug {
       set: (on) => (this.sidewalksEnabled = on),
       visible: () =>
         this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM,
+    },
+    {
+      id: "lane",
+      kinds: ["lane"],
+      toggle: "#lanes-toggle",
+      set: (on) => (this.lanesEnabled = on),
+      // paint is noise at city scale: it appears with the sidewalks
+      visible: () => this.lanesEnabled && this.map.getZoom() >= LANE_MIN_ZOOM,
     },
     {
       id: "fence",

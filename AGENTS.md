@@ -140,6 +140,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   directions, width, lanes and `turn:lanes`; merged per tile (kind
   `road_marking`), no popup. A two-way road gets the line on the right half,
   a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/lane.ts` / `lane_layout.ts` — the lane paint: the layout is
+  pure maths (which dividers a carriageway gets, and how a dash pattern runs
+  along a polyline without restarting at every corner), unit-tested like the
+  facade and tombstone layouts; `lane.ts` turns the segments into one
+  `LineSegments` per tile (kind `lane`). The road surface itself is the
+  basemap's, so this is paint only, gated at zoom 16.
 - `src/elements3d/rooftop.ts` — mapped water towers, chimneys, antennas and
   solar generators placed on the carrying building's roof (`base` from
   tilegen); a solar polygon keeps its footprint as a flat panel surface, a
@@ -396,10 +402,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **cmtype** — the per-feature kind tag in a tile: `building`, `tree`,
   `tree_row`, `water`, `cemetery`, `furniture`, `fountain`, `transit_stop`,
   `terrace`, `playground`, `monument`, `construction`, `crosswalk`,
-  `road_marking`, `platform`, `rail`, `park_path`, `power_tower`, `power_line`,
-  `traffic_signal`, `crossing` (the road/rail network is not emitted; routes
-  come from `traffic`). A `building:part` is still `cmtype: "building"`, with a
-  `base` elevation.
+  `road_marking`, `lane`, `platform`, `rail`, `park_path`, `power_tower`,
+  `power_line`, `traffic_signal`, `crossing` (the road/rail network is not
+  emitted; routes come from `traffic`, and `lane` carries only the way's
+  centerline plus width and lane count). A `building:part` is still
+  `cmtype: "building"`, with a `base` elevation.
 - **building part** — a `building:part=*` footprint drawn like a building but
   starting at its `min_height`/`min_level` instead of the street. `height` is
   the top elevation; without it, `max_level` or `building:levels` gives the
@@ -451,6 +458,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **crosswalk** — a marked `highway=crossing` with the road bearing and width;
   the frontend draws zebra bars along the road, repeated across it; clickable.
   The plain `crossing` point is kept only for the traffic slowdown.
+- **lane** — a drivable way clipped to the tile, with its carriageway width,
+  lane count and direction, so the frontend can paint the dividers. It is the
+  only emitted road geometry: the road surface comes from the basemap. Paint is
+  drawn as `LineSegments` (a dash is two vertices), one solid centre line for a
+  two-way road and a 3 m / 6 m dash per interior lane edge, gated at zoom 16
+  behind `#lanes-toggle`.
 - **road marking** — a stop, give-way or signal node with approach directions,
   width, lanes and turn tags; the frontend draws a stop/give-way line and lane
   arrows. It is paint, not a clickable object.
@@ -575,7 +588,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#roof-shapes-toggle`, `#water-toggle`, `#basemap-toggle`, `#benches-toggle`,
   `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`, `#fences-toggle`,
   `#bridges-toggle`, `#parked-cars-toggle`, `#lampposts-toggle`,
-  `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`, `#rooftop-toggle`,
+  `#transit-toggle`, `#sidewalks-toggle`, `#lanes-toggle`, `#walls-toggle`,
+  `#rooftop-toggle`,
   `#power-lines-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
   balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
   bridges & tunnels, parked cars, lamp posts and power lines are their own

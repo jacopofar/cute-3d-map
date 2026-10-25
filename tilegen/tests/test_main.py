@@ -295,6 +295,55 @@ def test_crosswalk_carries_the_road_bearing_and_width():
     )
 
 
+def test_lane_features_carry_width_lanes_and_direction():
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    road = geom("LINESTRING (9.0 45.0, 9.02 45.02)")
+
+    two_way = main.to_lane(
+        "way/1", {"highway": "residential", "lanes": "2"}, road, tile_box
+    )
+    assert two_way is not None
+    assert two_way["properties"]["cmtype"] == "lane"
+    assert two_way["properties"]["lanes"] == 2
+    assert two_way["properties"]["oneway"] is False
+    # two lanes and no width tag: 2 * 3.25 m plus a metre of shoulder
+    assert two_way["properties"]["width"] == 7.5
+    # clipped to the tile, like water: a road spans many tiles
+    assert two_way["geometry"]["type"] == "LineString"
+    clipped = shapely.from_geojson(json.dumps(two_way["geometry"]))
+    assert clipped.within(tile_box)
+
+    tagged = main.to_lane(
+        "way/2",
+        {"highway": "primary", "lanes": "6", "oneway": "yes", "width": "18"},
+        road,
+        tile_box,
+    )
+    assert tagged is not None
+    assert tagged["properties"]["lanes"] == 6
+    assert tagged["properties"]["oneway"] is True
+    assert tagged["properties"]["width"] == 18.0
+
+    # one lane has nothing to divide; a service way carries no paint; a plaza
+    # mapped as a highway area is not a lane
+    assert (
+        main.to_lane("way/3", {"highway": "residential", "lanes": "1"}, road, tile_box)
+        is None
+    )
+    assert (
+        main.to_lane("way/4", {"highway": "service", "lanes": "4"}, road, tile_box)
+        is None
+    )
+    assert (
+        main.to_lane("way/5", {"highway": "residential", "area": "yes"}, road, tile_box)
+        is None
+    )
+    # lanes are inferred from the width when the tag is missing
+    wide = main.to_lane("way/6", {"highway": "secondary"}, road, tile_box)
+    assert wide is not None
+    assert wide["properties"]["lanes"] == 3  # 10 m / 3.25
+
+
 def test_road_markings_carry_directions_and_lanes():
     roads = {
         20: main.RoadData(

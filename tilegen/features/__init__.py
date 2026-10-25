@@ -265,6 +265,9 @@ from .roads import (
     crossing_is_marked as crossing_is_marked,
 )
 from .roads import (
+    is_lane_road as is_lane_road,
+)
+from .roads import (
     parse_lane_count as parse_lane_count,
 )
 from .roads import (
@@ -275,6 +278,9 @@ from .roads import (
 )
 from .roads import (
     to_crosswalk as to_crosswalk,
+)
+from .roads import (
+    to_lane as to_lane,
 )
 from .roads import (
     to_road_marking as to_road_marking,

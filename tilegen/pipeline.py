@@ -33,6 +33,7 @@ from features import (
     is_cemetery,
     is_construction,
     is_green,
+    is_lane_road,
     is_monument,
     is_park_path,
     is_playground,
@@ -56,6 +57,7 @@ from features import (
     to_furniture,
     to_gate,
     to_green,
+    to_lane,
     to_monument,
     to_park_path,
     to_platform,
@@ -185,6 +187,8 @@ def _render_feature(
             to_crossing(feature_id, tags, s),
             to_crosswalk(feature_id, tags, s, road_data),
         ]
+    if is_lane_road(tags):
+        return [to_lane(feature_id, tags, s, tile_box)]
     if tags.get("amenity") == "bench":
         return [to_bench(feature_id, tags, s)]
     if is_rail_platform(tags):

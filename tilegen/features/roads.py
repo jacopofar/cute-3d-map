@@ -207,6 +207,62 @@ def to_road_marking(
     }
 
 
+# Roads wide enough to carry painted lanes. Ramps and service ways are left out:
+# a 5 m service way is one lane with no paint, and a link would paint the
+# junction twice on top of the road it leaves.
+LANE_HIGHWAYS = frozenset(
+    {
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "unclassified",
+        "residential",
+        "living_street",
+        "road",
+    }
+)
+
+
+def is_lane_road(tags) -> bool:
+    return tags.get("highway") in LANE_HIGHWAYS and tags.get("area") != "yes"
+
+
+def to_lane(feature_id, tags, s, tile_box) -> TileFeature | None:
+    """A drivable way clipped to the tile, with what the frontend needs to paint
+    its dividers: carriageway width, lane count and direction.
+
+    Like water, the way is clipped (a road spans many tiles); unlike a building
+    it stays a line, because lane paint is offsets of the centreline."""
+    if not is_lane_road(tags):
+        return None
+    width = road_width(tags)
+    lanes = parse_lane_count(tags, width)
+    if lanes < 2:
+        # one lane has no divider to draw
+        return None
+    clipped = s.intersection(tile_box)
+    if clipped.is_empty:
+        return None
+    geometry = json.loads(shapely.to_geojson(clipped))
+    if geometry["type"] not in ("LineString", "MultiLineString"):
+        return None
+    properties = {
+        "cmtype": "lane",
+        "width": round(width, 1),
+        "lanes": lanes,
+        "oneway": tags.get("oneway") in ("yes", "true", "1", "-1"),
+        "highway": tags.get("highway"),
+    }
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": geometry,
+        "properties": {k: v for k, v in properties.items() if v is not None},
+    }
+
+
 def to_crosswalk(
     feature_id, tags, s, road_data: dict[int, RoadData] | None
 ) -> TileFeature | None:

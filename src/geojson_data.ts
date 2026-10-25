@@ -25,6 +25,7 @@ import { wall, wallMaterial } from "./elements3d/wall";
 import { gate, gateMaterial } from "./elements3d/gate";
 import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
 import { parkPath, parkPathMaterial } from "./elements3d/park_path";
+import { lane, laneMaterial } from "./elements3d/lane";
 import {
   powerTower,
   powerTowerMaterial,
@@ -71,6 +72,52 @@ import {
   tunnelMaterial,
 } from "./elements3d/bridge";
 
+// One material per merged kind. The entries are factories so the one that needs a
+// canvas (the metro "M") stays lazy: the geometry builders are unit-tested in
+// node, where there is no DOM.
+const MATERIALS: Record<string, () => THREE.Material> = {
+  building: () => buildingMaterial,
+  tree: () => treeSurfaceMaterial,
+  glass: () => glassMaterial,
+  church: () => churchMaterial,
+  water: () => waterMaterial,
+  green: () => greenMaterial,
+  cemetery: () => cemeteryMaterial,
+  furniture: () => furnitureMaterial,
+  fountain: () => fountainMaterial,
+  fountain_water: () => fountainWaterMaterial,
+  transit_stop: () => transitStopMaterial,
+  metro_sign: () => metroSignMaterial(),
+  terrace: () => terraceMaterial,
+  playground: () => playgroundMaterial,
+  monument: () => monumentMaterial,
+  construction: () => constructionMaterial,
+  crosswalk: () => crosswalkMaterial,
+  road_marking: () => roadMarkingMaterial,
+  lane: () => laneMaterial,
+  platform: () => platformMaterial,
+  rail: () => railMaterial,
+  sidewalk: () => sidewalkMaterial,
+  wall: () => wallMaterial,
+  gate: () => gateMaterial,
+  rooftop: () => rooftopMaterial,
+  park_path: () => parkPathMaterial,
+  power_tower: () => powerTowerMaterial,
+  power_wire: () => powerWireMaterial,
+  aeroway: () => aerowayMaterial,
+  fence: () => fenceMaterial,
+  bridge: () => bridgeMaterial,
+  tunnel: () => tunnelMaterial,
+  bench: () => benchMaterial,
+};
+
+// kinds drawn as line segments rather than triangles
+const LINE_KINDS = new Set(["power_wire", "lane"]);
+
+function materialFor(kind: string): THREE.Material {
+  return MATERIALS[kind]?.() ?? treeSurfaceMaterial;
+}
+
 export function geoJSONtoGeometries(
   f: Geojson.Feature,
   originMeters: [number, number],
@@ -106,6 +153,7 @@ export function geoJSONtoGeometries(
     | "park_path"
     | "power_tower"
     | "power_wire"
+    | "lane"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -284,6 +332,14 @@ export function geoJSONtoGeometries(
       },
     ];
   }
+  if (f.properties.cmtype === "lane") {
+    return [
+      {
+        kind: "lane",
+        geometries: lane(originMeters, scaleFactor, f),
+      },
+    ];
+  }
   if (f.properties.cmtype === "power_tower") {
     return [
       {
@@ -336,9 +392,6 @@ export function geoJSONtoGeometries(
 // colors, so a whole tile renders in a single draw call per kind instead of
 // one mesh per feature
 const buildingMaterial = new THREE.MeshToonMaterial({ vertexColors: true });
-// trees are lit too, so they shade with the sun instead of being flat; their
-// material also carries the wind-sway vertex patch
-const treeMaterial = treeSurfaceMaterial;
 // benches are lit the same way, so their wood and metal shade
 const benchMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 // the church ornament (a cross) is lit as well, and small enough that the
@@ -871,78 +924,10 @@ export async function objectsAt(
     // skip the group: it used to take the whole tile down with it.
     const merged = BufferGeometryUtils.mergeGeometries(geometries);
     if (merged) {
-      const material =
-        kind === "building"
-          ? buildingMaterial
-          : kind === "glass"
-            ? glassMaterial
-            : kind === "church"
-              ? churchMaterial
-              : kind === "water"
-                ? waterMaterial
-                : kind === "green"
-                  ? greenMaterial
-                  : kind === "cemetery"
-                    ? cemeteryMaterial
-                    : kind === "furniture"
-                      ? furnitureMaterial
-                      : kind === "fountain"
-                        ? fountainMaterial
-                        : kind === "fountain_water"
-                          ? fountainWaterMaterial
-                          : kind === "transit_stop"
-                            ? transitStopMaterial
-                            : kind === "metro_sign"
-                              ? metroSignMaterial()
-                              : kind === "terrace"
-                                ? terraceMaterial
-                                : kind === "playground"
-                                  ? playgroundMaterial
-                                  : kind === "monument"
-                                    ? monumentMaterial
-                                    : kind === "construction"
-                                      ? constructionMaterial
-                                      : kind === "crosswalk"
-                                        ? crosswalkMaterial
-                                        : kind === "road_marking"
-                                          ? roadMarkingMaterial
-                                          : kind === "platform"
-                                            ? platformMaterial
-                                            : kind === "rail"
-                                              ? railMaterial
-                                              : kind === "sidewalk"
-                                                ? sidewalkMaterial
-                                                : kind === "wall"
-                                                  ? wallMaterial
-                                                  : kind === "gate"
-                                                    ? gateMaterial
-                                                    : kind === "rooftop"
-                                                      ? rooftopMaterial
-                                                      : kind === "park_path"
-                                                        ? parkPathMaterial
-                                                        : kind === "power_tower"
-                                                          ? powerTowerMaterial
-                                                          : kind ===
-                                                              "power_wire"
-                                                            ? powerWireMaterial
-                                                            : kind === "aeroway"
-                                                              ? aerowayMaterial
-                                                              : kind === "fence"
-                                                                ? fenceMaterial
-                                                                : kind ===
-                                                                    "bridge"
-                                                                  ? bridgeMaterial
-                                                                  : kind ===
-                                                                      "tunnel"
-                                                                    ? tunnelMaterial
-                                                                    : kind ===
-                                                                        "bench"
-                                                                      ? benchMaterial
-                                                                      : treeMaterial;
-      const mesh =
-        kind === "power_wire"
-          ? new THREE.LineSegments(merged, material)
-          : new THREE.Mesh(merged, material);
+      const material = materialFor(kind);
+      const mesh = LINE_KINDS.has(kind)
+        ? new THREE.LineSegments(merged, material)
+        : new THREE.Mesh(merged, material);
       mesh.userData = { kind, tileKey: `${x}_${y}` };
       // The custom layer writes MapLibre's projection straight into
       // camera.projectionMatrix, so three's frustum planes are only approximately

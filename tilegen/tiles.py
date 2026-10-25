@@ -108,6 +108,16 @@ class RoadMarkingProperties(TypedDict, total=False):
     turn_lanes_backward: list[str]
 
 
+class LaneProperties(TypedDict, total=False):
+    """A drivable way, for the lane paint the frontend draws itself."""
+
+    cmtype: Required[Literal["lane"]]
+    width: float
+    lanes: int
+    oneway: bool
+    highway: str
+
+
 class StopPointProperties(TypedDict):
     """The data-only signal and crossing points."""
 
@@ -300,6 +310,7 @@ BY_CMTYPE: dict[str, Any] = {
     "cemetery": CemeteryProperties,
     "construction": ConstructionProperties,
     "crosswalk": CrosswalkProperties,
+    "lane": LaneProperties,
     "road_marking": RoadMarkingProperties,
     "traffic_signal": StopPointProperties,
     "crossing": StopPointProperties,
