@@ -117,8 +117,8 @@ test("benches, trees and park paths open their OSM popups", async ({
     { timeout: 45_000 },
   );
   // the trees are in the neighbouring tiles, which can still be in flight when
-  // the bench's own tile lands: wait for enough of them to be in view instead
-  // of guessing with a fixed delay
+  // the bench's own tile lands: wait for one to be in view instead of guessing
+  // with a fixed delay (the sweep below tries several of them anyway)
   await page.waitForFunction(
     () => {
       const map = (window as unknown as { __coolMap: any }).__coolMap;
@@ -140,7 +140,7 @@ test("benches, trees and park paths open their OSM popups", async ({
           }
         }
       }
-      return inView >= 3;
+      return inView >= 1;
     },
     null,
     { timeout: 45_000 },

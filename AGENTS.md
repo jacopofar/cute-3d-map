@@ -194,6 +194,15 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   sinks; a footprint too complex to roof keeps its flat cap and the cross stands
   just above it. The cross is its own per-tile kind (`church`), so its checkbox
   hides just the ornament.
+- `src/selection.ts` — the click selection: which mesh a ray hit, the ground ring
+  that marks it and the popup that describes it. One `Selection` owns the ring
+  and the popup; the point-feature pickers (`waterAt`, `furnitureAt`, ...) are a
+  table keyed by mesh kind, so a new layer is a row, and `pickStatic` resolves a
+  hit to a point feature, a fence or wall, a generic OSM feature, a solar panel
+  or the building below it. It reaches the map through a four-field
+  `SelectionHost` (`tiles`, `map`, `scene`, `center`, `rooftopsVisible`).
+  `TileRecord` (in `src/tile_record.ts`) is one loaded tile: its meshes and the
+  tile data the pickers read back.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; one instance per fleet (`CAR_TRAFFIC`, `TRAIN_TRAFFIC`, `BUS_TRAFFIC`,
   `TRAM_TRAFFIC`). It places a slice of vehicles per update at ~30 Hz (spread
