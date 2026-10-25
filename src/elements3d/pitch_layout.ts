@@ -27,10 +27,23 @@ export interface PitchFrame {
 // angle still lines up.
 const FIELDS: Record<string, [number, number]> = {
   soccer: [105, 68],
+  futsal: [40, 20],
+  "five-a-side": [40, 20],
   tennis: [23.77, 10.97],
+  padel: [20, 10],
   basketball: [28, 15],
+  // a multi-use court is drawn as the basketball one: hoops and all
+  multi: [28, 15],
   volleyball: [18, 9],
+  beachvolleyball: [16, 8],
+  // a 400 m track: 84.39 m straights, 36.5 m inner radius, 8 lanes of 1.22 m
+  athletics: [176.91, 92.52],
 };
+
+// How long the drawn field has to be to be worth painting, in meters. A
+// throwing area or a warm-up strip tagged `athletics` is not a track, and a
+// 20 m oval with eight lanes reads as scribble.
+const MIN_DRAWN_LENGTH: Record<string, number> = { athletics: 80 };
 
 // OSM sometimes draws the pitch with its run-off and sometimes just the playing
 // surface; a meter of margin keeps the paint off the polygon edge either way.
@@ -123,6 +136,7 @@ export function pitchFrame(
   if (availableLength <= 1 || availableWidth <= 1) return null;
   const scale = Math.min(availableLength / field[0], availableWidth / field[1]);
   if (!Number.isFinite(scale) || scale <= MIN_SCALE) return null;
+  if (field[0] * scale < (MIN_DRAWN_LENGTH[sport] ?? 0)) return null;
 
   const cu = (minU + maxU) / 2;
   const cv = (minV + maxV) / 2;
@@ -223,6 +237,30 @@ function arc(
   return out;
 }
 
+// A stadium (the shape of a running track): two straights and a half circle at
+// each end. Every lane shares the straights' ends, so only the radius grows.
+function stadium(
+  frame: PitchFrame,
+  halfStraight: number,
+  radius: number,
+  steps = 12,
+): Segment[] {
+  return [
+    line(frame, -halfStraight, radius, halfStraight, radius),
+    line(frame, -halfStraight, -radius, halfStraight, -radius),
+    ...arc(frame, halfStraight, 0, radius, -Math.PI / 2, Math.PI / 2, steps),
+    ...arc(
+      frame,
+      -halfStraight,
+      0,
+      radius,
+      Math.PI / 2,
+      (3 * Math.PI) / 2,
+      steps,
+    ),
+  ];
+}
+
 /**
  * The markings of one pitch, in model space. Every layout starts from the outer
  * line of the field; the goal frames, hoops and nets are `pitch.ts`'s job.
@@ -230,7 +268,9 @@ function arc(
 export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
   const length = frame.length / 2;
   const width = frame.width / 2;
-  const out = rect(frame, -length, -width, length, width);
+  // a track is an oval: its lane outlines are the boundary, so no rectangle
+  const out =
+    sport === "athletics" ? [] : rect(frame, -length, -width, length, width);
 
   if (sport === "soccer") {
     // halfway line and centre circle (9.15 m, FIFA)
@@ -241,6 +281,36 @@ export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
       const goalLine = end * length;
       out.push(...rect(frame, goalLine, -20.16, goalLine - end * 16.5, 20.16));
       out.push(...rect(frame, goalLine, -9.16, goalLine - end * 5.5, 9.16));
+    }
+  }
+
+  if (sport === "futsal" || sport === "five-a-side") {
+    // halfway, a 3 m centre circle and the 6 m "D" in front of each goal
+    out.push(line(frame, 0, -width, 0, width));
+    out.push(...circle(frame, 0, 0, 3));
+    for (const end of [-1, 1]) {
+      const goal = end * length;
+      out.push(
+        ...arc(
+          frame,
+          goal,
+          0,
+          6,
+          end < 0 ? -Math.PI / 2 : Math.PI / 2,
+          end < 0 ? Math.PI / 2 : (3 * Math.PI) / 2,
+          12,
+        ),
+      );
+    }
+  }
+
+  if (sport === "padel") {
+    // the net, a service line 3 m into each side, and the centre line joining
+    // them: the walls are mapped as ways, so the box is the paint's job
+    out.push(line(frame, 0, -width, 0, width));
+    for (const end of [-1, 1]) {
+      out.push(line(frame, end * 3, -width, end * 3, width));
+      out.push(line(frame, 0, 0, end * 3, 0));
     }
   }
 
@@ -257,7 +327,7 @@ export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
     out.push(line(frame, 0, -width, 0, width));
   }
 
-  if (sport === "basketball") {
+  if (sport === "basketball" || sport === "multi") {
     out.push(line(frame, 0, -width, 0, width));
     out.push(...circle(frame, 0, 0, 1.8));
     for (const end of [-1, 1]) {
@@ -296,6 +366,23 @@ export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
     out.push(line(frame, 0, -width, 0, width));
     out.push(line(frame, -3, -width, -3, width));
     out.push(line(frame, 3, -width, 3, width));
+  }
+  // beach volleyball paints its boundary and nothing else: the net divides the
+  // sand and there is no attack line to draw
+
+  if (sport === "athletics") {
+    // Nine stadium outlines: the inner kerb, the seven lane dividers and the
+    // outer edge. The straights all end on the same two lines, so only the
+    // radius grows from the 36.5 m kerb to the 46.26 m outer edge.
+    const halfStraight = length - width;
+    const innerRadius = 36.5;
+    const lanes = 8;
+    const laneWidth = (width - innerRadius) / lanes;
+    for (let lane = 0; lane <= lanes; lane++) {
+      out.push(...stadium(frame, halfStraight, innerRadius + lane * laneWidth));
+    }
+    // the finish line, across the track at the end of the home straight
+    out.push(line(frame, halfStraight, -innerRadius, halfStraight, -width));
   }
 
   return out;

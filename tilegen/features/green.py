@@ -55,7 +55,7 @@ def green_kind(tags) -> str | None:
 
 
 def is_green(tags) -> bool:
-    return green_kind(tags) is not None
+    return green_kind(tags) is not None or track_green(tags) is not None
 
 
 # cemeteries: the ground is a clipped polygon like a park; the frontend fills it
@@ -152,6 +152,22 @@ def to_cemetery(feature_id, tags, s, tile_box) -> TileFeature | None:
     }
 
 
+# A running track is drawn as the athletics oval it carries: `sport=running` is
+# the same thing on the ground, so it normalizes to athletics.
+TRACK_SPORTS = frozenset({"athletics", "running"})
+
+
+def track_green(tags) -> str | None:
+    """The green style of a running track, or None.
+
+    Only the athletics and running tracks: a velodrome, a karting circuit or a
+    horse track is not green ground and keeps its basemap colour."""
+    if tags.get("leisure") != "track":
+        return None
+    sports = {part.strip().lower() for part in (tags.get("sport") or "").split(";")}
+    return "track" if sports & TRACK_SPORTS else None
+
+
 def pitch_sport(tags) -> str | None:
     """The `sport` of a pitch, passed through for the frontend to paint.
 
@@ -159,6 +175,9 @@ def pitch_sport(tags) -> str | None:
     ``GREEN_GRASS_LEISURE``), so nothing here draws it: the frontend decides
     which sports it has a layout for. ``sport`` can be a ";" list, so the raw
     value travels and the frontend picks the first entry it knows."""
+    if tags.get("leisure") == "track":
+        # the track's own sport: the frontend paints the athletics lanes
+        return "athletics" if track_green(tags) else None
     if tags.get("leisure") != "pitch":
         return None
     value = tags.get("sport")
@@ -170,7 +189,7 @@ def pitch_sport(tags) -> str | None:
 def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A green area as a render feature, clipped to the tile like water (a park
     spans many tiles). The `green` sub-kind selects the frontend shader style."""
-    kind = green_kind(tags)
+    kind = green_kind(tags) or track_green(tags)
     if kind is None or s.geom_type not in ("Polygon", "MultiPolygon"):
         return None
     clipped = _flatten(s.intersection(tile_box), "Polygon")

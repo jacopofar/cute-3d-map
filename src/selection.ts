@@ -102,6 +102,20 @@ const FOUNTAIN_PICK_RADIUS = 8;
 // hidden layer must not be pickable either. The kinds with no toggle of their
 // own (buildings, trees, painted markings, ...) are always pickable; a kind
 // missing from this table has no popup at all.
+// the popup's name for the sports a pitch can be; anything else is generic
+const PITCH_LABELS: Record<string, string> = {
+  soccer: "Soccer pitch",
+  futsal: "Futsal pitch",
+  "five-a-side": "Five-a-side pitch",
+  tennis: "Tennis court",
+  padel: "Padel court",
+  basketball: "Basketball court",
+  multi: "Multi-use court",
+  volleyball: "Volleyball court",
+  beachvolleyball: "Beach volleyball court",
+  athletics: "Athletics track",
+};
+
 const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {
   building: "always",
   glass: "always",
@@ -904,11 +918,7 @@ export class Selection {
         // a pitch keeps its green style but deserves its own name
         if (info.sport) {
           const sport = pitchSportOf(info.sport);
-          if (sport === "soccer") return "Soccer pitch";
-          if (sport === "tennis") return "Tennis court";
-          if (sport === "basketball") return "Basketball court";
-          if (sport === "volleyball") return "Volleyball court";
-          return "Sports pitch";
+          return (sport && PITCH_LABELS[sport]) ?? "Sports pitch";
         }
         return info.subtype === "dense" ? "Park" : "Green area";
       case "cemetery":

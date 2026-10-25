@@ -27,6 +27,14 @@ describe("pitchSportOf", () => {
     expect(pitchSportOf("tennis;basketball")).toBe("tennis");
   });
 
+  it("knows the small-court sports too", () => {
+    expect(pitchSportOf("beachvolleyball")).toBe("beachvolleyball");
+    expect(pitchSportOf("padel")).toBe("padel");
+    expect(pitchSportOf("futsal")).toBe("futsal");
+    expect(pitchSportOf("multi;basketball")).toBe("multi");
+    expect(pitchSportOf("running;athletics")).toBe("athletics");
+  });
+
   it("ignores sports it has no layout for, and rubbish", () => {
     expect(pitchSportOf("rugby")).toBeNull();
     expect(pitchSportOf("")).toBeNull();
@@ -74,6 +82,12 @@ describe("pitchFrame", () => {
       ),
     ).toBeNull();
   });
+
+  it("refuses an athletics area too small to be a track", () => {
+    // a throwing circle or a warm-up strip tagged athletics is not an oval
+    expect(pitchFrame(box(40, 30), "athletics")).toBeNull();
+    expect(pitchFrame(box(120, 70), "athletics")).not.toBeNull();
+  });
 });
 
 describe("pitchPoint", () => {
@@ -114,6 +128,38 @@ describe("pitchPaint", () => {
     // 4 sides + halfway + centre circle + per end: key (4) + circle (16) +
     // two straights + arc (16)
     expect(paint.length).toBe(4 + 1 + 24 + 2 * (4 + 16 + 2 + 16));
+  });
+
+  it("draws the small-pitch set for futsal and five-a-side", () => {
+    for (const sport of ["futsal", "five-a-side"]) {
+      // 4 sides + halfway + the 3 m centre circle (24 segments) + two 12-segment Ds
+      expect(pitchPaint(sport, frame(sport)).length).toBe(4 + 1 + 24 + 24);
+    }
+  });
+
+  it("draws the net, service and centre lines for padel", () => {
+    // 4 sides + net + two service lines + two centre service lines
+    expect(pitchPaint("padel", frame("padel")).length).toBe(4 + 1 + 2 + 2);
+  });
+
+  it("leaves a beach volleyball court with just its boundary", () => {
+    // the net divides the sand; there is no centre or attack line to paint
+    expect(
+      pitchPaint("beachvolleyball", frame("beachvolleyball")),
+    ).toHaveLength(4);
+  });
+
+  it("draws basketball's set for a multi-use court", () => {
+    expect(pitchPaint("multi", frame("multi"))).toEqual(
+      pitchPaint("basketball", frame("basketball")),
+    );
+  });
+
+  it("draws nine lane outlines and a finish line for a track", () => {
+    const track = pitchPaint("athletics", frame("athletics"));
+    // each stadium is two straights plus two 12-segment half circles, and the
+    // outer one replaces the rectangle a court would get
+    expect(track.length).toBe(9 * (2 + 12 + 12) + 1);
   });
 
   it("draws the centre and attack lines for volleyball", () => {

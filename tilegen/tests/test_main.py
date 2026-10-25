@@ -324,6 +324,37 @@ def test_a_pitch_carries_its_sport_for_the_frontend_to_paint():
     assert "sport" not in untagged["properties"]
 
 
+def test_a_running_track_is_green_ground_with_an_athletics_oval():
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    oval = geom("POLYGON ((9.0 45.0, 9.008 45.0, 9.008 45.004, 9.0 45.004, 9.0 45.0))")
+
+    # leisure=track with a running sport: green ground, painted as athletics
+    track = main.to_green(
+        "way/1", {"leisure": "track", "sport": "athletics"}, oval, tile_box
+    )
+    assert track is not None
+    assert track["properties"]["cmtype"] == "green"
+    assert track["properties"]["green"] == "track"
+    assert track["properties"]["sport"] == "athletics"
+
+    # sport=running is the same oval on the ground
+    running = main.to_green(
+        "way/2", {"leisure": "track", "sport": "running"}, oval, tile_box
+    )
+    assert running is not None
+    assert running["properties"]["sport"] == "athletics"
+
+    # a velodrome or a karting circuit is not green ground, and not painted
+    for other in ("cycling", "karting", "horse_racing", None):
+        tags = (
+            {"leisure": "track"}
+            if other is None
+            else {"leisure": "track", "sport": other}
+        )
+        assert main.to_green("way/3", tags, oval, tile_box) is None
+        assert not main.is_green(tags)
+
+
 def test_lane_features_carry_width_lanes_and_direction():
     tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
     road = geom("LINESTRING (9.0 45.0, 9.02 45.02)")

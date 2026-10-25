@@ -39,6 +39,38 @@ function pitchFeature(
   } as unknown as Geojson.Feature;
 }
 
+// a 400 m track as OSM maps it: the tartan ring with the infield as a hole
+function trackFeature(): Geojson.Feature {
+  const offset = (x: number, y: number): [number, number] => [
+    ORIGIN[0] + x / (111_320 * SCALE),
+    ORIGIN[1] + y / 111_320,
+  ];
+  // a stadium ring: two straights and a half circle at each end
+  const ring = (halfLength: number, radius: number) => {
+    const straight = halfLength - radius;
+    const points: [number, number][] = [];
+    for (const centre of [straight, -straight]) {
+      for (let i = 0; i <= 12; i++) {
+        const sweep =
+          (centre > 0 ? -1 : 1) * (Math.PI / 2) + (i / 12) * Math.PI;
+        points.push(
+          offset(centre + Math.cos(sweep) * radius, Math.sin(sweep) * radius),
+        );
+      }
+    }
+    points.push(points[0]);
+    return points;
+  };
+  return {
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [ring(88.5, 46.2), ring(78.7, 36.5)],
+    },
+    properties: { cmtype: "green", green: "track", sport: "athletics" },
+  } as unknown as Geojson.Feature;
+}
+
 describe("pitch", () => {
   it("gives a soccer pitch paint and a goal frame, but no surface tint", () => {
     const { surface, paint } = pitch(
@@ -55,7 +87,15 @@ describe("pitch", () => {
   });
 
   it("paints a court surface for the sports that are not grass", () => {
-    for (const sport of ["tennis", "basketball", "volleyball"]) {
+    for (const sport of [
+      "tennis",
+      "basketball",
+      "volleyball",
+      "padel",
+      "futsal",
+      "beachvolleyball",
+      "multi",
+    ]) {
       const { surface, paint } = pitch(
         ORIGIN_METERS,
         SCALE,
@@ -66,8 +106,36 @@ describe("pitch", () => {
     }
   });
 
+  it("fills a track's ring with tartan and paints its lanes", () => {
+    const { surface, paint } = pitch(ORIGIN_METERS, SCALE, trackFeature());
+    expect(surface).toHaveLength(1);
+    // the tint is the ring itself, holes and all, not a fitted rectangle: a
+    // rectangle would cover the grass infield
+    expect(surface[0].getAttribute("position").count).toBeGreaterThan(6);
+    expect(paint[0].getAttribute("position").count).toBeGreaterThan(0);
+  });
+
+  it("refuses an athletics area too small to be a track", () => {
+    const { surface, paint } = pitch(
+      ORIGIN_METERS,
+      SCALE,
+      pitchFeature("athletics", 40, 30),
+    );
+    expect(surface).toHaveLength(0);
+    expect(paint).toHaveLength(0);
+  });
+
   it("merges a whole tile's worth of parts, which is how the layer draws it", () => {
-    for (const sport of ["soccer", "tennis", "basketball", "volleyball"]) {
+    for (const sport of [
+      "soccer",
+      "tennis",
+      "basketball",
+      "volleyball",
+      "padel",
+      "futsal",
+      "beachvolleyball",
+      "multi",
+    ]) {
       const { surface } = pitch(ORIGIN_METERS, SCALE, pitchFeature(sport));
       // a mismatch in the attribute sets would return null here, and the tile
       // pass would silently drop the whole kind

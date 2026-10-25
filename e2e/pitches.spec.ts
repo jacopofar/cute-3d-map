@@ -35,6 +35,80 @@ const count = (page: import("@playwright/test").Page, kind: string) =>
     return counts;
   }, kind);
 
+// an athletics track north of the city: the tartan ring with its lanes, and the
+// infield pitch inside it
+const TRACK = "#map=17.2/45.43789/9.08315";
+
+test("a running track paints its lanes and names itself in the popup", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`/${TRACK}`);
+  await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
+      timeout: 60_000,
+    })
+    .toBe(true);
+
+  // the tile data carries the track as a green with the athletics sport
+  const athletics = () =>
+    page.evaluate(() => {
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+      let found = 0;
+      for (const record of map.tiles.values()) {
+        for (const info of record.objects.features) {
+          if (info.kind === "green" && info.sport === "athletics") found += 1;
+        }
+      }
+      return found;
+    });
+  await expect.poll(athletics, { timeout: 60_000 }).toBeGreaterThan(0);
+
+  // the tartan and the lanes are drawn like any other court
+  for (const kind of ["pitch", "pitch_paint"]) {
+    await expect
+      .poll(async () => (await count(page, kind)).visible, { timeout: 20_000 })
+      .toBeGreaterThan(0);
+  }
+
+  // Click on the tartan band, five metres inside its northern edge. The paint
+  // and the tint are not pickable, so the click lands on the green feature
+  // underneath, which is what names the track.
+  const point = await page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+    const rect = map.map.getCanvas().getBoundingClientRect();
+    // the window holds dozens of tiles: take a track that is actually on screen
+    for (const record of map.tiles.values()) {
+      for (const info of record.objects.features) {
+        if (info.kind !== "green" || info.sport !== "athletics") continue;
+        const outer = info.rings?.[0];
+        if (!outer) continue;
+        let top: [number, number] = outer[0];
+        for (const vertex of outer) {
+          if (vertex[1] > top[1]) top = vertex;
+        }
+        // a lane band is ~10 m wide, so 5 m south of the outermost vertex is
+        // still the tartan
+        const projected = map.map.project([top[0], top[1] - 5 / 111_320]);
+        const x = projected.x + rect.left;
+        const y = projected.y + rect.top;
+        const onScreen =
+          x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
+        if (onScreen) return { x, y };
+      }
+    }
+    throw new Error("no athletics track on screen");
+  });
+  await page.mouse.click(point.x, point.y);
+  await expect(page.locator(".maplibregl-popup-content")).toContainText(
+    "Athletics track",
+  );
+
+  expect(errors).toEqual([]);
+});
+
 test("pitches draw their court and paint, and the checkbox hides just those", async ({
   page,
 }) => {

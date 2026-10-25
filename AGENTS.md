@@ -151,19 +151,26 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   facade and tombstone layouts; `lane.ts` turns the segments into one
   `LineSegments` per tile (kind `lane`). The road surface itself is the
   basemap's, so this is paint only, gated at zoom 16.
-- `src/elements3d/pitch_layout.ts` / `pitch.ts` — sports pitches. A pitch is
-  already a green area (`leisure=pitch` is a grass polygon), so tilegen only
-  adds its `sport`, and the court is a frontend pass over that polygon.
-  The layout is pure maths and unit-tested: fit the sport's real field (soccer
-  105x68, tennis 23.77x10.97, basketball 28x15, volleyball 18x9) inside the
-  footprint's minimum-area rectangle, so a court mapped at an angle or a 30 m
-  five-a-side still lines up, then draw the markings in that frame. `pitch.ts`
+- `src/elements3d/pitch_layout.ts` / `pitch.ts` — sports pitches and running
+  tracks. A pitch is already a green area (`leisure=pitch` is a grass polygon),
+  so tilegen only adds its `sport`, and the court is a frontend pass over that
+  polygon. The layout is pure maths and unit-tested: fit the sport's real field
+  (soccer 105x68, futsal and five-a-side 40x20, tennis 23.77x10.97, padel 20x10,
+  basketball and multi 28x15, volleyball 18x9, beach volleyball 16x8, athletics
+  176.91x92.52) inside the footprint's minimum-area rectangle, so a court mapped
+  at an angle still lines up, then draw the markings in that frame. `pitch.ts`
   adds a clay/rubber/sand surface for the sports that are not grass, the goals
-  (posts and crossbar), the basketball hoops (pole, board, rim) and the tennis
-  and volleyball nets. Two kinds per tile: `pitch` (the merged Lambert mesh) and
-  `pitch_paint` (the white `LineSegments`), since a kind cannot be both. Gated
-  at zoom 16 behind `#pitches-toggle`; the lawn underneath stays the parks
-  layer. A sport without a layout keeps its plain green.
+  (posts and crossbar, 3 m on a small pitch), the basketball hoops (pole, board,
+  rim) and the tennis, padel and volleyball nets. A `leisure=track` mapped for
+  athletics or running is the same pass: tilegen emits it as a green with
+  `green: "track"` and the `athletics` sport, the tartan is the ring itself
+  (infield hole and all, not a fitted rectangle) and the paint is nine
+  stadium-shaped lane outlines plus the finish line. Two kinds per tile: `pitch`
+  (the merged Lambert mesh) and `pitch_paint` (the white `LineSegments`), since a
+  kind cannot be both. Gated at zoom 16 behind `#pitches-toggle`; the lawn
+  underneath stays the parks layer. A sport without a layout keeps its plain
+  green, and a footprint too small for the sport's field is refused (an 80 m
+  oval for a track, so a throwing strip is not painted as one).
 - `src/elements3d/rooftop.ts` — mapped water towers, chimneys, antennas and
   solar generators placed on the carrying building's roof (`base` from
   tilegen); a solar polygon keeps its footprint as a flat panel surface, a
@@ -484,11 +491,18 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   behind `#lanes-toggle`.
 - **pitch** — a `leisure=pitch` green area carrying a `sport` tag. It is a green
   like any other (same polygon, same clipping, same parks checkbox); the sport
-  just tells the frontend which court to paint. The markings and the goals,
-  hoops and nets are their own per-tile kinds (`pitch` and `pitch_paint`), so
-  `#pitches-toggle` hides the court and leaves the lawn. `sport` may be a ";"
-  list; the frontend paints the first entry it has a layout for, and everything
-  else (rugby, hockey, padel, futsal) stays flat green.
+  just tells the frontend which court to paint. Soccer, futsal/five-a-side,
+  tennis, padel, basketball, multi-use, volleyball, beach volleyball and
+  athletics have a layout; the markings and the goals, hoops and nets are their
+  own per-tile kinds (`pitch` and `pitch_paint`), so `#pitches-toggle` hides the
+  court and leaves the lawn. `sport` may be a ";" list, and the frontend paints
+  the first entry it has a layout for; rugby, hockey, baseball and the rest stay
+  flat green.
+- **track** — a `leisure=track` mapped for athletics or running, emitted as a
+  green with `green: "track"` and the `athletics` sport. Its polygon is the
+  tartan ring (the infield is a hole), so the pitch pass fills the ring rather
+  than a rectangle and paints the lanes on it. A velodrome or a karting circuit
+  is not green ground and keeps its basemap colour.
 - **road marking** — a stop, give-way or signal node with approach directions,
   width, lanes and turn tags; the frontend draws a stop/give-way line and lane
   arrows. It is paint, not a clickable object.

@@ -33,8 +33,12 @@ const PAINT_Z = 0.02;
 // so soccer has no tint at all.
 const SURFACE_COLORS: Record<string, string> = {
   tennis: "#a8503a", // clay, which is what most Italian courts are
+  padel: "#3f6b85", // the blue turf of a padel box
   basketball: "#95503a", // the reddish rubber of an outdoor court
+  multi: "#95503a", // a multi-use court is a ball court: same rubber
   volleyball: "#c9b085", // sand
+  beachvolleyball: "#c9b085",
+  athletics: "#9c4128", // tartan
 };
 
 const GOAL_FRAME = new THREE.Color("#f4f4ef");
@@ -43,10 +47,14 @@ const RIM = new THREE.Color("#cc5530");
 const POLE = new THREE.Color("#5b6169");
 const NET = new THREE.Color("#dedcd4");
 
-// The props scale with the pitch, like the paint: a 40 m five-a-side gets a
-// proportionate goal rather than the full 7.32 m one.
-const GOAL_WIDTH = 7.32;
-const GOAL_HEIGHT = 2.44;
+// Width and height of the goal frame, in field meters. The props scale with the
+// pitch, like the paint, so a futsal pitch gets its own 3 m goal rather than a
+// shrunken 7.32 m one.
+const GOALS: Record<string, [number, number]> = {
+  soccer: [7.32, 2.44],
+  futsal: [3, 2],
+  "five-a-side": [3, 2],
+};
 
 export const pitchMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
@@ -64,26 +72,35 @@ export interface PitchGeometries {
   paint: THREE.BufferGeometry[];
 }
 
-// the largest ring of the feature, in model space: a pitch is one rectangle
-function pitchRing(
+interface PitchRings {
+  // the part the layout is fitted to: a pitch is one rectangle, a track the
+  // oval that carries the lanes
+  outer: [number, number][];
+  // the infield of a track, which the tartan does not cover
+  holes: [number, number][][];
+}
+
+// the largest part of the feature, in model space
+function pitchRings(
   originMeters: [number, number],
   scaleFactor: number,
   f: Geojson.Feature,
-): [number, number][] | null {
+): PitchRings | null {
   const g = f.geometry;
-  const parts: Geojson.Position[][] =
+  const parts: Geojson.Position[][][] =
     g.type === "Polygon"
-      ? [g.coordinates[0]]
+      ? [g.coordinates]
       : g.type === "MultiPolygon"
-        ? g.coordinates.map((part) => part[0])
+        ? g.coordinates
         : [];
-  let best: Geojson.Position[] | null = null;
+  let best: Geojson.Position[][] | null = null;
   let bestArea = 0;
   for (const part of parts) {
     // shoelace on the raw lon/lat: only used to rank the parts
+    const ring = part[0];
     let twice = 0;
-    for (let i = 0; i < part.length - 1; i++) {
-      twice += part[i][0] * part[i + 1][1] - part[i + 1][0] * part[i][1];
+    for (let i = 0; i < ring.length - 1; i++) {
+      twice += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
     }
     const area = Math.abs(twice);
     if (area > bestArea) {
@@ -91,10 +108,19 @@ function pitchRing(
       best = part;
     }
   }
-  if (!best || best.length < 4) return null;
-  return best.map((c) =>
-    toModelCoords([c[0], c[1]] as [number, number], originMeters, scaleFactor),
-  );
+  if (!best || best[0].length < 4) return null;
+  const toModel = (ring: Geojson.Position[]) =>
+    ring.map((c) =>
+      toModelCoords(
+        [c[0], c[1]] as [number, number],
+        originMeters,
+        scaleFactor,
+      ),
+    );
+  return {
+    outer: toModel(best[0]),
+    holes: best.slice(1).map(toModel),
+  };
 }
 
 // the field as two triangles, in one flat color
@@ -144,17 +170,21 @@ function fieldSurface(
 
 // a goal at each short end: two posts and a crossbar, as tall as the field is
 // big. The crossbar is the one box whose long side runs across the pitch.
-function goals(frame: PitchFrame, parts: THREE.BufferGeometry[]): void {
+function goals(
+  frame: PitchFrame,
+  parts: THREE.BufferGeometry[],
+  [goalWidth, goalHeight]: [number, number],
+): void {
   const scale = frame.scale;
   const angleAcross = Math.atan2(frame.across[1], frame.across[0]);
   const post = 0.12 * scale;
-  const width = GOAL_WIDTH * scale;
-  const height = GOAL_HEIGHT * scale;
+  const width = goalWidth * scale;
+  const height = goalHeight * scale;
   const boxes = new BoxBuilder();
   for (const end of [-1, 1]) {
     const u = (end * frame.length) / 2;
     for (const side of [-1, 1]) {
-      const [x, y] = pitchPoint(frame, u, (side * GOAL_WIDTH) / 2);
+      const [x, y] = pitchPoint(frame, u, (side * goalWidth) / 2);
       boxes.box(x, y, 0, post, post, height, angleAcross, GOAL_FRAME);
     }
     // the crossbar: its long side runs across the pitch, on top of the posts
@@ -249,6 +279,25 @@ function net(
   if (geometry) parts.push(geometry);
 }
 
+// The ring itself, filled: a track's tartan is an oval with the infield cut out,
+// so it cannot be the fitted rectangle the courts use.
+function ringSurface(
+  rings: PitchRings,
+  color: THREE.Color,
+): THREE.BufferGeometry | null {
+  const toVec = (point: [number, number]) => new THREE.Vector2(...point);
+  const shape = new THREE.Shape(rings.outer.map(toVec));
+  for (const hole of rings.holes)
+    shape.holes.push(new THREE.Path(hole.map(toVec)));
+  const flat = new THREE.ShapeGeometry(shape);
+  const geometry = flat.index ? flat.toNonIndexed() : flat;
+  if (geometry !== flat) flat.dispose();
+  const position = geometry.getAttribute("position");
+  for (let i = 0; i < position.count; i++) position.setZ(i, SURFACE_Z);
+  applyVertexColor(geometry, color);
+  return position.count >= 3 ? geometry : null;
+}
+
 /**
  * The pitch geometry of one feature: the court surface and its props in one
  * mesh, the markings in one LineSegments. Both empty for a green that is not a
@@ -263,18 +312,26 @@ export function pitch(
   const props = f.properties as { sport?: unknown } | null;
   const sport = pitchSportOf(props?.sport);
   if (!sport) return { surface: [], paint: [] };
-  const ring = pitchRing(originMeters, scaleFactor, f);
-  if (!ring) return { surface: [], paint: [] };
-  const frame = pitchFrame(ring, sport);
+  const rings = pitchRings(originMeters, scaleFactor, f);
+  if (!rings) return { surface: [], paint: [] };
+  const frame = pitchFrame(rings.outer, sport);
   if (!frame) return { surface: [], paint: [] };
 
   const parts: THREE.BufferGeometry[] = [];
   const tint = SURFACE_COLORS[sport];
-  if (tint) parts.push(fieldSurface(frame, new THREE.Color(tint)));
-  if (sport === "soccer") goals(frame, parts);
-  if (sport === "basketball") hoops(frame, parts);
+  if (tint) {
+    const surface =
+      sport === "athletics"
+        ? ringSurface(rings, new THREE.Color(tint))
+        : fieldSurface(frame, new THREE.Color(tint));
+    if (surface) parts.push(surface);
+  }
+  const goal = GOALS[sport];
+  if (goal) goals(frame, parts, goal);
+  if (sport === "basketball" || sport === "multi") hoops(frame, parts);
   if (sport === "tennis") net(frame, parts, 1.07, 0.1, 0.95);
-  if (sport === "volleyball") net(frame, parts, 2.55, 1.9, 1.0);
+  if (sport === "volleyball" || sport === "beachvolleyball")
+    net(frame, parts, 2.55, 1.9, 1.0);
 
   const segments = pitchPaint(sport, frame);
   const positions: number[] = [];
