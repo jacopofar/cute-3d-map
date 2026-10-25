@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probe needs room
 test.setTimeout(90_000);
@@ -31,7 +32,7 @@ test("zebra crossings load and open an OSM popup", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.crosswalk?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -39,7 +40,7 @@ test("zebra crossings load and open an OSM popup", async ({ page }) => {
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let meshes = 0;
     let vertices = 0;
     map.scene.traverse((object: any) => {
@@ -65,7 +66,7 @@ test("zebra crossings load and open an OSM popup", async ({ page }) => {
     .poll(
       async () => {
         target = await page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           const container = map.map.getContainer() as HTMLElement;
           for (const info of [...map.tiles.values()]
             .map((t) => t.objects.crosswalks)

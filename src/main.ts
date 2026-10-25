@@ -10,7 +10,7 @@ import "./maplibre_setup";
 
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
-import type { CustomLayerInterface, LngLat } from "maplibre-gl";
+import type { CustomLayerInterface, LngLat, LngLatLike } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
@@ -37,7 +37,7 @@ import {
   isNightHour,
 } from "./lighting.ts";
 import { DriveMode } from "./drive_mode.ts";
-import type { MapDebug } from "./debug.ts";
+import type { MapDebug, ModelTransform } from "./debug.ts";
 import { Selection } from "./selection.ts";
 import type { TileRecord } from "./tile_record.ts";
 import { DAY_HOUR, NIGHT_HOUR } from "./daynight.ts";
@@ -162,12 +162,17 @@ class CoolMap implements MapDebug {
     return this.customLayer.camera;
   }
 
+  // a copy, so a spec cannot reach in and move the origin
+  get originTransform(): ModelTransform {
+    return { ...this.modelTransform };
+  }
+
   // the click popups and the ground rings; it reads the tile store and the
   // scene above, so it is created in the constructor once they exist
   private readonly selection: Selection;
 
   // read-only probe for the e2e specs: open a building's popup without a click
-  selectBuilding(info: BuildingInfo, lngLat: LngLat): void {
+  selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void {
     this.selection.selectBuilding(info, lngLat);
   }
   // the layer keeps one mesh per tile and diffs them itself

@@ -1,16 +1,13 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
-interface Probe {
-  scene: { traverse(cb: (o: any) => void): void };
-}
-
 const countBenches = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const counts = { total: 0, visible: 0 };
     map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "bench") return;

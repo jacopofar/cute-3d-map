@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probe needs room
 test.setTimeout(90_000);
@@ -33,7 +34,7 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return {
             platforms: map.stats().byKind.platform?.meshes ?? 0,
             rails: map.stats().byKind.rail?.meshes ?? 0,
@@ -47,7 +48,7 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     });
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let platformMeshes = 0;
     let railMeshes = 0;
     map.scene.traverse((object: any) => {
@@ -64,7 +65,7 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     .poll(
       async () => {
         target = await page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           const container = map.map.getContainer() as HTMLElement;
           const camera = map.camera;
           let found: { p: { x: number; y: number } } | null = null;
@@ -74,11 +75,13 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
             for (let i = 0; i + 2 < pos.count; i += 3) {
               const z = pos.getZ(i);
               if (z < 0.2) continue;
-              const v = new camera.position.constructor(
-                (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3,
-                (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3,
-                z,
-              );
+              const v = camera.position
+                .clone()
+                .set(
+                  (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3,
+                  (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3,
+                  z,
+                );
               object.updateMatrixWorld(true);
               v.applyMatrix4(object.matrixWorld).project(camera);
               const x = ((v.x + 1) / 2) * container.clientWidth;
@@ -115,7 +118,7 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     ) as HTMLInputElement;
     input.click();
     let visible = 0;
-    (window as unknown as { __coolMap: any }).__coolMap.scene.traverse(
+    (window as unknown as { __coolMap: MapDebug }).__coolMap.scene.traverse(
       (object: any) => {
         if (
           (object.userData?.kind === "platform" ||

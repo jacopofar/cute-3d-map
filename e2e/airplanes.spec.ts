@@ -1,20 +1,16 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
 // Linate: the default Milan view has no runway, so the test has to fly there
-const LINATE = { center: [9.2706, 45.4444], zoom: 17 };
-
-interface Probe {
-  map: { jumpTo(options: { center: [number, number]; zoom: number }): void };
-  scene: { traverse(cb: (o: any) => void): void };
-}
+const LINATE = { center: [9.2706, 45.4444] as [number, number], zoom: 17 };
 
 const countKind = (page: import("@playwright/test").Page, kind: string) =>
   page.evaluate((wanted) => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const counts = { total: 0, visible: 0 };
     map.scene.traverse((object: any) => {
       if (object.userData?.kind !== wanted) return;
@@ -47,7 +43,7 @@ test("the runway surface and planes appear at Linate and follow the toggle", asy
     })
     .toBe(true);
   await page.evaluate((place) => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo(place);
   }, LINATE);
 

@@ -4,7 +4,7 @@
 // (`selectBuilding`, `lightingState`). Everything not in this interface is
 // private to the map.
 
-import type { LngLat, Map as MapLibreMap } from "maplibre-gl";
+import type { LngLatLike, Map as MapLibreMap } from "maplibre-gl";
 import type * as THREE from "three";
 
 import type { BuildingInfo } from "./geojson_data";
@@ -17,6 +17,16 @@ export interface DriveStateSnapshot {
   lat: number;
   heading: number;
   speed: number;
+}
+
+export interface ModelTransform {
+  translateX: number;
+  translateY: number;
+  translateZ: number;
+  rotateX: number;
+  rotateY: number;
+  rotateZ: number;
+  scale: number;
 }
 
 export interface LightingSnapshot {
@@ -34,6 +44,11 @@ export interface MapDebug {
   readonly camera: THREE.Camera;
   /** the loaded tiles, keyed by tile key */
   readonly tiles: Map<string, TileRecord>;
+  /** the projection origin, in lon/lat */
+  readonly tileCenter: [number, number];
+  /** the Mercator transform built from it: `translateX/Y` are the origin in
+   * Mercator units, which is what anchors the 3D model to the view */
+  readonly originTransform: ModelTransform;
   /** mesh, vertex and triangle counters, current frame included */
   stats(): SceneStats;
   /** where the drive car is, whether or not the mode is on */
@@ -44,5 +59,5 @@ export interface MapDebug {
    * visible barrier */
   collisionAt(lon: number, lat: number, heading?: number): boolean;
   /** open a building's popup without clicking it */
-  selectBuilding(info: BuildingInfo, lngLat: LngLat): void;
+  selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void;
 }

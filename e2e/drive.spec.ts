@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -113,7 +114,7 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     .poll(
       () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           let count = 0;
           for (const list of [...map.tiles.values()].map(
             (t) => t.objects.buildings,
@@ -126,7 +127,7 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     )
     .toBeGreaterThan(0);
   const collision = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const spawn = map.driveState();
     let blocked: string | null = null;
     for (const list of [...map.tiles.values()].map(

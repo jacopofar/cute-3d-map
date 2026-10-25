@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 test.setTimeout(90_000);
 
@@ -33,7 +34,7 @@ test("the basemap checkbox removes and restores the MapTiler style", async ({
   const layers = () =>
     page.evaluate(
       () =>
-        (window as unknown as { __coolMap: any }).__coolMap.map.getStyle()
+        (window as unknown as { __coolMap: MapDebug }).__coolMap.map.getStyle()
           .layers.length,
     );
   await expect.poll(layers, { timeout: 30_000 }).toBeGreaterThan(0);

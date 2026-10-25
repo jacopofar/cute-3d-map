@@ -91,7 +91,11 @@ async function stopSampling(
   phase: string,
 ): Promise<Sample> {
   return page.evaluate((name) => {
-    const w = window as unknown as { __frames: number[]; __long: number[] };
+    const w = window as unknown as {
+      __frames: number[];
+      __long: number[];
+      __stop: boolean;
+    };
     w.__stop = true;
     const f = w.__frames.filter((x) => x > 0).sort((a, b) => a - b);
     const q = (p: number) =>

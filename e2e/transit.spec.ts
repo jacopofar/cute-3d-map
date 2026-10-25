@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probes need room
 test.setTimeout(90_000);
@@ -35,7 +36,7 @@ test("the Duomo metro entrances load and open an OSM popup", async ({
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           const stats = map.stats();
           return Math.min(
             stats.byKind.transit_stop?.meshes ?? 0,
@@ -47,7 +48,7 @@ test("the Duomo metro entrances load and open an OSM popup", async ({
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const stats = map.stats();
     return {
       bodies: stats.byKind.transit_stop?.meshes ?? 0,
@@ -60,7 +61,7 @@ test("the Duomo metro entrances load and open an OSM popup", async ({
   expect(state.triangles).toBeGreaterThan(100);
 
   const target = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
     const infos = [...map.tiles.values()]
       .map((t) => t.objects.transit)

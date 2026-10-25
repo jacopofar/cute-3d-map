@@ -1,13 +1,9 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
-
-interface Probe {
-  tiles: Map<string, { objects: { buildings: unknown[] } }>;
-  selectBuilding(info: unknown, lngLat: { lng: number; lat: number }): void;
-}
 
 test.beforeEach(async ({ page }) => {
   await page.route("https://api.maptiler.com/**", (route) =>
@@ -39,7 +35,7 @@ test("the building popup stays readable in a dark color scheme", async ({
           () =>
             [
               ...(
-                window as unknown as { __coolMap: Probe }
+                window as unknown as { __coolMap: MapDebug }
               ).__coolMap.tiles.values(),
             ].flatMap((t) => t.objects.buildings).length,
         ),
@@ -48,7 +44,7 @@ test("the building popup stays readable in a dark color scheme", async ({
     .toBeGreaterThan(0);
 
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const info = [...map.tiles.values()]
       .map((t) => t.objects.buildings)
       .flat()[0];

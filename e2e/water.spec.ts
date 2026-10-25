@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // minimal valid style, same trick as the other specs (no MapTiler key/network)
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
@@ -25,7 +26,7 @@ test("clicking water shows its kind and an OSM link", async ({ page }) => {
     .toBe(true);
   await page.waitForFunction(
     () => {
-      const map = (window as unknown as { __coolMap: any }).__coolMap;
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
       return [...map.tiles.values()]
         .map((t) => t.objects.water)
         .some((tiles: any) =>
@@ -39,7 +40,7 @@ test("clicking water shows its kind and an OSM link", async ({ page }) => {
   // project a few water points (waterway midpoints, area ring centres) to the
   // screen and click until one opens a popup that is not a building's
   const points = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const width = window.innerWidth;
     const height = window.innerHeight;
     const all = [...map.tiles.values()]

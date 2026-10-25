@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -33,7 +34,7 @@ test("the Monumentale loads cemetery ground with tombstone rows", async ({
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.cemetery?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -41,7 +42,7 @@ test("the Monumentale loads cemetery ground with tombstone rows", async ({
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let meshes = 0;
     let vertices = 0;
     map.scene.traverse((object: any) => {

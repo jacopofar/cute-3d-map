@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probes need room
 test.setTimeout(90_000);
@@ -33,7 +34,7 @@ test("street furniture loads along a dense avenue", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.furniture?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -41,7 +42,7 @@ test("street furniture loads along a dense avenue", async ({ page }) => {
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let meshes = 0;
     let vertices = 0;
     map.scene.traverse((object: any) => {
@@ -76,7 +77,7 @@ test("clicking a furniture prop opens its OSM popup", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.furniture?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -84,7 +85,7 @@ test("clicking a furniture prop opens its OSM popup", async ({ page }) => {
     .toBeGreaterThan(0);
 
   const target = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
     const infos = [...map.tiles.values()]
       .map((t) => t.objects.furniture)

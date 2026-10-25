@@ -1,17 +1,13 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same mocked style as the other specs.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 test.setTimeout(120_000);
 
-interface Probe {
-  map: { jumpTo(options: { center?: [number, number]; zoom?: number }): void };
-  scene: { traverse(cb: (o: any) => void): void };
-}
-
 const nightLights = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const out = {
       lamps: 0,
       lampPosts: 0,
@@ -67,11 +63,12 @@ test("the lamp posts checkbox hides only the street lamps", async ({
     .toBe(true);
 
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo({ center: [9.1919, 45.4641], zoom: 17.5 });
   });
   await page.evaluate(() => {
-    const slider = document.querySelector("#time-slider");
+    const slider = document.querySelector<HTMLInputElement>("#time-slider");
+    if (!slider) throw new Error("no #time-slider");
     slider.value = "21.5";
     slider.dispatchEvent(new Event("input", { bubbles: true }));
   });

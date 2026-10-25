@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // A minimal valid Mapbox/MapLibre style with no sources or layers, so the map
 // reaches "style.load" without any MapTiler key or network access.
@@ -62,7 +63,7 @@ test("the locate button centers the map on the browser position", async ({
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           const center = map.map.getCenter();
           return Math.hypot(center.lat - 48.8566, center.lng - 2.3522);
         }),
@@ -75,7 +76,7 @@ test("the compass resets a rotated map north", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".maplibregl-ctrl-compass")).toBeVisible();
   await page.evaluate(() => {
-    (window as unknown as { __coolMap: any }).__coolMap.map.jumpTo({
+    (window as unknown as { __coolMap: MapDebug }).__coolMap.map.jumpTo({
       bearing: 45,
     });
   });
@@ -84,7 +85,7 @@ test("the compass resets a rotated map north", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.map.getBearing();
         }),
       { timeout: 15_000 },

@@ -8,7 +8,7 @@
 // projection origin, so those come in through `SelectionHost`.
 
 import { Popup } from "maplibre-gl";
-import type { LngLat, Map as MapLibreMap } from "maplibre-gl";
+import type { LngLat, LngLatLike, Map as MapLibreMap } from "maplibre-gl";
 import type Geojson from "geojson";
 import * as THREE from "three";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
@@ -720,7 +720,7 @@ export class Selection {
   // All the popups share the same chrome; only the body differs. An empty body
   // means "nothing worth saying", so those clicks leave the map alone. Returns
   // the popup so callers that wire extra controls can skip the null check.
-  showPopup(lngLat: LngLat, lines: (string | null)[]): Popup | undefined {
+  showPopup(lngLat: LngLatLike, lines: (string | null)[]): Popup | undefined {
     const body = lines.filter(Boolean);
     if (body.length === 0) return undefined;
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
@@ -891,7 +891,7 @@ export class Selection {
     }
   }
 
-  selectBuilding(info: BuildingInfo, lngLat: LngLat) {
+  selectBuilding(info: BuildingInfo, lngLat: LngLatLike) {
     this.clear();
     const originMeters = epsg4326toEpsg3857(this.center());
     const scaleFactor = scaleFactorAt(this.center()[1]);

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { stat } from "node:fs/promises";
+import type { MapDebug } from "../src/debug";
 
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
@@ -22,7 +23,7 @@ test("a building popup downloads a GLB", async ({ page }) => {
           () =>
             [
               ...(
-                window as unknown as { __coolMap: any }
+                window as unknown as { __coolMap: MapDebug }
               ).__coolMap.tiles.values(),
             ].flatMap((t) => t.objects.buildings).length,
         ),
@@ -30,7 +31,7 @@ test("a building popup downloads a GLB", async ({ page }) => {
     )
     .toBeGreaterThan(0);
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const info = [...map.tiles.values()]
       .map((t) => t.objects.buildings)
       .flat()[0] as any;

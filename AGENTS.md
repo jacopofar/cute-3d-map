@@ -26,8 +26,9 @@ decorative volumetric cloud layer.
 ## Build, test, verify
 
 - `npm run dev` — Vite dev server (needs `VITE_MAPTILER_KEY` in `.env`).
-- `npm run test:check` — type check plus the unit suite without coverage, the
-  default per-change loop (~5 s).
+- `npm run test:check` — the default per-change loop (~6 s): the app type check
+  (`test:types`), the Playwright specs' type check (`test:types:e2e`, see
+  `tsconfig.e2e.json`) and the unit suite without coverage.
 - `npm run build` — type check plus production build.
 - `npm run test:unit` — vitest for the pure modules, with coverage (~4 s).
 - `npm run test:e2e:changed` — Playwright specs selected from the diff against
@@ -73,10 +74,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   kinds and flag stay in one place), seeds each flag from the restored checkbox
   and applies on change.
 - `src/debug.ts` — `MapDebug`, the surface the e2e specs and the benchmark read
-  (`map`, `scene`, `camera`, `tiles`, `stats`, `driveState`, `lightingState`,
-  `collisionAt`, `selectBuilding`). `CoolMap implements MapDebug`, so moving any
-  of them breaks the type check instead of the browser run. Everything else on
-  the map is private.
+  (`map`, `scene`, `camera`, `tiles`, `tileCenter`, `originTransform`, `stats`,
+  `driveState`, `lightingState`, `collisionAt`, `selectBuilding`). `CoolMap
+  implements MapDebug` and the specs cast `__coolMap` to it, so moving any of
+  them breaks `npm run test:check` instead of the browser run. Everything else
+  on the map is private. `tsconfig.e2e.json` is the specs' program (it needs the
+  node types for the GLB and benchmark files, which the app does not).
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
   squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).
