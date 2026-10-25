@@ -48,18 +48,18 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 ## Architecture
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
-  `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
-  center (`loadUnloadCoord`), debounced 150 ms. The per-tile layers whose
-  checkbox is a plain visibility switch are rows in `layerSwitches` (mesh
-  kinds, when to draw, anything else that follows the same switch). Every
-  loaded tile is one `TileRecord` in the `tiles` map: the merged meshes in the
-  scene plus everything the pickers, the drive collision and the moving layers
-  read back, so a layer is one field, not a map of its own. The map carries
-  its view in a `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre
-  reads and writes it) and the projection origin is seeded from wherever the
-  map opens. The scene lights, sun shadows (a 2 km cascade following the
-  view, received only by the ground catcher), sky/fog, the dawn/dusk grade and
-  the night-light visibility are driven from `applyLighting()`.
+  `CustomLayerInterface`, then wires the modules below together. It keeps the
+  map's view, hands the layers their tile unions and exposes the read-only
+  probes the e2e uses (`stats`, `collisionAt`, `driveState`, `lightingState`,
+  `selectBuilding`). The per-tile layers whose checkbox is a plain visibility
+  switch are rows in `layerSwitches` (mesh kinds, when to draw, anything else
+  that follows the same switch). Every loaded tile is one `TileRecord` in the
+  `tiles` map: the merged meshes in the scene plus everything the pickers, the
+  drive collision and the moving layers read back, so a layer is one field, not
+  a map of its own. The map carries its view in a `#map=zoom/lat/lon` permalink
+  (`hash: "map"`, so MapLibre reads and writes it) and the projection origin is
+  seeded from wherever the map opens. The view is debounced 150 ms before the
+  tile pass runs.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
@@ -72,6 +72,17 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).
   It lives on its own so the geometry builders, the pickers and their unit
   tests do not import `geojson_data` just to convert a coordinate.
+- `src/tile_loader.ts` — the tile window: which tiles to fetch and keep (a
+  3-tile margin, `RENDER_TILE_MARGIN`), the store itself, disposal, the in-flight
+  set and the origin generation. It reports that tiles came, went or were
+  dropped (`onTileAdded`, `onTilesChanged`, `onReload`) and the map re-feeds its
+  layers, which is what keeps a tile and its data appearing and disappearing
+  together. The margin and the origin drift check (2 tiles) live here.
+- `src/lighting.ts` — the day/night rig: the sun, fill and hemisphere lights,
+  the ground and the shadow catcher, and everything that follows the sun
+  (exposure, the window/glass/water uniforms, the fog, the MapLibre sky, the
+  `#grade` overlay, the basemap style swap and the shadow debounce). The solar
+  model stays in `daynight.ts`; this only pushes it onto a scene.
 - `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,

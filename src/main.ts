@@ -16,20 +16,30 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
   epsg4326toEpsg3857,
   getTileIndex,
-  parseTileKey,
   scaleFactorAt,
   toModelCoords,
 } from "./projection.ts";
-import { objectsAt } from "./geojson_data.ts";
 import {
   PERF_ENDPOINT,
   PerfReporter,
   sceneStats,
   type SceneStats,
 } from "./perf.ts";
+import { TileLoader, disposeFacadeDetail } from "./tile_loader.ts";
+import {
+  BASEMAP_DAY,
+  BASEMAP_NIGHT,
+  BASEMAP_NIGHT_AT,
+  BLOOM_NIGHT_AT,
+  LightingRig,
+  basemapStyleUrl,
+  initialHour,
+  isNightHour,
+} from "./lighting.ts";
 import { DriveMode } from "./drive_mode.ts";
 import { Selection } from "./selection.ts";
 import type { TileRecord } from "./tile_record.ts";
+import { DAY_HOUR, NIGHT_HOUR } from "./daynight.ts";
 import { escapeHtml } from "./ui/html.ts";
 import {
   savedCheckbox,
@@ -39,7 +49,6 @@ import {
 import type {
   ApronRing,
   BuildingInfo,
-  TileObjects,
   RunwayLine,
   TrafficLoop,
 } from "./geojson_data.ts";
@@ -60,21 +69,10 @@ import {
   tileFacadeDetail,
   windowMaterial,
 } from "./elements3d/facade.ts";
-import { crosswalkMaterial } from "./elements3d/crosswalk.ts";
 import { fountainWaterMaterial } from "./elements3d/fountain.ts";
-import { glassMaterial } from "./elements3d/glass.ts";
-import { roadMarkingMaterial } from "./elements3d/road_marking.ts";
 import { greenMaterial } from "./elements3d/green.ts";
 import { cameraCenter, waterMaterial } from "./elements3d/water.ts";
 import { treeSway } from "./elements3d/tree_material.ts";
-import {
-  DAY_HOUR,
-  NIGHT_HOUR,
-  currentMilanSolarHour,
-  lerpColor,
-  lightingAt,
-  type Lighting,
-} from "./daynight.ts";
 
 // Import our custom CSS
 // import "./scss/styles.scss";
@@ -96,24 +94,6 @@ const FACADE_TILE_MARGIN = 1;
 const FENCE_MIN_ZOOM = 18;
 // sidewalks are a street-level detail; the slabs are cheap but there are many
 const SIDEWALK_MIN_ZOOM = 16;
-// MapTiler basemap styles. The map opens on the day style and swaps to the dark
-// one at night, so the bright basemap does not clash with the dark 3D scene.
-// this is beautiful but covers 3D feature by hovering or something
-// const BASEMAP_DAY = "aquarelle-v4";
-const BASEMAP_DAY = "basic-v2";
-const BASEMAP_NIGHT = "basic-v2-dark";
-const basemapStyleUrl = (name: string): string =>
-  `https://api.maptiler.com/maps/${name}/style.json?key=${import.meta.env.VITE_MAPTILER_KEY}`;
-// An empty style keeps the 3D custom layer without the MapTiler canvas. The
-// page background shows through where the basemap used to be.
-const EMPTY_BASEMAP_STYLE = { version: 8 as const, sources: {}, layers: [] };
-// the night/day boundary that decides which basemap to show (the lighting model
-// fades smoothly, but a style can only be one or the other)
-const BASEMAP_NIGHT_AT = 0.5;
-// below this night factor the pass is off: the lamps are hidden and a bloom
-// over a daylight scene would only wash out the roofs
-const BLOOM_NIGHT_AT = 0.35;
-
 // One per-tile layer whose checkbox is a plain visibility switch.
 interface LayerSwitch {
   id: string;
@@ -155,13 +135,14 @@ class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
-  // Every loaded tile, keyed by tile key. The meshes in the scene and the
-  // source data read back by the pickers, the drive collision and the
-  // parked-car/plane/lamp layers belong to the same tile and must come and go
-  // together, so they live in one record instead of a map per kind (that used
-  // to take 22 `delete` lines per unload, and growing a layer meant touching
-  // four lists in two methods).
-  readonly tiles = new Map<string, TileRecord>();
+  // the tile window: fetching, retention, disposal and the store
+  private readonly loader: TileLoader;
+  // the loader owns the store; this keeps the read path (`this.tiles`) and the
+  // e2e's `map.tiles` on the same map
+  get tiles(): Map<string, TileRecord> {
+    return this.loader.tiles;
+  }
+
   // the click popups and the ground rings; it reads the tile store and the
   // scene above, so it is created in the constructor once they exist
   private readonly selection: Selection;
@@ -234,39 +215,28 @@ class CoolMap {
   private airplanes?: PlaneLayer;
   // the scene lights, kept so the time-of-day model can drive them. They are
   // created in onAdd (with the renderer) and are undefined until then.
-  private sunLight?: THREE.DirectionalLight;
-  private fillLight?: THREE.DirectionalLight;
-  private hemisphereLight?: THREE.HemisphereLight;
-  private groundMesh?: THREE.Mesh;
-  private shadowGround?: THREE.Mesh;
+  // the lights, the ground, the shadow catcher and the basemap swap
+  private readonly light: LightingRig;
   // headless CI runs on SwiftShader; the shadow pass is not worth it there
   private softwareRenderer = false;
   // hours 0..24, local mean solar time at Milan; seeded from the real sun and
   // driven by the slider/night checkbox afterwards. The slider steps 0.25 h, so
   // round the seed to match rather than give the thumb a fractional value.
-  private timeOfDay = Math.round(currentMilanSolarHour() * 4) / 4;
-  private lighting: Lighting = lightingAt(this.timeOfDay);
+
   // which basemap is mounted, so a night/day flip only swaps the style once
-  private darkBasemap = false;
+
   // the basemap checkbox; while off the map keeps an empty style and only the
   // 3D custom layer is drawn
-  private basemapEnabled = true;
+
   // user toggle (the page checkbox); combined with the zoom gate
   private trafficEnabled = true;
   // whether clicking a building inspects it
   private inspectEnabled = true;
   // user toggle for the decorative cloud layer (also gated on the zoom)
   private cloudsEnabled = true;
-  // tiles with a fetch in flight; kept out of the tile store so a failed load
-  // does not leave a permanent "loaded but empty" entry that blocks retries
-  private pendingTiles: Set<string> = new Set();
-  private renderTileMargin: number = 3;
   // move fires continuously; debounce the tile load/unload pass
   private moveDebounce: ReturnType<typeof setTimeout> | undefined;
-  private shadowTimer: ReturnType<typeof setTimeout> | undefined;
-  // increments every time the projection origin is reset, so in-flight
-  // async tile loads from the old origin can be recognized and discarded
-  private originGeneration: number = 0;
+
   private modelTransform: {
     translateX: number;
     translateY: number;
@@ -281,15 +251,7 @@ class CoolMap {
     const selectionScene = new THREE.Scene();
     // A saved day/night switch wins over the solar seed, so the first basemap
     // is the one the user last chose instead of a frame of the other one.
-    const savedNight = savedCheckbox("night-toggle");
-    if (savedNight !== undefined) {
-      this.timeOfDay = savedNight ? NIGHT_HOUR : DAY_HOUR;
-      this.lighting = lightingAt(this.timeOfDay);
-    }
-    // Open on the basemap the current sun calls for, so the day style does not
-    // flash before the first applyLighting() swaps it.
-    const nightBasemap = this.lighting.night > BASEMAP_NIGHT_AT;
-    this.darkBasemap = nightBasemap;
+    const hour = initialHour(savedCheckbox("night-toggle"));
     this.map = new MapLibreMap({
       container: "central-map",
       center: tileCenter,
@@ -299,7 +261,9 @@ class CoolMap {
       // position can be linked; the prefix makes maplibre use that shape, and
       // it reads a fragment pasted on load and updates it as the map moves
       hash: "map",
-      style: basemapStyleUrl(nightBasemap ? BASEMAP_NIGHT : BASEMAP_DAY),
+      // open on the basemap the current sun calls for, so the day style does
+      // not flash before the first apply() swaps it
+      style: basemapStyleUrl(isNightHour(hour) ? BASEMAP_NIGHT : BASEMAP_DAY),
     });
     // the projection origin follows whatever the map actually opened on (a
     // #map= fragment may have moved it), so no tiles are fetched for the
@@ -308,6 +272,22 @@ class CoolMap {
     this.tileCenter = [opened.lng, opened.lat];
     // the click handling needs the map; the scene arrives with the custom layer
     // below, so it is reached through a getter rather than captured here
+    this.loader = new TileLoader({
+      scene: selectionScene,
+      origin: () => this.tileCenter,
+      viewCenter: () => this.map.getCenter(),
+      imputedColors: () => this.imputedColorsEnabled,
+      onOriginDrift: (center) => this.resetOrigin(center),
+      onTilesChanged: () => this.syncTileLayers(),
+      onTileAdded: () => this.syncAfterTileLoad(),
+      onReload: () => {
+        this.parkedCars?.clear();
+        this.syncTraffic();
+        this.syncAirplanes();
+        this.syncNightLights();
+        this.light.refreshSunShadow();
+      },
+    });
     this.drive = new DriveMode(
       {
         map: this.map,
@@ -316,14 +296,14 @@ class CoolMap {
           (kind !== "fence" || this.fencesEnabled) &&
           (kind !== "wall" || this.wallsEnabled),
         catchUpTiles: () => {
-          this.loadUnloadCoord(this.map.getCenter());
+          this.loader.load(this.map.getCenter());
           this.syncBuildingDetail();
         },
-        refreshSunShadow: () => this.refreshSunShadow(),
+        refreshSunShadow: () => this.light.refreshSunShadow(),
         onExit: () => {
-          this.loadUnloadCoord(this.map.getCenter());
+          this.loader.load(this.map.getCenter());
           this.syncBuildingDetail();
-          this.refreshSunShadow();
+          this.light.refreshSunShadow();
         },
         reportPerf: (event) => this.reportPerf(event),
         clearSelection: () => this.selection.clear(),
@@ -332,6 +312,18 @@ class CoolMap {
       selectionScene,
     );
     this.drive.wire();
+    this.light = new LightingRig(
+      {
+        map: this.map,
+        scene: selectionScene,
+        center: () => this.tileCenter,
+        onNight: (night: number) => {
+          this.clouds?.setNight(night);
+          this.applyNightLightsVisibility();
+        },
+      },
+      hour,
+    );
     this.selection = new Selection({
       tiles: this.tiles,
       map: this.map,
@@ -427,71 +419,11 @@ class CoolMap {
         coolMap.softwareRenderer =
           /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
 
-        // atmospheric fog, matched to the sky color in applyLighting(); it
-        // blends the far 3D edges into the horizon instead of cutting off
-        this.scene.fog = new THREE.Fog(0xd9e3ea, 1200, 6000);
-
-        // lighting: a warm sun, a cool fill from the opposite side, and a
-        // hemisphere light so faces away from the sun are not pitch black.
-        // Their colors and intensities are set from the time of day in
-        // applyLighting(), so the starting values here do not matter much.
-        const sun = new THREE.DirectionalLight(0xfff1dc, 2.2);
-        sun.position.set(-40, 60, 100).normalize();
-        // one tight shadow cascade around the view: 2 km across is enough at
-        // city zooms and keeps the texel size usable at 2048
-        sun.castShadow = !coolMap.softwareRenderer;
-        sun.shadow.mapSize.set(2048, 2048);
-        sun.shadow.camera.left = -1000;
-        sun.shadow.camera.right = 1000;
-        sun.shadow.camera.top = 1000;
-        sun.shadow.camera.bottom = -1000;
-        // the light sits 3 km out; a tight depth range keeps the 24-bit depth
-        // precise enough to avoid acne on roofs and walls
-        sun.shadow.camera.near = 1000;
-        sun.shadow.camera.far = 5000;
-        sun.shadow.bias = -0.0002;
-        sun.shadow.normalBias = 2.0;
-        this.scene.add(sun.target);
-        this.scene.add(sun);
-        coolMap.sunLight = sun;
-
-        const fill = new THREE.DirectionalLight(0xbfd4ff, 0.6);
-        fill.position.set(60, -50, 60).normalize();
-        this.scene.add(fill);
-        coolMap.fillLight = fill;
-
-        const hemisphere = new THREE.HemisphereLight(0xcfe0ff, 0x4a4030, 1.0);
-        this.scene.add(hemisphere);
-        coolMap.hemisphereLight = hemisphere;
-
-        // faint ground plane under everything (also a shadow catcher later)
-        const ground = new THREE.Mesh(
-          new THREE.PlaneGeometry(20000, 20000),
-          new THREE.MeshBasicMaterial({
-            color: 0x8a8f95,
-            transparent: true,
-            opacity: 0.12,
-            depthWrite: false,
-          }),
-        );
-        ground.position.z = -0.05;
-        ground.renderOrder = -1;
-        this.scene.add(ground);
-        coolMap.groundMesh = ground;
-
-        // a transparent catcher for the sun shadows: it darkens the basemap
-        // and the ground under buildings, trees and cars without covering it
-        const shadowGround = new THREE.Mesh(
-          new THREE.PlaneGeometry(20000, 20000),
-          new THREE.ShadowMaterial({ opacity: 0.32 }),
-        );
-        shadowGround.position.z = -0.04;
-        shadowGround.receiveShadow = true;
-        shadowGround.material.depthWrite = false;
-        shadowGround.renderOrder = -0.5;
-        shadowGround.frustumCulled = false;
-        this.scene.add(shadowGround);
-        coolMap.shadowGround = shadowGround;
+        // the lights, the ground and the shadow catcher belong to the rig,
+        // which is built with the scene; it only needs the renderer and the
+        // SwiftShader verdict
+        coolMap.light.setSoftwareRenderer(coolMap.softwareRenderer);
+        if (this.renderer) coolMap.light.setRenderer(this.renderer);
 
         // this.scene.add(heartMesh());
 
@@ -545,7 +477,7 @@ class CoolMap {
         // warm lamps and red/green signal heads for the night
         coolMap.nightLights = new NightLights(this.scene);
         // the lights now exist, so push the current time-of-day state onto them
-        coolMap.applyLighting();
+        coolMap.light.apply();
         // tiles may already have loaded before this layer was added, so seed
         // the renderer with whatever routes are present
         coolMap.syncTraffic();
@@ -665,7 +597,7 @@ class CoolMap {
             coolMap.bloom &&
             coolMap.bloomEnabled &&
             !coolMap.softwareRenderer &&
-            coolMap.lighting.night > BLOOM_NIGHT_AT
+            coolMap.light.night > BLOOM_NIGHT_AT
           ) {
             try {
               bloomed = coolMap.bloom.render(this.scene, this.camera);
@@ -710,10 +642,10 @@ class CoolMap {
         this.map.addLayer(this.customLayer);
       }
       // load map data at setup before the user moves
-      this.loadUnloadCoord(this.map.getCenter());
+      this.loader.load(this.map.getCenter());
       this.applyTrafficState();
       // a style swap drops the sky; re-apply the current time-of-day state
-      coolMap.applyLighting();
+      coolMap.light.apply();
       // // this is only to show maplibre globe, not useful on a city-level map :)
       // this.map.setSky({ "atmosphere-blend": 1.0 });
       // this.map.setProjection({
@@ -734,9 +666,9 @@ class CoolMap {
       this.moveDebounce = setTimeout(() => {
         this.moveDebounce = undefined;
         this.applyTrafficState();
-        this.loadUnloadCoord(this.map.getCenter());
+        this.loader.load(this.map.getCenter());
         this.syncBuildingDetail();
-        this.refreshSunShadow();
+        this.light.refreshSunShadow();
       }, 150);
     });
 
@@ -779,16 +711,16 @@ class CoolMap {
     const timeSlider = document.querySelector<HTMLInputElement>("#time-slider");
     const syncTimeControls = () => {
       if (nightToggle) {
-        nightToggle.checked = this.lighting.night > BASEMAP_NIGHT_AT;
+        nightToggle.checked = this.light.night > BASEMAP_NIGHT_AT;
       }
-      if (timeSlider) timeSlider.value = String(this.timeOfDay);
+      if (timeSlider) timeSlider.value = String(this.light.timeOfDay);
     };
     nightToggle?.addEventListener("change", () => {
-      this.setTimeOfDay(nightToggle.checked ? NIGHT_HOUR : DAY_HOUR);
+      this.light.setTimeOfDay(nightToggle.checked ? NIGHT_HOUR : DAY_HOUR);
       syncTimeControls();
     });
     timeSlider?.addEventListener("input", () => {
-      this.setTimeOfDay(Number(timeSlider.value));
+      this.light.setTimeOfDay(Number(timeSlider.value));
       syncTimeControls();
     });
     syncTimeControls();
@@ -818,7 +750,7 @@ class CoolMap {
       this.applyLayer("water");
     });
     wireToggle("#basemap-toggle", (on) => {
-      this.setBasemapEnabled(on);
+      this.light.setBasemapEnabled(on);
     });
     wireToggle("#sidewalks-toggle", (on) => {
       this.sidewalksEnabled = on;
@@ -884,7 +816,7 @@ class CoolMap {
       // the color is baked into the geometry, so the loaded tiles have to be
       // rebuilt: drop them and let the move pass fetch them again
       this.imputedColorsEnabled = on;
-      this.reloadTiles();
+      void this.loader.reload();
     });
 
     // the gear opens the layer list; the chevron at the top of the list folds it
@@ -945,44 +877,6 @@ class CoolMap {
 
   // drop every loaded tile so the next load pass rebuilds them, picking up the
   // current load-time options (imputed colors)
-  private reloadTiles() {
-    for (const record of this.tiles.values()) this.disposeTile(record);
-    this.tiles.clear();
-    this.parkedCars?.clear();
-    this.syncTraffic();
-    this.syncAirplanes();
-    this.syncNightLights();
-    this.refreshSunShadow();
-    this.loadUnloadCoord(this.map.getCenter());
-  }
-
-  // remove one tile's meshes from the scene and free their geometry. The
-  // materials are shared module-level singletons and are deliberately not
-  // disposed; the facade detail owns its own geometry, so it goes too.
-  private disposeTile(record: TileRecord) {
-    for (const mesh of record.objects.meshes) {
-      this.customLayer.scene.remove(mesh);
-      if (mesh instanceof THREE.Mesh || mesh instanceof THREE.LineSegments) {
-        mesh.geometry.dispose();
-      }
-    }
-    this.disposeDetail(record.detail);
-    record.detail = undefined;
-  }
-
-  // run a callback over every mesh of every loaded tile
-  private forEachMesh(fn: (mesh: THREE.Object3D) => void) {
-    for (const record of this.tiles.values()) {
-      for (const mesh of record.objects.meshes) fn(mesh);
-    }
-  }
-
-  // every loaded tile's source data, flattened; the moving layers want the
-  // union of all of them (the loops, the crossings, the runways)
-  private allObjects(): TileObjects[] {
-    return [...this.tiles.values()].map((record) => record.objects);
-  }
-
   // click a building or a water body to highlight it and show its info
   private onMapClick(event: {
     point: { x: number; y: number };
@@ -1140,10 +1034,37 @@ class CoolMap {
   // loaded tiles. There is no road graph: this is a free joyride over the 3D
   // city, not a driving simulation.
 
+  // the layers that hold a union of the loaded tiles have to be re-fed
+  // whenever that union changes
+  private syncTileLayers() {
+    this.syncTraffic();
+    this.syncAirplanes();
+    this.syncParkedCars();
+    this.syncNightLights();
+    this.light.refreshSunShadow();
+  }
+
+  // one tile arrived: its routes, its runways, its facade detail and the
+  // switches it may have missed while it was in flight
+  private syncAfterTileLoad() {
+    this.syncTraffic();
+    this.syncAirplanes();
+    this.syncBuildingDetail();
+    // a tile can arrive after its checkbox was toggled, so it picks up the
+    // current switches here (this covers the power and park-path layers too)
+    this.applyTileVisibility();
+    this.light.refreshSunShadow();
+  }
+
   // read-only collision probe for the e2e: whether a car at this position and
   // heading would hit a building or a visible barrier
   collisionAt(lon: number, lat: number, heading = 0): boolean {
     return this.drive.blocked({ lon, lat, heading, speed: 0 });
+  }
+
+  // read-only day/night state for the e2e (like stats())
+  lightingState(): { hour: number; night: number; sunIntensity: number } {
+    return this.light.readState();
   }
 
   // read-only state for the e2e (like lightingState() and stats())
@@ -1157,7 +1078,7 @@ class CoolMap {
     return this.drive.state();
   }
 
-  private resetOrigin(center: LngLat) {
+  private resetOrigin(center: { lng: number; lat: number }) {
     const origin = MercatorCoordinate.fromLngLat(center, 0);
     const newScale = origin.meterInMercatorCoordinateUnits();
     const old = this.modelTransform;
@@ -1174,7 +1095,7 @@ class CoolMap {
         0,
       )
       .multiply(new THREE.Matrix4().makeScale(a, a, a));
-    this.forEachMesh((mesh) => mesh.applyMatrix4(remap));
+    this.loader.forEachMesh((mesh) => mesh.applyMatrix4(remap));
 
     this.modelTransform = {
       translateX: origin.x,
@@ -1193,115 +1114,11 @@ class CoolMap {
     this.clearBuildingDetail();
     // in-flight loads were baked against the old origin, so discard them and
     // clear their bookkeeping to let the load loop request them again
-    this.originGeneration += 1;
-    this.pendingTiles.clear();
+    this.loader.invalidate();
     this.syncParkedCars();
     this.syncNightLights();
-    this.refreshSunShadow();
+    this.light.refreshSunShadow();
     console.log("reset projection origin to", center.lng, center.lat);
-  }
-
-  private async loadUnloadCoord(center: LngLat) {
-    // the farther the projection origin is from the visible area, the more
-    // meters get squeezed into a Mercator unit (and the worse the float
-    // precision), so when we drift too far from the tile of the current
-    // origin, rebuild the transform around the current center
-    // modelTransform.translateX/Y are Mercator world units, not lng/lat, so
-    // build the coordinate directly and convert back with toLngLat()
-    const [ox, oy] = getTileIndex(
-      new MercatorCoordinate(
-        this.modelTransform.translateX,
-        this.modelTransform.translateY,
-      ).toLngLat(),
-    );
-    const [cx, cy] = getTileIndex(center);
-    if (Math.abs(ox - cx) > 2 || Math.abs(oy - cy) > 2) {
-      this.resetOrigin(center);
-    }
-    let unloaded = false;
-    for (const [key, record] of this.tiles) {
-      const [x, y] = parseTileKey(key);
-      if (
-        Math.abs(x - cx) > this.renderTileMargin ||
-        Math.abs(y - cy) > this.renderTileMargin
-      ) {
-        this.disposeTile(record);
-        this.tiles.delete(key);
-        unloaded = true;
-      }
-    }
-    // the routes of an unloaded tile are gone; hand the renderer the remaining
-    // ones. setLoops only reprepares plain data, so this is cheap enough to run
-    // on the moves that actually unload a tile.
-    if (unloaded) {
-      this.syncTraffic();
-      this.syncAirplanes();
-      this.syncParkedCars();
-      this.syncNightLights();
-      this.refreshSunShadow();
-    }
-    const generation = this.originGeneration;
-    // inclusive bounds so the loaded window matches the retention window
-    // above (|x - cx| <= margin), otherwise the +margin row/column is kept
-    // loaded but never (re)fetched
-    for (
-      let x = cx - this.renderTileMargin;
-      x <= cx + this.renderTileMargin;
-      x++
-    ) {
-      for (
-        let y = cy - this.renderTileMargin;
-        y <= cy + this.renderTileMargin;
-        y++
-      ) {
-        this.loadTile(x, y, generation);
-      }
-    }
-  }
-
-  private async loadTile(x: number, y: number, generation: number) {
-    const tileKey = `${x}_${y}`;
-    if (this.tiles.has(tileKey) || this.pendingTiles.has(tileKey)) {
-      return;
-    }
-    this.pendingTiles.add(tileKey);
-    try {
-      const objects = await objectsAt(
-        this.tileCenter,
-        x,
-        y,
-        this.imputedColorsEnabled,
-      );
-      if (generation !== this.originGeneration) {
-        // the origin was reset while this tile was being computed, so the
-        // meshes are in coordinates of a projection that is no longer used
-        console.log("discarding stale tile", tileKey);
-        return;
-      }
-      // the tile may have left the render window while it was loading; if so
-      // don't add it (the move handler will skip it, or has already dropped it)
-      const [cx, cy] = getTileIndex(this.map.getCenter());
-      if (
-        Math.abs(x - cx) > this.renderTileMargin ||
-        Math.abs(y - cy) > this.renderTileMargin
-      ) {
-        return;
-      }
-      this.tiles.set(tileKey, { objects });
-      objects.meshes.forEach((m) => this.customLayer.scene.add(m));
-      this.syncTraffic();
-      this.syncAirplanes();
-      this.syncBuildingDetail();
-      // a tile can arrive after its checkbox was toggled, so it picks up the
-      // current switches here (this covers the power and park-path layers too)
-      this.applyTileVisibility();
-      this.refreshSunShadow();
-    } catch (e) {
-      // leave the tile out of the store so a later move retries it
-      console.warn("failed to load tile", tileKey, e);
-    } finally {
-      this.pendingTiles.delete(tileKey);
-    }
   }
 
   // show/hide the traffic renderers from the toggle and the current zoom
@@ -1469,7 +1286,7 @@ class CoolMap {
     const layer = this.layerSwitches.find((candidate) => candidate.id === id);
     if (!layer) return;
     const on = layer.visible();
-    this.forEachMesh((mesh) => {
+    this.loader.forEachMesh((mesh) => {
       if (layer.kinds.includes(mesh.userData.kind as string)) {
         mesh.visible = on;
       }
@@ -1483,7 +1300,7 @@ class CoolMap {
     const index = this.layerForKind();
     const on = new Map<LayerSwitch, boolean>();
     for (const layer of this.layerSwitches) on.set(layer, layer.visible());
-    this.forEachMesh((mesh) => {
+    this.loader.forEachMesh((mesh) => {
       const layer = index.get(mesh.userData.kind as string);
       if (layer) mesh.visible = on.get(layer) ?? false;
     });
@@ -1491,12 +1308,7 @@ class CoolMap {
   }
 
   private disposeDetail(detail: TileRecord["detail"]): void {
-    if (!detail) return;
-    for (const mesh of [detail.windows, detail.balconies]) {
-      if (!mesh) continue;
-      this.customLayer.scene.remove(mesh);
-      mesh.geometry.dispose();
-    }
+    disposeFacadeDetail(this.customLayer.scene, detail);
   }
 
   // drop the facade detail of every tile but keep the tiles themselves
@@ -1519,209 +1331,6 @@ class CoolMap {
     this.clouds?.setEnabled(enabled);
   }
 
-  // the checkbox and the slider both funnel through here; cheap to recompute
-  private setTimeOfDay(hour: number) {
-    this.timeOfDay = hour;
-    this.applyLighting();
-  }
-
-  // Push the time-of-day model onto the scene: the three lights, the renderer
-  // exposure, the window shader, the clouds and the basemap. Called when the
-  // time changes and once from onAdd, not every frame.
-  private applyLighting() {
-    const lighting = lightingAt(this.timeOfDay);
-    this.lighting = lighting;
-    if (this.sunLight) {
-      this.sunLight.color.setHex(lighting.keyColor);
-      this.sunLight.intensity = lighting.keyIntensity;
-      this.sunLight.position.set(...lighting.keyDirection).normalize();
-    }
-    if (this.fillLight) {
-      this.fillLight.color.setHex(lighting.fillColor);
-      this.fillLight.intensity = lighting.fillIntensity;
-    }
-    if (this.hemisphereLight) {
-      this.hemisphereLight.color.setHex(lighting.skyColor);
-      this.hemisphereLight.groundColor.setHex(lighting.groundColor);
-      this.hemisphereLight.intensity = lighting.hemisphereIntensity;
-    }
-    if (this.groundMesh) {
-      (this.groundMesh.material as THREE.MeshBasicMaterial).color.setHex(
-        lerpColor(0x11151c, 0x8a8f95, 1 - lighting.night),
-      );
-    }
-    // Painted road markings are lit, but a pure white Lambert still reads
-    // brighter than the night street and feeds the bloom. Dim the whole paint
-    // material with the same night factor; daylight stays pure white.
-    const paint = 1 - 0.72 * lighting.night;
-    crosswalkMaterial.color.setScalar(paint);
-    roadMarkingMaterial.color.setScalar(paint);
-    if (this.customLayer.renderer) {
-      this.customLayer.renderer.toneMappingExposure = lighting.exposure;
-    }
-    // the window shader reads the same key light, so the glass tracks dawn/dusk
-    windowMaterial.uniforms.uNight.value = lighting.night;
-    windowMaterial.uniforms.uKeyDirection.value
-      .set(...lighting.keyDirection)
-      .normalize();
-    windowMaterial.uniforms.uKeyColor.value.setHex(lighting.keyColor);
-    windowMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
-    windowMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
-    windowMaterial.uniforms.uAmbientIntensity.value =
-      lighting.hemisphereIntensity;
-    // glass walls read the same sun and sky as the windows, so a curtain wall
-    // reflects the same dawn and goes just as dark at night
-    glassMaterial.uniforms.uNight.value = lighting.night;
-    glassMaterial.uniforms.uKeyDirection.value
-      .set(...lighting.keyDirection)
-      .normalize();
-    glassMaterial.uniforms.uKeyColor.value.setHex(lighting.keyColor);
-    glassMaterial.uniforms.uKeyIntensity.value = lighting.keyIntensity;
-    glassMaterial.uniforms.uAmbientColor.value.setHex(lighting.skyColor);
-    glassMaterial.uniforms.uAmbientIntensity.value =
-      lighting.hemisphereIntensity;
-    waterMaterial.uniforms.uNight.value = lighting.night;
-    fountainWaterMaterial.uniforms.uNight.value = lighting.night;
-    // the glitter on the water is the same key light the windows get: its
-    // color warms at the horizon and its direction is the real sun, so the
-    // reflection sits under the sun instead of wherever the bands happen to be
-    waterMaterial.uniforms.uSunDirection.value
-      .set(...lighting.keyDirection)
-      .normalize();
-    waterMaterial.uniforms.uSunColor.value.setHex(lighting.keyColor);
-    waterMaterial.uniforms.uSunIntensity.value = lighting.keyIntensity;
-    greenMaterial.uniforms.uNight.value = lighting.night;
-    this.clouds?.setNight(lighting.night);
-    // the fog and the MapLibre sky follow the same palette as the lights, so
-    // distant geometry dissolves into the horizon instead of stopping abruptly
-    if (this.customLayer.scene.fog instanceof THREE.Fog) {
-      this.customLayer.scene.fog.color.setHex(lighting.skyFog);
-    }
-    if (this.shadowGround) {
-      this.shadowGround.visible = !this.softwareRenderer;
-      const material = this.shadowGround.material as THREE.ShadowMaterial;
-      material.opacity = Math.min(0.4, 0.15 * lighting.keyIntensity);
-    }
-    this.applySky(lighting);
-    this.applyNightLightsVisibility();
-    this.refreshSunShadow();
-    const grade = document.querySelector<HTMLElement>("#grade");
-    if (grade) {
-      grade.style.backgroundColor = `#${lighting.gradeColor
-        .toString(16)
-        .padStart(6, "0")}`;
-      grade.style.opacity = String(lighting.gradeOpacity);
-    }
-    this.applyBasemap(lighting.night > BASEMAP_NIGHT_AT);
-  }
-
-  // MapLibre's sky/atmosphere: a gradient from the zenith to the horizon with
-  // fog, warmed through sunrise/sunset and deep blue at night.
-  private applySky(lighting: Lighting) {
-    if (!this.map.isStyleLoaded()) return;
-    const hex = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
-    this.map.setSky({
-      "sky-color": hex(lighting.skyTop),
-      "horizon-color": hex(lighting.skyHorizon),
-      "fog-color": hex(lighting.skyFog),
-      "sky-horizon-blend": 0.6,
-      "horizon-fog-blend": 0.45,
-      "fog-ground-blend": 0.6,
-      "atmosphere-blend": 1,
-    });
-  }
-
-  // Reposition the sun and its shadow camera and request one shadow-map
-  // render. Debounced: a burst of tile loads (each one would otherwise trigger
-  // a full 2.4M-caster shadow pass) coalesces into one, and the view settling
-  // updates it once.
-  private refreshSunShadow() {
-    if (!this.sunLight || this.softwareRenderer) return;
-    if (this.shadowTimer !== undefined) clearTimeout(this.shadowTimer);
-    this.shadowTimer = setTimeout(() => {
-      this.shadowTimer = undefined;
-      this.applySunShadow();
-    }, 200);
-  }
-
-  private applySunShadow() {
-    if (!this.sunLight || this.softwareRenderer) return;
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
-    const center = this.map.getCenter();
-    const [x, y] = toModelCoords(
-      [center.lng, center.lat],
-      originMeters,
-      scaleFactor,
-    );
-    const direction = this.lighting.keyDirection;
-    this.sunLight.target.position.set(x, y, 0);
-    this.sunLight.target.updateMatrixWorld();
-    this.sunLight.position.set(
-      x + direction[0] * 3000,
-      y + direction[1] * 3000,
-      direction[2] * 3000,
-    );
-    this.sunLight.updateMatrixWorld();
-    if (this.customLayer.renderer) {
-      this.customLayer.renderer.shadowMap.needsUpdate = true;
-    }
-  }
-
-  // Swap the basemap to the dark MapTiler style at night (and back by day).
-  // setStyle diffs, so the custom layer usually survives it; the style.load
-  // handler and onAdd are both written to tolerate a re-add just in case.
-  // Remembering the mounted style keeps the swap to once per crossing, not on
-  // every lighting update.
-  private setBasemapEnabled(on: boolean) {
-    if (on === this.basemapEnabled) return;
-    this.basemapEnabled = on;
-    const fade = document.querySelector<HTMLElement>("#basemap-fade");
-    if (fade) fade.style.opacity = "0";
-    if (on) {
-      const night = this.lighting.night > BASEMAP_NIGHT_AT;
-      this.darkBasemap = night;
-      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
-    } else {
-      this.map.setStyle(EMPTY_BASEMAP_STYLE);
-    }
-  }
-
-  private applyBasemap(night: boolean) {
-    if (!this.basemapEnabled) return;
-    if (night === this.darkBasemap) return;
-    this.darkBasemap = night;
-    const fade = document.querySelector<HTMLElement>("#basemap-fade");
-    if (!fade) {
-      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
-      return;
-    }
-    // fade through black, swap under the cover, then reveal the new style
-    fade.style.opacity = "1";
-    let done = false;
-    const reveal = () => {
-      if (done) return;
-      done = true;
-      fade.style.opacity = "0";
-    };
-    setTimeout(() => {
-      this.map.once("style.load", reveal);
-      this.map.setStyle(basemapStyleUrl(night ? BASEMAP_NIGHT : BASEMAP_DAY));
-      // the style load is normally quick; do not stay black if it never fires
-      setTimeout(reveal, 900);
-    }, 230);
-  }
-
-  // read-only day/night state for the e2e test (like stats()): the current
-  // hour, the 0..1 night factor and the key-light intensity
-  lightingState(): { hour: number; night: number; sunIntensity: number } {
-    return {
-      hour: this.timeOfDay,
-      night: this.lighting.night,
-      sunIntensity: this.lighting.keyIntensity,
-    };
-  }
-
   // the clouds are anchored in the world and fade out as the map zooms in;
   // like the fleets they are recomputed every frame, in the same projection
   private updateClouds(originMeters: [number, number], scaleFactor: number) {
@@ -1739,8 +1348,12 @@ class CoolMap {
   // hand the union of the loaded tiles' precomputed loops to the renderers,
   // split by kind (both get the crossing points; only the car loops pass them)
   private syncTraffic() {
-    const loops = this.allObjects().flatMap((objects) => objects.traffic);
-    const crossings = this.allObjects().flatMap((objects) => objects.crossings);
+    const loops = this.loader
+      .allObjects()
+      .flatMap((objects) => objects.traffic);
+    const crossings = this.loader
+      .allObjects()
+      .flatMap((objects) => objects.crossings);
     this.carsTraffic?.setLoops(
       loops.filter((loop) => loop.kind === "car"),
       crossings,
@@ -1848,7 +1461,7 @@ class CoolMap {
 
   private applyNightLightsVisibility() {
     this.nightLights?.setLampsEnabled(this.lamppostsEnabled);
-    this.nightLights?.setVisible(this.lighting.night, this.map.getZoom());
+    this.nightLights?.setVisible(this.light.night, this.map.getZoom());
   }
 
   private recordFrame(now: number) {
