@@ -864,6 +864,11 @@ export async function objectsAt(
     if (model) meshes.push(model);
   }
   for (const [kind, geometries] of Object.entries(byKind)) {
+    if (geometries.length === 0) continue;
+    // a builder can legitimately produce nothing for a degenerate feature (a
+    // sliver cemetery polygon leaves no room for a row of graves), and
+    // mergeGeometries throws on an empty array instead of returning null, so
+    // skip the group: it used to take the whole tile down with it.
     const merged = BufferGeometryUtils.mergeGeometries(geometries);
     if (merged) {
       const material =
