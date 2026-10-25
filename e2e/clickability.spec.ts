@@ -116,7 +116,35 @@ test("benches, trees and park paths open their OSM popups", async ({
     bench.id,
     { timeout: 45_000 },
   );
-  await page.waitForTimeout(800);
+  // the trees are in the neighbouring tiles, which can still be in flight when
+  // the bench's own tile lands: wait for enough of them to be in view instead
+  // of guessing with a fixed delay
+  await page.waitForFunction(
+    () => {
+      const map = (window as unknown as { __coolMap: any }).__coolMap;
+      const container = map.map.getContainer() as HTMLElement;
+      let inView = 0;
+      for (const list of [...map.tiles.values()].map(
+        (t) => t.objects.features,
+      )) {
+        for (const f of list as any[]) {
+          if (f.kind !== "tree" || f.lon === undefined) continue;
+          const p = map.map.project([f.lon, f.lat]);
+          if (
+            p.x > 100 &&
+            p.y > 150 &&
+            p.x < container.clientWidth - 100 &&
+            p.y < container.clientHeight - 100
+          ) {
+            inView += 1;
+          }
+        }
+      }
+      return inView >= 3;
+    },
+    null,
+    { timeout: 45_000 },
+  );
 
   const canvas = await page.locator("canvas.maplibregl-canvas").boundingBox();
   const clickAt = async (x: number, y: number) => {
@@ -173,10 +201,12 @@ test("benches, trees and park paths open their OSM popups", async ({
     return out;
   })) as { id: string; x: number; y: number }[];
 
+  console.log(`DEBUG trees=${trees.length} ${JSON.stringify(trees)}`);
   let treeOk = false;
   for (const tree of trees) {
     for (const dy of [-12, -9, -6, -3, 0]) {
       const text = await clickAt(tree.x, tree.y + dy);
+      console.log(`DEBUG click ${tree.id} dy=${dy} -> ${JSON.stringify(text)}`);
       if (text && /Tree|Conifer/.test(text) && /OSM/.test(text)) {
         treeOk = true;
         break;
