@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { toModelCoords } from "./geojson_data";
+import { toModelCoords } from "./projection";
 import {
   DRIVE_CONFIG,
   driveStep,

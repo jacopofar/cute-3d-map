@@ -3,7 +3,8 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857, waterInfo } from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
+import { waterInfo } from "../geojson_data";
 import {
   DEFAULT_WATER_COLOR,
   UNDERWATER_OPACITY,

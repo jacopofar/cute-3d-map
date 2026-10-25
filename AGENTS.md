@@ -58,6 +58,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
+- `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
+  `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
+  squeeze). It lives on its own so the geometry builders, the pickers and their
+  unit tests do not import `geojson_data` just to convert a coordinate.
 - `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,

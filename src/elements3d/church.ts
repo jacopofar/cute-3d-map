@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
-import { toModelCoords, type BuildingInfo } from "../geojson_data";
+import { toModelCoords } from "../projection";
+import type { BuildingInfo } from "../geojson_data";
 import { hashSeed, makeRng } from "./random";
 import {
   frameToWorld,

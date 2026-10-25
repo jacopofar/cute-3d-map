@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
-import { toModelCoords, type ParkedCar } from "./geojson_data";
+import { toModelCoords } from "./projection";
+import type { ParkedCar } from "./geojson_data";
 import { CAR_TRAFFIC, simpleVehicleGeometry, vehicleGeometry } from "./traffic";
 
 /*

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 import { BoxBuilder } from "./box_builder";
 import { hashSeed } from "./random";
 import { tombstoneSpots } from "./tombstone_rows";

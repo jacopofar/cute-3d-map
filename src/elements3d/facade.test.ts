@@ -1,11 +1,9 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import {
-  epsg4326toEpsg3857,
-  toModelCoords,
-  type BuildingInfo,
-} from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
+import { toModelCoords } from "../projection";
+import type { BuildingInfo } from "../geojson_data";
 import { tileFacadeDetail, FACADE_COLORS } from "./facade";
 import { GROUND_CLEARANCE } from "./facade_layout";
 

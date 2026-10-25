@@ -18,11 +18,12 @@ import type { CustomLayerInterface, LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
-  objectsAt,
   TILE_ZOOM,
   epsg4326toEpsg3857,
+  scaleFactorAt,
   toModelCoords,
-} from "./geojson_data.ts";
+} from "./projection.ts";
+import { objectsAt } from "./geojson_data.ts";
 import type {
   ApronRing,
   BarrierInfo,
@@ -235,6 +236,10 @@ const FEATURE_PICK_RADIUS: Record<string, number> = {
   fence: 4,
   wall: 4,
 };
+
+// A fountain is picked from its basin, not its centre point: tilegen clamps the
+// size to 12 m, so this also covers the rim and a slightly-off click.
+const FOUNTAIN_PICK_RADIUS = 8;
 
 function osmLink(id: string | undefined): string | null {
   if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
@@ -801,7 +806,8 @@ class CoolMap {
         // this.renderer.xr.enabled = true;
         // document.body.appendChild(VRButton.createButton(this.renderer));
       },
-      render(gl, args) {
+      // the renderer owns its own GL context; this argument is unused
+      render(_gl, args) {
         coolMap.recordFrame(performance.now());
         const modelTransform = coolMap.modelTransform;
         const rotationX = new THREE.Matrix4().makeRotationAxis(
@@ -1337,7 +1343,7 @@ class CoolMap {
     const tileKey = (hit.object.userData.tileKey as string | undefined) ?? "";
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     if (hit.object.userData.kind === "custom_model") {
       const buildingId = hit.object.userData.buildingId as string | undefined;
       const info = (this.loadedBuildings[tileKey] ?? []).find(
@@ -1534,64 +1540,25 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): FurnitureInfo | undefined {
-    const candidates = this.loadedFurniture[tileKey] ?? [];
-    let best: FurnitureInfo | undefined;
-    let bestSq = 9;
-    for (const info of candidates) {
-      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
-      const dx = m[0] - point.x;
-      const dy = m[1] - point.y;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq < bestSq) {
-        bestSq = distanceSq;
-        best = info;
-      }
-    }
-    return best;
+    return this.nearestPoint(
+      this.loadedFurniture[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      3,
+    );
   }
 
   private selectFurniture(info: FurnitureInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    const ring: THREE.Vector3[] = [];
-    for (let i = 0; i < 24; i++) {
-      const angle = (i / 24) * Math.PI * 2;
-      ring.push(
-        new THREE.Vector3(
-          x + Math.cos(angle) * 1.3,
-          y + Math.sin(angle) * 1.3,
-          0.12,
-        ),
-      );
-    }
-    const outline = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(ring),
-      new THREE.LineBasicMaterial({
-        color: 0xffcc00,
-        depthTest: false,
-        transparent: true,
-      }),
-    );
-    outline.renderOrder = 999;
-    this.customLayer.scene.add(outline);
-    this.highlight = outline;
+    this.highlightAt(info.lon, info.lat, 1.3);
 
     const label = FURNITURE_LABELS[info.kind] ?? info.kind.replace(/_/g, " ");
     const lines = [
       `<strong>${escapeHtml(label)}</strong>`,
       osmLink(info.id),
     ].filter(Boolean);
-    if (lines.length === 0) return;
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private fountainAt(
@@ -1600,64 +1567,26 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): FountainInfo | undefined {
-    const candidates = this.loadedFountains[tileKey] ?? [];
-    let best: FountainInfo | undefined;
-    let bestSq = Infinity;
-    for (const info of candidates) {
-      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
-      const dx = m[0] - point.x;
-      const dy = m[1] - point.y;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq < bestSq) {
-        bestSq = distanceSq;
-        best = info;
-      }
-    }
-    return best;
+    return this.nearestPoint(
+      this.loadedFountains[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      FOUNTAIN_PICK_RADIUS,
+    );
   }
 
   private selectFountain(info: FountainInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    const radius = Math.max(1.5, info.size / 2 + 0.6);
-    const ring: THREE.Vector3[] = [];
-    for (let i = 0; i < 32; i++) {
-      const angle = (i / 32) * Math.PI * 2;
-      ring.push(
-        new THREE.Vector3(
-          x + Math.cos(angle) * radius,
-          y + Math.sin(angle) * radius,
-          0.15,
-        ),
-      );
-    }
-    const outline = new THREE.LineLoop(
-      new THREE.BufferGeometry().setFromPoints(ring),
-      new THREE.LineBasicMaterial({
-        color: 0xffcc00,
-        depthTest: false,
-        transparent: true,
-      }),
-    );
-    outline.renderOrder = 999;
-    this.customLayer.scene.add(outline);
-    this.highlight = outline;
+    // the ring hugs the basin, so a big fountain is ringed wider
+    this.highlightAt(info.lon, info.lat, Math.max(1.5, info.size / 2 + 0.6));
 
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       "Fountain",
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private transitAt(
@@ -1666,20 +1595,13 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): TransitInfo | undefined {
-    const candidates = this.loadedTransit[tileKey] ?? [];
-    let best: TransitInfo | undefined;
-    let bestSq = 36;
-    for (const info of candidates) {
-      const m = toModelCoords([info.lon, info.lat], originMeters, scaleFactor);
-      const dx = m[0] - point.x;
-      const dy = m[1] - point.y;
-      const distanceSq = dx * dx + dy * dy;
-      if (distanceSq < bestSq) {
-        bestSq = distanceSq;
-        best = info;
-      }
-    }
-    return best;
+    return this.nearestPoint(
+      this.loadedTransit[tileKey] ?? [],
+      point,
+      originMeters,
+      scaleFactor,
+      6,
+    );
   }
 
   private nearestPoint<T extends { lon: number; lat: number }>(
@@ -1721,14 +1643,7 @@ class CoolMap {
 
   private selectCrosswalk(info: CrosswalkInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 4);
+    this.highlightAt(info.lon, info.lat, 4);
 
     const label = info.crossing?.includes("traffic_signals")
       ? "Zebra crossing at traffic lights"
@@ -1759,14 +1674,7 @@ class CoolMap {
 
   private selectRooftop(info: RooftopInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 5);
+    this.highlightAt(info.lon, info.lat, 5);
     const labels: Record<string, string> = {
       water_tower: "Water tower",
       chimney: "Chimney",
@@ -1779,10 +1687,7 @@ class CoolMap {
       label,
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private platformAt(
@@ -1805,23 +1710,13 @@ class CoolMap {
 
   private selectPlatform(info: PlatformInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 6);
+    this.highlightAt(info.lon, info.lat, 6);
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       "Rail platform",
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private constructionAt(
@@ -1842,14 +1737,7 @@ class CoolMap {
 
   private selectConstruction(info: ConstructionInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 8);
+    this.highlightAt(info.lon, info.lat, 8);
 
     const labels: Record<string, string> = {
       residential: "Residential construction",
@@ -1866,10 +1754,7 @@ class CoolMap {
       label,
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private playgroundAt(
@@ -1904,35 +1789,18 @@ class CoolMap {
 
   private selectPlayground(info: PlaygroundInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 7);
+    this.highlightAt(info.lon, info.lat, 7);
     const lines = [
       info.name ? `<strong>${escapeHtml(info.name)}</strong>` : null,
       "Playground",
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private selectMonument(info: MonumentInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 3);
+    this.highlightAt(info.lon, info.lat, 3);
     const labels: Record<string, string> = {
       statue: "Statue",
       bust: "Bust",
@@ -1953,10 +1821,7 @@ class CoolMap {
       label,
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private terraceAt(
@@ -1983,14 +1848,7 @@ class CoolMap {
 
   private selectTerrace(info: TerraceInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 2.2);
+    this.highlightAt(info.lon, info.lat, 2.2);
 
     const labels: Record<string, string> = {
       cafe: "Cafe terrace",
@@ -2007,10 +1865,32 @@ class CoolMap {
       label,
       osmLink(info.id),
     ].filter(Boolean);
+    this.showPopup(lngLat, lines);
+  }
+
+  // All the popups share the same chrome; only the body differs. An empty body
+  // means "nothing worth saying", so those clicks leave the map alone. Returns
+  // the popup so callers that wire extra controls can skip the null check.
+  private showPopup(
+    lngLat: LngLat,
+    lines: (string | null)[],
+  ): Popup | undefined {
+    const body = lines.filter(Boolean);
+    if (body.length === 0) return undefined;
     this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
       .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
+      .setHTML(body.join("<br>"))
       .addTo(this.map);
+    return this.popup;
+  }
+
+  // a lon/lat point in model space, ringed on the ground. Every select* for a
+  // point feature needs exactly this, and it was copy-pasted a dozen times.
+  private highlightAt(lon: number, lat: number, radius: number): void {
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
+    const [x, y] = toModelCoords([lon, lat], originMeters, scaleFactor);
+    this.highlightPoint(x, y, radius);
   }
 
   private highlightPoint(x: number, y: number, radius: number): void {
@@ -2040,14 +1920,7 @@ class CoolMap {
 
   private selectTransit(info: TransitInfo, lngLat: LngLat) {
     this.clearSelection();
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
-    const [x, y] = toModelCoords(
-      [info.lon, info.lat],
-      originMeters,
-      scaleFactor,
-    );
-    this.highlightPoint(x, y, 2.6);
+    this.highlightAt(info.lon, info.lat, 2.6);
 
     const labels: Record<string, string> = {
       metro: "Metro entrance",
@@ -2060,10 +1933,7 @@ class CoolMap {
       label,
       osmLink(info.id),
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   private selectWater(info: WaterInfo, lngLat: LngLat) {
@@ -2076,11 +1946,7 @@ class CoolMap {
       escapeHtml(label),
       osmLink(info.id),
     ].filter(Boolean);
-    if (lines.length === 0) return;
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   // a generic OSM feature: points get a ring, areas and lines just the popup
@@ -2088,7 +1954,7 @@ class CoolMap {
     this.clearSelection();
     if (info.lon !== undefined && info.lat !== undefined) {
       const originMeters = epsg4326toEpsg3857(this.tileCenter);
-      const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+      const scaleFactor = scaleFactorAt(this.tileCenter[1]);
       const [x, y] = toModelCoords(
         [info.lon, info.lat],
         originMeters,
@@ -2102,11 +1968,7 @@ class CoolMap {
       escapeHtml(this.featureLabel(info)),
       osmLink(info.id),
     ].filter(Boolean);
-    if (lines.length === 0) return;
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
+    this.showPopup(lngLat, lines);
   }
 
   // fences and walls are features too; reuse the generic popup
@@ -2251,11 +2113,8 @@ class CoolMap {
       headsign ? `Towards ${escapeHtml(headsign)}` : null,
       '<span class="follow-hint">Following — click the map to stop</span>',
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
-    this.popup.on("close", () => this.stopFollowing());
+    const popup = this.showPopup(lngLat, lines);
+    popup?.on("close", () => this.stopFollowing());
     this.startFollowing(hit.renderer, hit.loopId, hit.phase);
   }
 
@@ -2643,7 +2502,7 @@ class CoolMap {
   private selectBuilding(info: BuildingInfo, lngLat: LngLat) {
     this.clearSelection();
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
 
     // outline: base + top loops and verticals for each ring
     const positions: number[] = [];
@@ -2699,19 +2558,16 @@ class CoolMap {
       `<a href="#" data-gltf class="gltf-link" title="Download GLTF">G</a>`,
       `<a href="#" data-zoom>Zoom to building</a>`,
     ].filter(Boolean);
-    this.popup = new Popup({ closeButton: true, offset: 8, maxWidth: "320px" })
-      .setLngLat(lngLat)
-      .setHTML(lines.join("<br>"))
-      .addTo(this.map);
-    const link = this.popup
-      .getElement()
+    const popup = this.showPopup(lngLat, lines);
+    const link = popup
+      ?.getElement()
       ?.querySelector("[data-zoom]") as HTMLElement | null;
     link?.addEventListener("click", (clickEvent) => {
       clickEvent.preventDefault();
       this.zoomToBuilding(info);
     });
-    const gltfLink = this.popup
-      .getElement()
+    const gltfLink = popup
+      ?.getElement()
       ?.querySelector("[data-gltf]") as HTMLElement | null;
     gltfLink?.addEventListener("click", (clickEvent) => {
       clickEvent.preventDefault();
@@ -2743,7 +2599,7 @@ class CoolMap {
       return;
     }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     const feature: Geojson.Feature = {
       type: "Feature",
       id: info.id,
@@ -3094,7 +2950,7 @@ class CoolMap {
         // not loaded yet: loadTile runs this again when it arrives
         if (!infos) continue;
         const originMeters = epsg4326toEpsg3857(this.tileCenter);
-        const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+        const scaleFactor = scaleFactorAt(this.tileCenter[1]);
         const detail = tileFacadeDetail(originMeters, scaleFactor, infos);
         this.loadedDetail[key] = {
           windows: this.addDetailMesh(key, "windows", detail.windows),
@@ -3469,7 +3325,7 @@ class CoolMap {
   private applySunShadow() {
     if (!this.sunLight || this.softwareRenderer) return;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     const center = this.map.getCenter();
     const [x, y] = toModelCoords(
       [center.lng, center.lat],
@@ -3624,7 +3480,7 @@ class CoolMap {
       }
     }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     // the distance LOD follows the view center: cars within
     // PARKED_CAR_DETAIL_RADIUS get the full body, the rest a box. The layer
     // quantizes this, so only a meaningful move rebuilds the split.
@@ -3663,7 +3519,7 @@ class CoolMap {
       }
     }
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     this.nightLights.setTiles(tiles, originMeters, scaleFactor);
     this.applyNightLightsVisibility();
   }

@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857 } from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
 import {
   DEFAULT_GREEN_COLOR,
   DEFAULT_GREEN_STYLE,

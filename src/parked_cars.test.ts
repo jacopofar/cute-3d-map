@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857, toModelCoords } from "./geojson_data";
+import { epsg4326toEpsg3857, toModelCoords } from "./projection";
 import {
   diffParkedTiles,
   PARKED_CAR_MIN_ZOOM,

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
-import { toModelCoords, type BuildingInfo } from "../geojson_data";
+import { toModelCoords } from "../projection";
+import type { BuildingInfo } from "../geojson_data";
 import {
   BALCONY_DEPTH,
   BALCONY_RAILING,

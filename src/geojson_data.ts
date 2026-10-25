@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type Geojson from "geojson";
+import { epsg4326toEpsg3857, scaleFactorAt, toModelCoords } from "./projection";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
 import {
@@ -69,63 +70,6 @@ import {
   bridgeMaterial,
   tunnelMaterial,
 } from "./elements3d/bridge";
-
-// square building with an hole, to test this kind of shape and highlight skew
-// import myGeoJSON from './bicocca_hole.json';
-// in Berlin, east side
-// import myGeoJSON from './lichtenberg.json';
-// reichstag
-// import myGeoJSON from './reichstag.json';
-// import myGeoJSON from './liberty_statue.json';
-// import myGeoJSON from './capetown_lighthouse.json';
-// import myGeoJSON from './montevideo_stadium_part.json';
-// import myGeoJSON from './canada_far_north_building.json';
-// import myGeoJSON from './tokyo_imperial_palace.json';
-// import myGeoJSON from './santa_monica_rand.json';
-// import myGeoJSON from './quito_colegio.json';
-// import _myGeoJSON from "./11721.json";
-
-// static, the zoom at which 3D tile data are stored; must match TILE_ZOOM in
-// tilegen/main.py
-export const TILE_ZOOM = 15;
-
-export function epsg4326toEpsg3857(
-  coordinates: [number, number],
-): [number, number] {
-  let x = (coordinates[0] * 20037508.34) / 180;
-  let y =
-    Math.log(Math.tan(((90 + coordinates[1]) * Math.PI) / 360)) /
-    (Math.PI / 180);
-  y = (y * 20037508.34) / 180;
-  return [x, y];
-}
-
-// Milan, Italy
-// const scaleFactor = 0.70;
-// Berlin, Germany
-// const scaleFactor = 0.608;
-// New York
-// const scaleFactor = 0.758;
-// Cape Town, SA + Montevideo
-// const scaleFactor = 0.82835;
-// northern Canada
-// const scaleFactor = 0.549;
-// Tokyo
-// const scaleFactor = 0.812;
-// Quito (close to Equator)
-// const scaleFactor =  1.000;
-
-export function toModelCoords(
-  coord: [number, number],
-  originMeters: [number, number],
-  scaleFactor: number,
-): [number, number] {
-  const coordMeters = epsg4326toEpsg3857(coord);
-  return [
-    (coordMeters[0] - originMeters[0]) * scaleFactor,
-    (coordMeters[1] - originMeters[1]) * scaleFactor,
-  ];
-}
 
 export function geoJSONtoGeometries(
   f: Geojson.Feature,
@@ -738,7 +682,7 @@ export async function objectsAt(
   // offset in meters of the origin
   const originMeters = epsg4326toEpsg3857(viewOrigin);
   // scaling factor
-  const scaleFactor = Math.cos((2 * Math.PI * viewOrigin[1]) / 360);
+  const scaleFactor = scaleFactorAt(viewOrigin[1]);
   const response = await fetch(`tiles/${x}/${y}.json`);
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404

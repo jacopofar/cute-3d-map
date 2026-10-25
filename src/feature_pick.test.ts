@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BarrierInfo, FeatureInfo } from "./geojson_data";
-import { toModelCoords } from "./geojson_data";
+import { toModelCoords } from "./projection";
 import {
   barrierAt,
   featureAt,

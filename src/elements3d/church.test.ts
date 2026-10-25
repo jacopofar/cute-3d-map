@@ -2,7 +2,8 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857, type BuildingInfo } from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
+import { type BuildingInfo } from "../geojson_data";
 import { building } from "./building";
 import {
   CHURCH_CROSS_COLOR,

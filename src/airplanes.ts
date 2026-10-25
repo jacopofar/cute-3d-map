@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 
-import { toModelCoords, type RunwayLine } from "./geojson_data";
+import { toModelCoords } from "./projection";
+import type { RunwayLine } from "./geojson_data";
 import { applyVertexColor } from "./elements3d/vertex_color";
 
 /*

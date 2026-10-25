@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 
 /*
  * Zebra crossings: flat white bars on the carriageway, long along the traffic

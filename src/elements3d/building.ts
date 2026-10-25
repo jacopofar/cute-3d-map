@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 import { parseColor } from "./color";
 import { DEFAULT_GLASS_COLOR, isGlass } from "./glass";
 import {

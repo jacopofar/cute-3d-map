@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 import { applyVertexColor } from "./vertex_color";
 import { hashSeed } from "./random";
 

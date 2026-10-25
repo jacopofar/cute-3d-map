@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 
-import { toModelCoords, type LampSpot } from "./geojson_data";
+import { toModelCoords } from "./projection";
+import type { LampSpot } from "./geojson_data";
 import { lightGreen, SIGNAL_GREEN_S } from "./traffic_math";
 
 /*

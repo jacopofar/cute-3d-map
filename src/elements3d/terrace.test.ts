@@ -1,7 +1,7 @@
 import type Geojson from "geojson";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857 } from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
 import { terrace } from "./terrace";
 
 const ORIGIN: [number, number] = [9.19, 45.46];

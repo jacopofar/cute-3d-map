@@ -2,7 +2,7 @@
 // the merged per-tile mesh tells us the kind and tile, and this finds the
 // specific point, line or area under the hit. Unit-tested in feature_pick.test.ts.
 
-import { toModelCoords } from "./geojson_data";
+import { toModelCoords } from "./projection";
 import type { BarrierInfo, FeatureInfo } from "./geojson_data";
 
 export interface PickPoint {

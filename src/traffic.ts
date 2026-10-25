@@ -1,10 +1,7 @@
 import * as THREE from "three";
 
-import {
-  toModelCoords,
-  type TrafficLoop,
-  type TrafficRun,
-} from "./geojson_data";
+import { toModelCoords } from "./projection";
+import type { TrafficLoop, TrafficRun } from "./geojson_data";
 import {
   compactSlots,
   crossingShift,

@@ -11,6 +11,7 @@ export default defineConfig({
       // the Playwright smoke tests and is measured nowhere
       include: [
         "src/daynight.ts",
+        "src/projection.ts",
         "src/traffic_math.ts",
         "src/driving.ts",
         "src/collision.ts",

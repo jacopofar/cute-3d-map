@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857 } from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
 import { building } from "./building";
 import { DEFAULT_ROOF_COLOR, roofGeometry } from "./roof";
 

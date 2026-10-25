@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  epsg4326toEpsg3857,
-  geoJSONtoGeometries,
-  type BuildingInfo,
-} from "../geojson_data";
+import { epsg4326toEpsg3857 } from "../projection";
+import { geoJSONtoGeometries, type BuildingInfo } from "../geojson_data";
 import { tileFacadeDetail } from "./facade";
 import { isGlass } from "./glass";
 

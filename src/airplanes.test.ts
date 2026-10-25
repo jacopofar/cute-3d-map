@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import { epsg4326toEpsg3857 } from "./geojson_data";
+import { epsg4326toEpsg3857 } from "./projection";
 import { PlaneLayer, PLANE_MIN_ZOOM } from "./airplanes";
 
 // Linate's 17/35 runway, ~1600 m

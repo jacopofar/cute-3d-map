@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 
 /*
  * Stop lines and lane arrows at stop, give-way and signal nodes. tilegen
