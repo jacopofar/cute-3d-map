@@ -49,7 +49,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
   `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
-  center (`loadUnloadCoord`), debounced 150 ms. The map carries its view in a
+  center (`loadUnloadCoord`), debounced 150 ms. Every loaded tile is one
+  `TileRecord` in the `tiles` map: the merged meshes in the scene plus
+  everything the pickers, the drive collision and the moving layers read back,
+  so a layer is one field, not a map of its own. The map carries its view in a
   `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre reads and writes it)
   and the projection origin is seeded from wherever the map opens. The scene
   lights, sun shadows (a 2 km cascade following the view, received only by the
@@ -66,8 +69,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,
   since OSM rings come in both windings). `CoolMap` builds it only above zoom 17
-  and only for the tiles around the center (`loadedDetail`), and drops it when
-  zoomed out or when the origin resets.
+  and only for the tiles around the center (`TileRecord.detail`), and drops it
+  when zoomed out or when the origin resets.
 - `src/elements3d/water.ts` — lakes, ponds and reservoirs as flat polygons and
   rivers/canals/streams as flat ribbons at ground level, drawn by one animated
   `ShaderMaterial` (procedural ripples, `uTime` advanced each frame). A negative
@@ -318,7 +321,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 ## Domain lexicon
 
 - **tile** — a `public/tiles/{x}/{y}.json` file at `TILE_ZOOM` (15).
-- **tile key** — the `x_y` string used in `loadedTiles` / `pendingTiles`.
+- **tile key** — the `x_y` string used in `tiles` / `pendingTiles`.
 - **origin** — the projection origin (`tileCenter`) in EPSG:3857; model
   coordinates are meters relative to it, scaled by `cos(latitude)`.
 - **origin reset** — recentering the origin when the view drifts more than 2

@@ -26,9 +26,11 @@ test("clicking water shows its kind and an OSM link", async ({ page }) => {
   await page.waitForFunction(
     () => {
       const map = (window as unknown as { __coolMap: any }).__coolMap;
-      return Object.values(map.loadedWater).some((tiles: any) =>
-        tiles.some((w: any) => w.lines.length > 0 || w.rings.length > 0),
-      );
+      return [...map.tiles.values()]
+        .map((t) => t.objects.water)
+        .some((tiles: any) =>
+          tiles.some((w: any) => w.lines.length > 0 || w.rings.length > 0),
+        );
     },
     null,
     { timeout: 20_000 },
@@ -40,7 +42,9 @@ test("clicking water shows its kind and an OSM link", async ({ page }) => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const width = window.innerWidth;
     const height = window.innerHeight;
-    const all = Object.values(map.loadedWater).flat() as any[];
+    const all = [...map.tiles.values()]
+      .map((t) => t.objects.water)
+      .flat() as any[];
     const points: { x: number; y: number }[] = [];
     for (const water of all) {
       const candidates: [number, number][] = [];

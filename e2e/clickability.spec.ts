@@ -45,7 +45,9 @@ test("benches, trees and park paths open their OSM popups", async ({
       const map = (window as unknown as { __coolMap: any }).__coolMap;
       const seen = new Set<string>();
       const all: any[] = [];
-      for (const list of Object.values(map.loadedFeatures ?? {})) {
+      for (const list of [...map.tiles.values()].map(
+        (t) => t.objects.features,
+      )) {
         for (const f of list as any[]) {
           if (!f.id || seen.has(f.id)) continue;
           seen.add(f.id);
@@ -107,9 +109,9 @@ test("benches, trees and park paths open their OSM popups", async ({
   await page.waitForFunction(
     (id) => {
       const map = (window as unknown as { __coolMap: any }).__coolMap;
-      return Object.values(map.loadedFeatures ?? {}).some((list) =>
-        (list as any[]).some((f) => f.id === id),
-      );
+      return [...map.tiles.values()]
+        .map((t) => t.objects.features)
+        .some((list) => (list as any[]).some((f) => f.id === id));
     },
     bench.id,
     { timeout: 45_000 },
@@ -126,7 +128,7 @@ test("benches, trees and park paths open their OSM popups", async ({
   // the bench is at the map center; the seat sits a few pixels above the point
   const benchPoint = await page.evaluate((id) => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.id !== id || f.lon === undefined) continue;
         const p = map.map.project([f.lon, f.lat]);
@@ -152,7 +154,7 @@ test("benches, trees and park paths open their OSM popups", async ({
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
     const out: { id: string; x: number; y: number }[] = [];
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.kind !== "tree" || f.lon === undefined) continue;
         const p = map.map.project([f.lon, f.lat]);
@@ -188,7 +190,7 @@ test("benches, trees and park paths open their OSM popups", async ({
   const path = (await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.kind !== "park_path" || !f.lines) continue;
         for (const line of f.lines) {

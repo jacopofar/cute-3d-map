@@ -67,7 +67,9 @@ test("construction sites load with cranes and open an OSM popup", async ({
   const target = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    const infos = Object.values(map.loadedConstruction ?? {}).flat() as Array<{
+    const infos = [...map.tiles.values()]
+      .map((t) => t.objects.construction)
+      .flat() as Array<{
       name?: string;
       kind?: string;
       lon: number;

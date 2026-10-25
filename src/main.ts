@@ -38,9 +38,8 @@ import type {
   PlaygroundInfo,
   RooftopInfo,
   TerraceInfo,
+  TileObjects,
   TransitInfo,
-  LampSpot,
-  ParkedCar,
   RunwayLine,
   TrafficLoop,
   WaterInfo,
@@ -276,6 +275,22 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
   map: MapLibreMap;
 }
 
+// One loaded tile. `objects` is exactly what `objectsAt` returned: the merged
+// scene meshes plus the source data the pickers, the drive collision and the
+// moving layers read back. The facade detail is optional because it is built
+// only while zoomed in and dropped when zoomed out.
+export interface TileRecord {
+  objects: TileObjects;
+  detail?: { windows: THREE.Mesh | null; balconies: THREE.Mesh | null };
+}
+
+// "x_y" back to slippy-tile indices. The unload pass, the drive obstacle pass
+// and the e2e helpers all read tile keys, so parse them in one place.
+function parseTileKey(key: string): [number, number] {
+  const [x, y] = key.split("_");
+  return [Number(x), Number(y)];
+}
+
 function getTileIndex(point: { lng: number; lat: number }): [number, number] {
   const lon2tile = (lon: number) =>
     Math.floor(((lon + 180) / 360) * Math.pow(2, TILE_ZOOM));
@@ -378,45 +393,13 @@ class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
-  private loadedTiles: { [key: string]: THREE.Object3D[] } = {};
-  // precomputed loops per loaded tile
-  private loadedTraffic: { [key: string]: TrafficLoop[] } = {};
-  // building footprints per loaded tile, for click-picking
-  private loadedBuildings: { [key: string]: BuildingInfo[] } = {};
-  // fence/wall lines per loaded tile, for the car's collision
-  private loadedBarriers: { [key: string]: BarrierInfo[] } = {};
-  // generic OSM features (trees, benches, parks, rail, ...) per tile, for clicks
-  private loadedFeatures: { [key: string]: FeatureInfo[] } = {};
-  // water features per loaded tile, for click-picking
-  private loadedWater: { [key: string]: WaterInfo[] } = {};
-  // street-furniture points per loaded tile, for click-picking
-  private loadedFurniture: { [key: string]: FurnitureInfo[] } = {};
-  // fountains per loaded tile, for click-picking
-  private loadedFountains: { [key: string]: FountainInfo[] } = {};
-  // transit stops per loaded tile, for click-picking
-  private loadedTransit: { [key: string]: TransitInfo[] } = {};
-  // outdoor terraces per loaded tile, for click-picking
-  private loadedTerraces: { [key: string]: TerraceInfo[] } = {};
-  // playgrounds and monuments per loaded tile, for click-picking
-  private loadedPlaygrounds: { [key: string]: PlaygroundInfo[] } = {};
-  private loadedMonuments: { [key: string]: MonumentInfo[] } = {};
-  // rail platforms per loaded tile, for click-picking
-  private loadedPlatforms: { [key: string]: PlatformInfo[] } = {};
-  // rooftop accessories per loaded tile, for click-picking
-  private loadedRooftops: { [key: string]: RooftopInfo[] } = {};
-  // construction sites per loaded tile, for click-picking
-  private loadedConstruction: { [key: string]: ConstructionInfo[] } = {};
-  // marked crossings per loaded tile, for click-picking
-  private loadedCrosswalks: { [key: string]: CrosswalkInfo[] } = {};
-  // runway centrelines per loaded tile, for the airplane layer
-  private loadedRunways: { [key: string]: RunwayLine[] } = {};
-  private loadedAprons: { [key: string]: ApronRing[] } = {};
-  // signal/crossing points per loaded tile, for the traffic speed bump
-  private loadedCrossings: { [key: string]: [number, number][] } = {};
-  private loadedSignals: { [key: string]: [number, number][] } = {};
-  private loadedLamps: { [key: string]: LampSpot[] } = {};
-  // parked cars per loaded tile, for the static cars around the centre
-  private loadedParking: { [key: string]: ParkedCar[] } = {};
+  // Every loaded tile, keyed by tile key. The meshes in the scene and the
+  // source data read back by the pickers, the drive collision and the
+  // parked-car/plane/lamp layers belong to the same tile and must come and go
+  // together, so they live in one record instead of a map per kind (that used
+  // to take 22 `delete` lines per unload, and growing a layer meant touching
+  // four lists in two methods).
+  readonly tiles = new Map<string, TileRecord>();
   // the layer keeps one mesh per tile and diffs them itself
   private parkedCars?: ParkedCarLayer;
   private parkedCarsEnabled = true;
@@ -433,12 +416,6 @@ class CoolMap {
   // to smooth a hitch but short enough to follow a pan or a toggle
   private frameTimes: number[] = [];
   private fpsValue = 0;
-  // facade detail (windows/doors and balconies) meshes per tile, built only
-  // while zoomed in; kept out of loadedTiles so stats() and click-picking stay
-  // as they were
-  private loadedDetail: {
-    [key: string]: { windows: THREE.Mesh | null; balconies: THREE.Mesh | null };
-  } = {};
   // layer checkboxes
   private windowsEnabled = true;
   private balconiesEnabled = true;
@@ -542,8 +519,8 @@ class CoolMap {
   private inspectEnabled = true;
   // user toggle for the decorative cloud layer (also gated on the zoom)
   private cloudsEnabled = true;
-  // tiles with a fetch in flight; kept separate from loadedTiles so a failed
-  // load does not leave a permanent "loaded but empty" entry that blocks retries
+  // tiles with a fetch in flight; kept out of the tile store so a failed load
+  // does not leave a permanent "loaded but empty" entry that blocks retries
   private pendingTiles: Set<string> = new Set();
   private renderTileMargin: number = 3;
   // move fires continuously; debounce the tile load/unload pass
@@ -772,9 +749,9 @@ class CoolMap {
         // night bloom: a post pass over the scene only, composited back over
         // MapLibre's basemap. Created here because it needs the renderer.
         coolMap.bloom = new BloomPass(this.renderer);
-        // animated cars and trains, added to the scene directly — NOT via
-        // loadedTiles — so the origin reset does not touch them; their
-        // positions are recomputed each frame from the precomputed loops
+        // animated cars and trains, added to the scene directly — not part of
+        // any tile — so the origin reset does not touch them; their positions
+        // are recomputed each frame from the precomputed loops
         coolMap.carsTraffic = new TrafficRenderer(this.scene, CAR_TRAFFIC);
         coolMap.trainsTraffic = new TrafficRenderer(this.scene, TRAIN_TRAFFIC);
         coolMap.busesTraffic = new TrafficRenderer(this.scene, BUS_TRAFFIC);
@@ -1213,43 +1190,41 @@ class CoolMap {
   // drop every loaded tile so the next load pass rebuilds them, picking up the
   // current load-time options (imputed colors)
   private reloadTiles() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        this.customLayer.scene.remove(mesh);
-        if (mesh instanceof THREE.Mesh || mesh instanceof THREE.LineSegments) {
-          mesh.geometry.dispose();
-        }
-      }
-    }
-    this.loadedTiles = {};
-    this.loadedTraffic = {};
-    this.loadedBuildings = {};
-    this.loadedBarriers = {};
-    this.loadedFeatures = {};
-    this.loadedWater = {};
-    this.loadedFurniture = {};
-    this.loadedFountains = {};
-    this.loadedTransit = {};
-    this.loadedTerraces = {};
-    this.loadedPlaygrounds = {};
-    this.loadedMonuments = {};
-    this.loadedPlatforms = {};
-    this.loadedRooftops = {};
-    this.loadedConstruction = {};
-    this.loadedCrosswalks = {};
-    this.loadedCrossings = {};
-    this.loadedSignals = {};
-    this.loadedLamps = {};
-    this.loadedRunways = {};
-    this.loadedAprons = {};
-    this.loadedParking = {};
+    for (const record of this.tiles.values()) this.disposeTile(record);
+    this.tiles.clear();
     this.parkedCars?.clear();
-    this.clearBuildingDetail();
     this.syncTraffic();
     this.syncAirplanes();
     this.syncNightLights();
     this.refreshSunShadow();
     this.loadUnloadCoord(this.map.getCenter());
+  }
+
+  // remove one tile's meshes from the scene and free their geometry. The
+  // materials are shared module-level singletons and are deliberately not
+  // disposed; the facade detail owns its own geometry, so it goes too.
+  private disposeTile(record: TileRecord) {
+    for (const mesh of record.objects.meshes) {
+      this.customLayer.scene.remove(mesh);
+      if (mesh instanceof THREE.Mesh || mesh instanceof THREE.LineSegments) {
+        mesh.geometry.dispose();
+      }
+    }
+    this.disposeDetail(record.detail);
+    record.detail = undefined;
+  }
+
+  // run a callback over every mesh of every loaded tile
+  private forEachMesh(fn: (mesh: THREE.Object3D) => void) {
+    for (const record of this.tiles.values()) {
+      for (const mesh of record.objects.meshes) fn(mesh);
+    }
+  }
+
+  // every loaded tile's source data, flattened; the moving layers want the
+  // union of all of them (the loops, the crossings, the runways)
+  private allObjects(): TileObjects[] {
+    return [...this.tiles.values()].map((record) => record.objects);
   }
 
   // click a building or a water body to highlight it and show its info
@@ -1279,53 +1254,51 @@ class CoolMap {
     const far = new THREE.Vector3(ndc.x, ndc.y, 1).applyMatrix4(inv);
     raycaster.set(near, far.sub(near).normalize());
     const pickable: THREE.Object3D[] = [];
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        const kind = mesh.userData.kind;
-        // a hidden water layer is not pickable either
-        if (
-          kind === "building" ||
-          kind === "glass" ||
-          (kind === "water" && mesh.visible) ||
-          kind === "furniture" ||
-          kind === "fountain" ||
-          kind === "fountain_water" ||
-          kind === "playground" ||
-          kind === "monument" ||
-          kind === "construction" ||
-          kind === "crosswalk" ||
-          (kind === "custom_model" && mesh.visible) ||
-          (kind === "rooftop" && mesh.visible) ||
-          ((kind === "platform" ||
-            kind === "transit_stop" ||
-            kind === "metro_sign") &&
-            mesh.visible) ||
-          kind === "terrace" ||
-          // trees, cemeteries and painted markings have no visibility toggle;
-          // the rest are their own toggleable meshes
-          kind === "tree" ||
-          kind === "cemetery" ||
-          kind === "road_marking" ||
-          ((kind === "roof" ||
-            kind === "church" ||
-            kind === "bench" ||
-            kind === "green" ||
-            kind === "rail" ||
-            kind === "park_path" ||
-            kind === "power_tower" ||
-            kind === "power_wire" ||
-            kind === "bridge" ||
-            kind === "tunnel" ||
-            kind === "gate" ||
-            kind === "fence" ||
-            kind === "wall" ||
-            kind === "aeroway") &&
-            mesh.visible)
-        ) {
-          pickable.push(mesh);
-        }
+    this.forEachMesh((mesh) => {
+      const kind = mesh.userData.kind;
+      // a hidden water layer is not pickable either
+      if (
+        kind === "building" ||
+        kind === "glass" ||
+        (kind === "water" && mesh.visible) ||
+        kind === "furniture" ||
+        kind === "fountain" ||
+        kind === "fountain_water" ||
+        kind === "playground" ||
+        kind === "monument" ||
+        kind === "construction" ||
+        kind === "crosswalk" ||
+        (kind === "custom_model" && mesh.visible) ||
+        (kind === "rooftop" && mesh.visible) ||
+        ((kind === "platform" ||
+          kind === "transit_stop" ||
+          kind === "metro_sign") &&
+          mesh.visible) ||
+        kind === "terrace" ||
+        // trees, cemeteries and painted markings have no visibility toggle;
+        // the rest are their own toggleable meshes
+        kind === "tree" ||
+        kind === "cemetery" ||
+        kind === "road_marking" ||
+        ((kind === "roof" ||
+          kind === "church" ||
+          kind === "bench" ||
+          kind === "green" ||
+          kind === "rail" ||
+          kind === "park_path" ||
+          kind === "power_tower" ||
+          kind === "power_wire" ||
+          kind === "bridge" ||
+          kind === "tunnel" ||
+          kind === "gate" ||
+          kind === "fence" ||
+          kind === "wall" ||
+          kind === "aeroway") &&
+          mesh.visible)
+      ) {
+        pickable.push(mesh);
       }
-    }
+    });
     const hits = raycaster.intersectObjects(pickable, true);
     // a GTFS vehicle is in its own instanced mesh, so it is not in the static
     // pickable list; compare its ray distance with the nearest static hit
@@ -1346,7 +1319,7 @@ class CoolMap {
     const scaleFactor = scaleFactorAt(this.tileCenter[1]);
     if (hit.object.userData.kind === "custom_model") {
       const buildingId = hit.object.userData.buildingId as string | undefined;
-      const info = (this.loadedBuildings[tileKey] ?? []).find(
+      const info = (this.tiles.get(tileKey)?.objects.buildings ?? []).find(
         (candidate) => candidate.id === buildingId,
       );
       if (info) this.selectBuilding(info, event.lngLat);
@@ -1434,7 +1407,7 @@ class CoolMap {
     const hitKind = hit.object.userData.kind as string | undefined;
     if (hitKind === "fence" || hitKind === "wall") {
       const info = barrierAt(
-        this.loadedBarriers[tileKey] ?? [],
+        this.tiles.get(tileKey)?.objects.barriers ?? [],
         point,
         originMeters,
         scaleFactor,
@@ -1452,7 +1425,7 @@ class CoolMap {
         ...featureKinds.map((kind) => FEATURE_PICK_RADIUS[kind] ?? 6),
       );
       const info = featureAt(
-        this.loadedFeatures[tileKey] ?? [],
+        this.tiles.get(tileKey)?.objects.features ?? [],
         featureKinds,
         point,
         originMeters,
@@ -1471,7 +1444,7 @@ class CoolMap {
       this.selectRooftop(solar, event.lngLat);
       return;
     }
-    const candidates = this.loadedBuildings[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.buildings ?? [];
     let building = candidates.find((b) =>
       b.rings.some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -1505,7 +1478,7 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): WaterInfo | undefined {
-    const candidates = this.loadedWater[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.water ?? [];
     const inside = candidates.find((w) =>
       w.rings.some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -1541,7 +1514,7 @@ class CoolMap {
     scaleFactor: number,
   ): FurnitureInfo | undefined {
     return this.nearestPoint(
-      this.loadedFurniture[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.furniture ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1568,7 +1541,7 @@ class CoolMap {
     scaleFactor: number,
   ): FountainInfo | undefined {
     return this.nearestPoint(
-      this.loadedFountains[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.fountains ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1596,7 +1569,7 @@ class CoolMap {
     scaleFactor: number,
   ): TransitInfo | undefined {
     return this.nearestPoint(
-      this.loadedTransit[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.transit ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1633,7 +1606,7 @@ class CoolMap {
     scaleFactor: number,
   ): CrosswalkInfo | undefined {
     return this.nearestPoint(
-      this.loadedCrosswalks[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.crosswalks ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1660,7 +1633,7 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): RooftopInfo | undefined {
-    const candidates = this.loadedRooftops[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.rooftops ?? [];
     const inside = candidates.find((info) =>
       (info.rings ?? []).some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -1696,7 +1669,7 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): PlatformInfo | undefined {
-    const candidates = this.loadedPlatforms[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.platforms ?? [];
     const inside = candidates.find((info) =>
       info.rings.some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -1725,7 +1698,7 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): ConstructionInfo | undefined {
-    const candidates = this.loadedConstruction[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.construction ?? [];
     const inside = candidates.find((info) =>
       info.rings.some((ring) =>
         ringContains(ring, point, originMeters, scaleFactor),
@@ -1764,7 +1737,7 @@ class CoolMap {
     scaleFactor: number,
   ): PlaygroundInfo | undefined {
     return this.nearestPoint(
-      this.loadedPlaygrounds[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.playgrounds ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1779,7 +1752,7 @@ class CoolMap {
     scaleFactor: number,
   ): MonumentInfo | undefined {
     return this.nearestPoint(
-      this.loadedMonuments[tileKey] ?? [],
+      this.tiles.get(tileKey)?.objects.monuments ?? [],
       point,
       originMeters,
       scaleFactor,
@@ -1830,7 +1803,7 @@ class CoolMap {
     originMeters: [number, number],
     scaleFactor: number,
   ): TerraceInfo | undefined {
-    const candidates = this.loadedTerraces[tileKey] ?? [];
+    const candidates = this.tiles.get(tileKey)?.objects.terraces ?? [];
     let best: TerraceInfo | undefined;
     let bestSq = 25;
     for (const info of candidates) {
@@ -2163,8 +2136,8 @@ class CoolMap {
     const cosLat = Math.cos((center.lat * Math.PI) / 180);
     let best: { lon: number; lat: number; heading: number } | undefined;
     let bestDeg2 = Infinity;
-    for (const loops of Object.values(this.loadedTraffic)) {
-      for (const loop of loops) {
+    for (const { objects } of this.tiles.values()) {
+      for (const loop of objects.traffic) {
         if (loop.kind !== "car") continue;
         for (const run of loop.runs) {
           const coords = run.coords;
@@ -2452,7 +2425,7 @@ class CoolMap {
     for (let x = cx - 1; x <= cx + 1; x++) {
       for (let y = cy - 1; y <= cy + 1; y++) {
         const key = `${x}_${y}`;
-        for (const building of this.loadedBuildings[key] ?? []) {
+        for (const building of this.tiles.get(key)?.objects.buildings ?? []) {
           if (!building.bbox || !boxesOverlap(rect.box, building.bbox)) {
             continue;
           }
@@ -2462,7 +2435,7 @@ class CoolMap {
             return true;
           }
         }
-        for (const barrier of this.loadedBarriers[key] ?? []) {
+        for (const barrier of this.tiles.get(key)?.objects.barriers ?? []) {
           // a hidden barrier must not block: the layer checkbox is the truth
           if (barrier.kind === "fence" && !this.fencesEnabled) continue;
           if (barrier.kind === "wall" && !this.wallsEnabled) continue;
@@ -2710,9 +2683,7 @@ class CoolMap {
         0,
       )
       .multiply(new THREE.Matrix4().makeScale(a, a, a));
-    Object.values(this.loadedTiles)
-      .flat()
-      .forEach((m) => m.applyMatrix4(remap));
+    this.forEachMesh((mesh) => mesh.applyMatrix4(remap));
 
     this.modelTransform = {
       translateX: origin.x,
@@ -2756,54 +2727,22 @@ class CoolMap {
     if (Math.abs(ox - cx) > 2 || Math.abs(oy - cy) > 2) {
       this.resetOrigin(center);
     }
-    let deleteUsKeys: string[] = [];
-    Object.keys(this.loadedTiles).forEach((k) => {
-      let x = Number(k.split("_")[0]);
-      let y = Number(k.split("_")[1]);
+    let unloaded = false;
+    for (const [key, record] of this.tiles) {
+      const [x, y] = parseTileKey(key);
       if (
         Math.abs(x - cx) > this.renderTileMargin ||
         Math.abs(y - cy) > this.renderTileMargin
       ) {
-        console.log("Unloading tile ", k);
-        // TODO why is forEach needed and the array breaks it??
-        this.loadedTiles[k].forEach((m) => {
-          this.customLayer.scene.remove(m);
-          // each tile owns its merged geometry; the materials are shared
-          // module-level singletons, so dispose only the geometry
-          if (m instanceof THREE.Mesh || m instanceof THREE.LineSegments) {
-            m.geometry.dispose();
-          }
-        });
-        delete this.loadedTraffic[k];
-        delete this.loadedBuildings[k];
-        delete this.loadedBarriers[k];
-        delete this.loadedFeatures[k];
-        delete this.loadedWater[k];
-        delete this.loadedFurniture[k];
-        delete this.loadedFountains[k];
-        delete this.loadedTransit[k];
-        delete this.loadedTerraces[k];
-        delete this.loadedPlaygrounds[k];
-        delete this.loadedMonuments[k];
-        delete this.loadedPlatforms[k];
-        delete this.loadedRooftops[k];
-        delete this.loadedConstruction[k];
-        delete this.loadedCrosswalks[k];
-        delete this.loadedCrossings[k];
-        delete this.loadedSignals[k];
-        delete this.loadedLamps[k];
-        delete this.loadedRunways[k];
-        delete this.loadedAprons[k];
-        delete this.loadedParking[k];
-        this.disposeDetail(k);
-        deleteUsKeys.push(k);
+        this.disposeTile(record);
+        this.tiles.delete(key);
+        unloaded = true;
       }
-    });
-    deleteUsKeys.forEach((k) => delete this.loadedTiles[k]);
+    }
     // the routes of an unloaded tile are gone; hand the renderer the remaining
     // ones. setLoops only reprepares plain data, so this is cheap enough to run
     // on the moves that actually unload a tile.
-    if (deleteUsKeys.length > 0) {
+    if (unloaded) {
       this.syncTraffic();
       this.syncAirplanes();
       this.syncParkedCars();
@@ -2831,35 +2770,17 @@ class CoolMap {
 
   private async loadTile(x: number, y: number, generation: number) {
     const tileKey = `${x}_${y}`;
-    if (tileKey in this.loadedTiles || this.pendingTiles.has(tileKey)) {
+    if (this.tiles.has(tileKey) || this.pendingTiles.has(tileKey)) {
       return;
     }
     this.pendingTiles.add(tileKey);
     try {
-      const {
-        meshes,
-        buildings,
-        barriers,
-        features,
-        water,
-        furniture,
-        fountains,
-        transit,
-        terraces,
-        playgrounds,
-        monuments,
-        platforms,
-        rooftops,
-        construction,
-        crosswalks,
-        traffic,
-        crossings,
-        signals,
-        runways,
-        aprons,
-        parking,
-        lamps,
-      } = await objectsAt(this.tileCenter, x, y, this.imputedColorsEnabled);
+      const objects = await objectsAt(
+        this.tileCenter,
+        x,
+        y,
+        this.imputedColorsEnabled,
+      );
       if (generation !== this.originGeneration) {
         // the origin was reset while this tile was being computed, so the
         // meshes are in coordinates of a projection that is no longer used
@@ -2875,29 +2796,8 @@ class CoolMap {
       ) {
         return;
       }
-      this.loadedTiles[tileKey] = meshes;
-      meshes.forEach((m) => this.customLayer.scene.add(m));
-      this.loadedTraffic[tileKey] = traffic;
-      this.loadedBuildings[tileKey] = buildings;
-      this.loadedBarriers[tileKey] = barriers;
-      this.loadedFeatures[tileKey] = features;
-      this.loadedWater[tileKey] = water;
-      this.loadedFurniture[tileKey] = furniture;
-      this.loadedFountains[tileKey] = fountains;
-      this.loadedTransit[tileKey] = transit;
-      this.loadedTerraces[tileKey] = terraces;
-      this.loadedPlaygrounds[tileKey] = playgrounds;
-      this.loadedMonuments[tileKey] = monuments;
-      this.loadedPlatforms[tileKey] = platforms;
-      this.loadedRooftops[tileKey] = rooftops;
-      this.loadedConstruction[tileKey] = construction;
-      this.loadedCrosswalks[tileKey] = crosswalks;
-      this.loadedCrossings[tileKey] = crossings;
-      this.loadedSignals[tileKey] = signals;
-      this.loadedLamps[tileKey] = lamps;
-      this.loadedRunways[tileKey] = runways;
-      this.loadedAprons[tileKey] = aprons;
-      this.loadedParking[tileKey] = parking;
+      this.tiles.set(tileKey, { objects });
+      objects.meshes.forEach((m) => this.customLayer.scene.add(m));
       this.syncTraffic();
       this.syncAirplanes();
       this.syncBuildingDetail();
@@ -2905,7 +2805,7 @@ class CoolMap {
       this.applyParkPathVisibility();
       this.refreshSunShadow();
     } catch (e) {
-      // leave the tile out of loadedTiles so a later move retries it
+      // leave the tile out of the store so a later move retries it
       console.warn("failed to load tile", tileKey, e);
     } finally {
       this.pendingTiles.delete(tileKey);
@@ -2945,21 +2845,26 @@ class CoolMap {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
         keep.add(key);
-        if (this.loadedDetail[key]) continue;
-        const infos = this.loadedBuildings[key];
+        const record = this.tiles.get(key);
         // not loaded yet: loadTile runs this again when it arrives
-        if (!infos) continue;
+        if (!record || record.detail) continue;
         const originMeters = epsg4326toEpsg3857(this.tileCenter);
         const scaleFactor = scaleFactorAt(this.tileCenter[1]);
-        const detail = tileFacadeDetail(originMeters, scaleFactor, infos);
-        this.loadedDetail[key] = {
+        const detail = tileFacadeDetail(
+          originMeters,
+          scaleFactor,
+          record.objects.buildings,
+        );
+        record.detail = {
           windows: this.addDetailMesh(key, "windows", detail.windows),
           balconies: this.addDetailMesh(key, "balconies", detail.balconies),
         };
       }
     }
-    for (const key of Object.keys(this.loadedDetail)) {
-      if (!keep.has(key)) this.disposeDetail(key);
+    for (const [key, record] of this.tiles) {
+      if (keep.has(key) || !record.detail) continue;
+      this.disposeDetail(record.detail);
+      record.detail = undefined;
     }
     this.applyDetailVisibility();
     this.applyTileVisibility();
@@ -2988,169 +2893,142 @@ class CoolMap {
   // the windows and the balconies follow their checkboxes; the zoom gate is
   // handled by building or dropping the meshes in syncBuildingDetail
   private applyDetailVisibility() {
-    for (const { windows, balconies } of Object.values(this.loadedDetail)) {
-      if (windows) windows.visible = this.windowsEnabled;
-      if (balconies) balconies.visible = this.balconiesEnabled;
+    for (const { detail } of this.tiles.values()) {
+      if (!detail) continue;
+      if (detail.windows) detail.windows.visible = this.windowsEnabled;
+      if (detail.balconies) detail.balconies.visible = this.balconiesEnabled;
     }
   }
 
   // roofs are their own mesh per tile, so this is just visibility too
   private applyRoofVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "roof") {
-          mesh.visible = this.roofShapesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "roof") {
+        mesh.visible = this.roofShapesEnabled;
       }
-    }
+    });
   }
 
   // water is a per-tile mesh as well, so its checkbox is a visibility switch
   private applyWaterVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "water") {
-          mesh.visible = this.waterEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "water") {
+        mesh.visible = this.waterEnabled;
       }
-    }
+    });
   }
 
   // benches are a per-tile mesh too
   private applyBenchVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "bench") {
-          mesh.visible = this.benchesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "bench") {
+        mesh.visible = this.benchesEnabled;
       }
-    }
+    });
   }
 
-  // bridges and tunnels are per-tile meshes too: one checkbox (bridges and
-  // tunnels) drives both kinds
+  // rooftop accessories are their own per-tile mesh, so the checkbox is a
+  // plain visibility switch
   private applyRooftopVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "rooftop") {
-          mesh.visible = this.rooftopsEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "rooftop") {
+        mesh.visible = this.rooftopsEnabled;
       }
-    }
+    });
   }
 
   private applyParkPathVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "park_path") {
-          mesh.visible = this.parkPathsEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "park_path") {
+        mesh.visible = this.parkPathsEnabled;
       }
-    }
+    });
   }
 
   private applyPowerVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        const kind = mesh.userData.kind;
-        if (kind === "power_tower" || kind === "power_wire") {
-          mesh.visible = this.powerLinesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      const kind = mesh.userData.kind;
+      if (kind === "power_tower" || kind === "power_wire") {
+        mesh.visible = this.powerLinesEnabled;
       }
-    }
+    });
   }
 
   private applyWallVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "wall" || mesh.userData.kind === "gate") {
-          mesh.visible = this.wallsEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "wall" || mesh.userData.kind === "gate") {
+        mesh.visible = this.wallsEnabled;
       }
-    }
+    });
   }
 
   private applySidewalkVisibility() {
     const on = this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM;
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "sidewalk") mesh.visible = on;
-      }
-    }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "sidewalk") mesh.visible = on;
+    });
   }
 
   private applyTransitVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        const kind = mesh.userData.kind;
-        if (
-          kind === "transit_stop" ||
-          kind === "metro_sign" ||
-          kind === "platform" ||
-          kind === "rail"
-        ) {
-          mesh.visible = this.transitEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      const kind = mesh.userData.kind;
+      if (
+        kind === "transit_stop" ||
+        kind === "metro_sign" ||
+        kind === "platform" ||
+        kind === "rail"
+      ) {
+        mesh.visible = this.transitEnabled;
       }
-    }
+    });
   }
 
   private applyBridgeVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        const kind = mesh.userData.kind;
-        if (kind === "bridge" || kind === "tunnel") {
-          mesh.visible = this.bridgesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      const kind = mesh.userData.kind;
+      if (kind === "bridge" || kind === "tunnel") {
+        mesh.visible = this.bridgesEnabled;
       }
-    }
+    });
   }
 
   // fences are a per-tile mesh too, gated on the zoom: the geometry is in the
   // tile either way (it is cheap), only the drawing waits for the zoom
   private applyFenceVisibility() {
     const on = this.fencesEnabled && this.map.getZoom() >= FENCE_MIN_ZOOM;
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "fence") {
-          mesh.visible = on;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "fence") {
+        mesh.visible = on;
       }
-    }
+    });
   }
 
   // ... and so is the church ornament: only the crosses go away, the walls are
   // plain buildings
   private applyChurchVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "church") {
-          mesh.visible = this.churchesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "church") {
+        mesh.visible = this.churchesEnabled;
       }
-    }
+    });
   }
 
   // ... and so is the green layer
   private applyGreenVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "green") {
-          mesh.visible = this.parksEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "green") {
+        mesh.visible = this.parksEnabled;
       }
-    }
+    });
   }
 
   // the airplane checkbox switches both the tarmac meshes and the plane layer
   private applyAirplaneVisibility() {
-    for (const meshes of Object.values(this.loadedTiles)) {
-      for (const mesh of meshes) {
-        if (mesh.userData.kind === "aeroway") {
-          mesh.visible = this.airplanesEnabled;
-        }
+    this.forEachMesh((mesh) => {
+      if (mesh.userData.kind === "aeroway") {
+        mesh.visible = this.airplanesEnabled;
       }
-    }
+    });
     this.airplanes?.setEnabled(this.airplanesEnabled);
   }
 
@@ -3170,19 +3048,21 @@ class CoolMap {
     this.applyRooftopVisibility();
   }
 
-  private disposeDetail(key: string) {
-    const detail = this.loadedDetail[key];
+  private disposeDetail(detail: TileRecord["detail"]): void {
     if (!detail) return;
     for (const mesh of [detail.windows, detail.balconies]) {
       if (!mesh) continue;
       this.customLayer.scene.remove(mesh);
       mesh.geometry.dispose();
     }
-    delete this.loadedDetail[key];
   }
 
+  // drop the facade detail of every tile but keep the tiles themselves
   private clearBuildingDetail() {
-    for (const key of Object.keys(this.loadedDetail)) this.disposeDetail(key);
+    for (const record of this.tiles.values()) {
+      this.disposeDetail(record.detail);
+      record.detail = undefined;
+    }
   }
 
   setTrafficEnabled(enabled: boolean) {
@@ -3417,8 +3297,8 @@ class CoolMap {
   // hand the union of the loaded tiles' precomputed loops to the renderers,
   // split by kind (both get the crossing points; only the car loops pass them)
   private syncTraffic() {
-    const loops = Object.values(this.loadedTraffic).flat();
-    const crossings = Object.values(this.loadedCrossings).flat();
+    const loops = this.allObjects().flatMap((objects) => objects.traffic);
+    const crossings = this.allObjects().flatMap((objects) => objects.crossings);
     this.carsTraffic?.setLoops(
       loops.filter((loop) => loop.kind === "car"),
       crossings,
@@ -3442,15 +3322,15 @@ class CoolMap {
   // so dedupe by id here (the first copy wins; they are the same geometry).
   private syncAirplanes() {
     if (!this.airplanes) return;
+    // a runway or an apron spanning tiles repeats in each of them, so dedupe
+    // by OSM id before handing them to the layer
     const runwaysById = new Map<string, RunwayLine>();
-    for (const runways of Object.values(this.loadedRunways)) {
-      for (const runway of runways) {
+    const apronsById = new Map<string, ApronRing>();
+    for (const { objects } of this.tiles.values()) {
+      for (const runway of objects.runways) {
         if (!runwaysById.has(runway.id)) runwaysById.set(runway.id, runway);
       }
-    }
-    const apronsById = new Map<string, ApronRing>();
-    for (const aprons of Object.values(this.loadedAprons)) {
-      for (const apron of aprons) {
+      for (const apron of objects.aprons) {
         if (!apronsById.has(apron.id)) apronsById.set(apron.id, apron);
       }
     }
@@ -3475,7 +3355,7 @@ class CoolMap {
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        const spots = this.loadedParking[key];
+        const spots = this.tiles.get(key)?.objects.parking;
         if (spots) tiles.push({ key, spots });
       }
     }
@@ -3509,8 +3389,8 @@ class CoolMap {
     for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
       for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
         const key = `${x}_${y}`;
-        const lamps = this.loadedLamps[key] ?? [];
-        const signals = this.loadedSignals[key] ?? [];
+        const lamps = this.tiles.get(key)?.objects.lamps ?? [];
+        const signals = this.tiles.get(key)?.objects.signals ?? [];
         if (lamps.length > 0 || signals.length > 0) {
           // the raw per-tile arrays are the identity the layer diffs on, so do
           // not copy them here
@@ -3596,13 +3476,17 @@ class CoolMap {
   } {
     let meshes = 0;
     let vertices = 0;
+    let buildings = 0;
+    let facadeTiles = 0;
+    let facadeVertices = 0;
     const byKind: Record<
       string,
       { meshes: number; vertices: number; triangles: number }
     > = {};
-    for (const list of Object.values(this.loadedTiles)) {
-      meshes += list.length;
-      for (const object of list) {
+    for (const { objects, detail } of this.tiles.values()) {
+      meshes += objects.meshes.length;
+      buildings += objects.buildings.length;
+      for (const object of objects.meshes) {
         if (
           !(object instanceof THREE.Mesh) &&
           !(object instanceof THREE.LineSegments)
@@ -3627,18 +3511,14 @@ class CoolMap {
               : count / 3;
         vertices += count;
       }
-    }
-    let facadeTiles = 0;
-    let facadeVertices = 0;
-    for (const detail of Object.values(this.loadedDetail)) {
-      for (const mesh of [detail.windows, detail.balconies]) {
+      for (const mesh of [detail?.windows, detail?.balconies]) {
         if (!mesh) continue;
         facadeTiles += 1;
         facadeVertices += mesh.geometry.getAttribute("position")?.count ?? 0;
       }
     }
     return {
-      tiles: Object.keys(this.loadedTiles).length,
+      tiles: this.tiles.size,
       meshes,
       vertices,
       // last frame's scene, captured before the bloom quads overwrite
@@ -3646,10 +3526,7 @@ class CoolMap {
       drawCalls: this.lastSceneDraw.calls,
       triangles: this.lastSceneDraw.triangles,
       byKind,
-      buildings: Object.values(this.loadedBuildings).reduce(
-        (n, b) => n + b.length,
-        0,
-      ),
+      buildings,
       vehicles: this.carsTraffic?.count ?? 0,
       trains: this.trainsTraffic?.count ?? 0,
       facadeTiles,

@@ -62,7 +62,9 @@ test("the Duomo metro entrances load and open an OSM popup", async ({
   const target = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    const infos = Object.values(map.loadedTransit ?? {}).flat() as Array<{
+    const infos = [...map.tiles.values()]
+      .map((t) => t.objects.transit)
+      .flat() as Array<{
       kind: string;
       name?: string;
       lon: number;

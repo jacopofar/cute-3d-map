@@ -115,7 +115,9 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
         page.evaluate(() => {
           const map = (window as unknown as { __coolMap: any }).__coolMap;
           let count = 0;
-          for (const list of Object.values(map.loadedBuildings ?? {})) {
+          for (const list of [...map.tiles.values()].map(
+            (t) => t.objects.buildings,
+          )) {
             count += (list as unknown[]).length;
           }
           return count;
@@ -127,7 +129,9 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const spawn = map.driveState();
     let blocked: string | null = null;
-    for (const list of Object.values(map.loadedBuildings ?? {})) {
+    for (const list of [...map.tiles.values()].map(
+      (t) => t.objects.buildings,
+    )) {
       for (const b of list as any[]) {
         if (!b.bbox) continue;
         const lon = (b.bbox[0] + b.bbox[2]) / 2;

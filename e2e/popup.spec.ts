@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
 interface Probe {
-  loadedBuildings: Record<string, unknown[]>;
+  tiles: Map<string, { objects: { buildings: unknown[] } }>;
   selectBuilding(info: unknown, lngLat: { lng: number; lat: number }): void;
 }
 
@@ -37,10 +37,11 @@ test("the building popup stays readable in a dark color scheme", async ({
       async () =>
         page.evaluate(
           () =>
-            Object.values(
-              (window as unknown as { __coolMap: Probe }).__coolMap
-                .loadedBuildings,
-            ).flat().length,
+            [
+              ...(
+                window as unknown as { __coolMap: Probe }
+              ).__coolMap.tiles.values(),
+            ].flatMap((t) => t.objects.buildings).length,
         ),
       { timeout: 20_000 },
     )
@@ -48,7 +49,9 @@ test("the building popup stays readable in a dark color scheme", async ({
 
   await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
-    const info = Object.values(map.loadedBuildings).flat()[0];
+    const info = [...map.tiles.values()]
+      .map((t) => t.objects.buildings)
+      .flat()[0];
     map.selectBuilding(info, { lng: 9.186, lat: 45.497 });
   });
 

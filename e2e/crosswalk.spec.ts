@@ -67,9 +67,9 @@ test("zebra crossings load and open an OSM popup", async ({ page }) => {
         target = await page.evaluate(() => {
           const map = (window as unknown as { __coolMap: any }).__coolMap;
           const container = map.map.getContainer() as HTMLElement;
-          for (const info of Object.values(
-            map.loadedCrosswalks ?? {},
-          ).flat() as Array<{
+          for (const info of [...map.tiles.values()]
+            .map((t) => t.objects.crosswalks)
+            .flat() as Array<{
             id?: string;
             lon: number;
             lat: number;

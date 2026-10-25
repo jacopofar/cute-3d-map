@@ -86,7 +86,9 @@ test("clicking a furniture prop opens its OSM popup", async ({ page }) => {
   const target = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    const infos = Object.values(map.loadedFurniture ?? {}).flat() as Array<{
+    const infos = [...map.tiles.values()]
+      .map((t) => t.objects.furniture)
+      .flat() as Array<{
       kind: string;
       lon: number;
       lat: number;

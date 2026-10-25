@@ -69,7 +69,9 @@ test("the Piazza Castello fountain loads and opens its OSM popup", async ({
   const target = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    const infos = Object.values(map.loadedFountains ?? {}).flat() as Array<{
+    const infos = [...map.tiles.values()]
+      .map((t) => t.objects.fountains)
+      .flat() as Array<{
       name?: string;
       lon: number;
       lat: number;
