@@ -260,6 +260,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   above `NIGHT_LIGHT_MIN_ZOOM` (15), and only for the 3x3 centre tiles. The
   `#lampposts-toggle` checkbox hides the lamps/pools/posts only; signal heads
   stay.
+- `src/perf.ts` — frame timing (`PerfReporter`, a two-second fps window), the
+  fire-and-forget perf POST (`VITE_PERF_ENDPOINT`, a no-op when unset) and
+  `sceneStats`: the read-only counters the benchmark and the e2e read back.
 - `src/daynight.ts` — the approximate solar model (Milan, local mean solar
   time): sun altitude/azimuth, key/fill/hemisphere colors, sky and fog colors,
   dawn/dusk warmth and the screen grade. Pure and unit-tested.

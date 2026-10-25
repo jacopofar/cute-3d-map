@@ -20,11 +20,16 @@ import {
   toModelCoords,
 } from "./projection.ts";
 import { objectsAt } from "./geojson_data.ts";
+import {
+  PERF_ENDPOINT,
+  PerfReporter,
+  sceneStats,
+  type SceneStats,
+} from "./perf.ts";
 import { Selection } from "./selection.ts";
 import type { TileRecord } from "./tile_record.ts";
 import { escapeHtml } from "./ui/html.ts";
 import {
-  checkboxStates,
   savedCheckbox,
   restoreCheckboxStates,
   saveCheckboxStates,
@@ -215,34 +220,6 @@ function getTileIndex(point: { lng: number; lat: number }): [number, number] {
   return [lon2tile(point.lng), lat2tile(point.lat)];
 }
 
-// the browser name is enough for the perf report; the full UA string is noisy
-// and the payload is meant to be grouped, not fingerprinted
-function browserName(): string {
-  const ua = navigator.userAgent;
-  if (/Edg\//.test(ua)) return "Edge";
-  if (/OPR\//.test(ua)) return "Opera";
-  if (/Firefox\//.test(ua)) return "Firefox";
-  if (/Chrome\//.test(ua)) return "Chrome";
-  if (/Safari\//.test(ua)) return "Safari";
-  return "Unknown";
-}
-
-function webGPUSupported(): boolean {
-  // WebGPU is exposed as navigator.gpu; the property is absent on browsers that
-  // only implement WebGL
-  return "gpu" in navigator;
-}
-
-// The layers menu owns every checkbox, but the night and inspect switches are
-// outside it; collect all of them by id so the report always matches the DOM.
-
-// Build-time opt-in: without an endpoint the reporting path is a no-op and no
-// request leaves the page. Both names are accepted so an existing .env with
-// either spelling keeps working.
-const PERF_ENDPOINT = String(
-  import.meta.env.PERF_ENDPOINT ?? import.meta.env.VITE_PERF_ENDPOINT ?? "",
-).trim();
-
 class CoolMap {
   tileCenter: [number, number];
   map: MapLibreMap;
@@ -274,10 +251,8 @@ class CoolMap {
   // The scene's own draw stats, captured before the bloom passes overwrite
   // renderer.info (the final composite is a one-draw, two-triangle quad).
   private lastSceneDraw = { calls: 0, triangles: 0 };
-  // render timestamps for the perf report; a two-second window is long enough
-  // to smooth a hitch but short enough to follow a pan or a toggle
-  private frameTimes: number[] = [];
-  private fpsValue = 0;
+  // frame timing and the diagnostic report
+  private readonly perf = new PerfReporter();
   // layer checkboxes
   private windowsEnabled = true;
   private balconiesEnabled = true;
@@ -2297,140 +2272,26 @@ class CoolMap {
   }
 
   private recordFrame(now: number) {
-    if (!PERF_ENDPOINT) return;
-    this.frameTimes.push(now);
-    const cutoff = now - 2000;
-    while (this.frameTimes.length > 1 && this.frameTimes[0] < cutoff) {
-      this.frameTimes.shift();
-    }
-    const elapsed = now - this.frameTimes[0];
-    this.fpsValue =
-      elapsed > 0 ? ((this.frameTimes.length - 1) * 1000) / elapsed : 0;
-  }
-
-  private perfPayload(extra: Record<string, unknown> = {}) {
-    return {
-      browser: browserName(),
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      webgpu: webGPUSupported(),
-      fps: Math.round(this.fpsValue * 10) / 10,
-      checkboxes: checkboxStates(),
-      ...extra,
-    };
+    this.perf.recordFrame(now);
   }
 
   private reportPerf(extra: Record<string, unknown> = {}) {
-    if (!PERF_ENDPOINT) return;
-    // diagnostics must never break the map: a missing collector or an offline
-    // page is a no-op, not an unhandled rejection
-    void fetch(PERF_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(this.perfPayload(extra)),
-      keepalive: true,
-    }).catch(() => {});
+    this.perf.report(extra);
   }
 
   // read-only counters for the perf benchmark (perf/frame_times.spec.ts); the
   // app itself never calls this
-  stats(): {
-    tiles: number;
-    meshes: number;
-    vertices: number;
-    drawCalls: number;
-    triangles: number;
-    byKind: Record<
-      string,
-      { meshes: number; vertices: number; triangles: number }
-    >;
-    buildings: number;
-    vehicles: number;
-    trains: number;
-    facadeTiles: number;
-    facadeVertices: number;
-    parkedCars: number;
-    parkedCarTiles: number;
-    parkedCarMeshes: number;
-    parkedCarTriangles: number;
-    nightLightTiles: number;
-    nightLightMeshes: number;
-    vehiclesDrawn: number;
-    trainsDrawn: number;
-    buses: number;
-    trams: number;
-    busesDrawn: number;
-    tramsDrawn: number;
-  } {
-    let meshes = 0;
-    let vertices = 0;
-    let buildings = 0;
-    let facadeTiles = 0;
-    let facadeVertices = 0;
-    const byKind: Record<
-      string,
-      { meshes: number; vertices: number; triangles: number }
-    > = {};
-    for (const { objects, detail } of this.tiles.values()) {
-      meshes += objects.meshes.length;
-      buildings += objects.buildings.length;
-      for (const object of objects.meshes) {
-        if (
-          !(object instanceof THREE.Mesh) &&
-          !(object instanceof THREE.LineSegments)
-        ) {
-          continue;
-        }
-        const kind = (object.userData.kind as string) ?? "other";
-        const bucket = (byKind[kind] ??= {
-          meshes: 0,
-          vertices: 0,
-          triangles: 0,
-        });
-        const position = object.geometry.getAttribute("position");
-        const count = position ? position.count : 0;
-        bucket.meshes += 1;
-        bucket.vertices += count;
-        bucket.triangles +=
-          object instanceof THREE.LineSegments
-            ? 0
-            : object.geometry.index
-              ? object.geometry.index.count / 3
-              : count / 3;
-        vertices += count;
-      }
-      for (const mesh of [detail?.windows, detail?.balconies]) {
-        if (!mesh) continue;
-        facadeTiles += 1;
-        facadeVertices += mesh.geometry.getAttribute("position")?.count ?? 0;
-      }
-    }
-    return {
-      tiles: this.tiles.size,
-      meshes,
-      vertices,
-      // last frame's scene, captured before the bloom quads overwrite
-      // renderer.info
+  stats(): SceneStats {
+    return sceneStats(this.tiles, {
+      cars: this.carsTraffic,
+      trains: this.trainsTraffic,
+      buses: this.busesTraffic,
+      trams: this.tramsTraffic,
+      parkedCars: this.parkedCars,
+      nightLights: this.nightLights,
       drawCalls: this.lastSceneDraw.calls,
       triangles: this.lastSceneDraw.triangles,
-      byKind,
-      buildings,
-      vehicles: this.carsTraffic?.count ?? 0,
-      trains: this.trainsTraffic?.count ?? 0,
-      facadeTiles,
-      facadeVertices,
-      parkedCars: this.parkedCars?.count ?? 0,
-      parkedCarTiles: this.parkedCars?.tileCount ?? 0,
-      parkedCarMeshes: this.parkedCars?.meshCount ?? 0,
-      parkedCarTriangles: this.parkedCars?.triangles ?? 0,
-      nightLightTiles: this.nightLights?.tileCount ?? 0,
-      nightLightMeshes: this.nightLights?.meshCount ?? 0,
-      vehiclesDrawn: this.carsTraffic?.drawnCount ?? 0,
-      trainsDrawn: this.trainsTraffic?.drawnCount ?? 0,
-      buses: this.busesTraffic?.count ?? 0,
-      trams: this.tramsTraffic?.count ?? 0,
-      busesDrawn: this.busesTraffic?.drawnCount ?? 0,
-      tramsDrawn: this.tramsTraffic?.drawnCount ?? 0,
-    };
+    });
   }
 
   async getGLTF(): Promise<ArrayBuffer> {
