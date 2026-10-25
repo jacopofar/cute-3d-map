@@ -201,12 +201,10 @@ test("benches, trees and park paths open their OSM popups", async ({
     return out;
   })) as { id: string; x: number; y: number }[];
 
-  console.log(`DEBUG trees=${trees.length} ${JSON.stringify(trees)}`);
   let treeOk = false;
   for (const tree of trees) {
     for (const dy of [-12, -9, -6, -3, 0]) {
       const text = await clickAt(tree.x, tree.y + dy);
-      console.log(`DEBUG click ${tree.id} dy=${dy} -> ${JSON.stringify(text)}`);
       if (text && /Tree|Conifer/.test(text) && /OSM/.test(text)) {
         treeOk = true;
         break;

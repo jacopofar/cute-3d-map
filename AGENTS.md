@@ -69,8 +69,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `saveCheckboxStates` / `savedCheckbox` as the whole surface.
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
-  squeeze). It lives on its own so the geometry builders, the pickers and their
-  unit tests do not import `geojson_data` just to convert a coordinate.
+  squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).
+  It lives on its own so the geometry builders, the pickers and their unit
+  tests do not import `geojson_data` just to convert a coordinate.
 - `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,
@@ -226,6 +227,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   culls separately. `#parked-cars-toggle` is a plain visibility switch. Uses a
   lit material (unlike the moving fleet's unlit basic one), so parked cars
   darken at night.
+- `src/drive_mode.ts` — car mode's shell: the keys, the touch pad, the chase
+  camera, the HUD and the map handlers it borrows while driving. The mode owns
+  its state machine and its DOM nodes; the physics is `driving.ts`, the mesh
+  `driving_car.ts` and the obstacle tests `collision.ts`. It reads the
+  obstacles from the tile store through `DriveHost`, and asks the map to catch
+  its tile window up between frames (the per-frame camera jump keeps the move
+  debounce from ever firing).
 - `src/driving.ts` / `src/driving_car.ts` / `src/collision.ts` — car mode, the
   **Drive** button's free-driving car. `driving.ts` is the pure arcade model
   (accelerate/brake, a speed-scaled bicycle turn, lon/lat integration in
