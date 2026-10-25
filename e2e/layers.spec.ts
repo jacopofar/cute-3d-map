@@ -10,16 +10,14 @@ test.setTimeout(120_000);
 
 interface Probe {
   map: { jumpTo(options: { zoom: number }): void };
-  customLayer: {
-    scene: { traverse(cb: (o: any) => void): void };
-  };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const countMeshes = (page: import("@playwright/test").Page, kind: string) =>
   page.evaluate((wanted) => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     const counts = { total: 0, visible: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== wanted) return;
       counts.total += 1;
       if (object.visible) counts.visible += 1;
@@ -102,7 +100,7 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
         page.evaluate(() => {
           const map = (window as unknown as { __coolMap: Probe }).__coolMap;
           let total = 0;
-          map.customLayer.scene.traverse((object: any) => {
+          map.scene.traverse((object: any) => {
             if (object.userData?.group === "windows") total += 1;
           });
           return total;
@@ -115,7 +113,7 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
   const windowsHidden = await page.evaluate(() => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     let hidden = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.group === "windows" && !object.visible) hidden += 1;
     });
     return hidden;
@@ -149,7 +147,7 @@ const readDayNight = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     let uNight = null;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.group !== "windows") return;
       const value = object.material?.uniforms?.uNight?.value;
       if (typeof value === "number") uNight = value;
@@ -219,7 +217,7 @@ test("the night toggle darkens the scene and lights the windows", async ({
         page.evaluate(() => {
           const map = (window as unknown as { __coolMap: any }).__coolMap;
           let total = 0;
-          map.customLayer.scene.traverse((object: any) => {
+          map.scene.traverse((object: any) => {
             if (object.userData?.group === "windows") total += 1;
           });
           return total;

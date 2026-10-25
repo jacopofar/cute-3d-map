@@ -6,7 +6,7 @@ test.setTimeout(120_000);
 
 interface Probe {
   map: { jumpTo(options: { center?: [number, number]; zoom?: number }): void };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const nightLights = (page: import("@playwright/test").Page) =>
@@ -22,7 +22,7 @@ const nightLights = (page: import("@playwright/test").Page) =>
       signalsVisible: false,
       signalPostsVisible: false,
     };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       const kind = object.userData?.kind;
       // one object per tile and layer now, so sum the tiles and treat the
       // layer as visible when any tile is

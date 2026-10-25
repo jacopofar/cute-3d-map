@@ -9,14 +9,14 @@ const LINATE = { center: [9.2706, 45.4444], zoom: 17 };
 
 interface Probe {
   map: { jumpTo(options: { center: [number, number]; zoom: number }): void };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const countKind = (page: import("@playwright/test").Page, kind: string) =>
   page.evaluate((wanted) => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     const counts = { total: 0, visible: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== wanted) return;
       counts.total += 1;
       if (object.visible) counts.visible += 1;

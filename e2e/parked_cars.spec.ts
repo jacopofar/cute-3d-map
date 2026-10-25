@@ -12,7 +12,7 @@ const VIEW = { center: [9.1919, 45.4641], zoom: 17.5 };
 
 interface Probe {
   map: { jumpTo(options: { center?: [number, number]; zoom?: number }): void };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const parkedCars = (page: import("@playwright/test").Page) =>
@@ -20,7 +20,7 @@ const parkedCars = (page: import("@playwright/test").Page) =>
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     // one InstancedMesh per tile, so sum them instead of reading the last one
     const counts = { count: 0, visible: true, meshes: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "parked_car") return;
       counts.count += object.count;
       counts.visible = counts.visible && object.visible;

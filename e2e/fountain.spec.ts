@@ -46,7 +46,7 @@ test("the Piazza Castello fountain loads and opens its OSM popup", async ({
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     let meshes = 0;
     let vertices = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "fountain") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;

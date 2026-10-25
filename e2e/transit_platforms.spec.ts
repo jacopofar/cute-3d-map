@@ -50,7 +50,7 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     let platformMeshes = 0;
     let railMeshes = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind === "platform") platformMeshes += 1;
       if (object.userData?.kind === "rail") railMeshes += 1;
     });
@@ -66,9 +66,9 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
         target = await page.evaluate(() => {
           const map = (window as unknown as { __coolMap: any }).__coolMap;
           const container = map.map.getContainer() as HTMLElement;
-          const camera = map.customLayer.camera;
+          const camera = map.camera;
           let found: { p: { x: number; y: number } } | null = null;
-          map.customLayer.scene.traverse((object: any) => {
+          map.scene.traverse((object: any) => {
             if (found || object.userData?.kind !== "platform") return;
             const pos = object.geometry.getAttribute("position");
             for (let i = 0; i + 2 < pos.count; i += 3) {
@@ -115,17 +115,17 @@ test("Lambrate platforms and rails load and a platform opens a popup", async ({
     ) as HTMLInputElement;
     input.click();
     let visible = 0;
-    (
-      window as unknown as { __coolMap: any }
-    ).__coolMap.customLayer.scene.traverse((object: any) => {
-      if (
-        (object.userData?.kind === "platform" ||
-          object.userData?.kind === "rail") &&
-        object.visible
-      ) {
-        visible += 1;
-      }
-    });
+    (window as unknown as { __coolMap: any }).__coolMap.scene.traverse(
+      (object: any) => {
+        if (
+          (object.userData?.kind === "platform" ||
+            object.userData?.kind === "rail") &&
+          object.visible
+        ) {
+          visible += 1;
+        }
+      },
+    );
     return visible;
   });
   expect(hidden).toBe(0);

@@ -44,7 +44,7 @@ test("the Monumentale loads cemetery ground with tombstone rows", async ({
     const map = (window as unknown as { __coolMap: any }).__coolMap;
     let meshes = 0;
     let vertices = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "cemetery") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;

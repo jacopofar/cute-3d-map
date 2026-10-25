@@ -22,14 +22,14 @@ interface DriveProbe {
     getPitch(): number;
     dragPan: { isEnabled(): boolean };
   };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const probe = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
     const map = (window as unknown as { __coolMap: DriveProbe }).__coolMap;
     let carVisible: boolean | null = null;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind === "driving_car") carVisible = object.visible;
     });
     return {

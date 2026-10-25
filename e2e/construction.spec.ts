@@ -45,7 +45,7 @@ test("construction sites load with cranes and open an OSM popup", async ({
     let meshes = 0;
     let vertices = 0;
     let maxHeight = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "construction") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;

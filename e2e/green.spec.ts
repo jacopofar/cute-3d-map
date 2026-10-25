@@ -4,16 +4,14 @@ import { test, expect } from "@playwright/test";
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
 interface Probe {
-  customLayer: {
-    scene: { traverse(cb: (o: any) => void): void };
-  };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const countMeshes = (page: import("@playwright/test").Page, kind: string) =>
   page.evaluate((wanted) => {
     const map = (window as unknown as { __coolMap: Probe }).__coolMap;
     const counts = { total: 0, visible: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== wanted) return;
       counts.total += 1;
       if (object.visible) counts.visible += 1;

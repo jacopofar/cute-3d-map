@@ -67,6 +67,16 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   from. `src/ui/checkboxes.ts` — the layer checkboxes' state, remembered in one
   cookie keyed by the label id, with `restoreCheckboxStates` /
   `saveCheckboxStates` / `savedCheckbox` as the whole surface.
+- `src/ui/controls.ts` — the layer checkboxes, the menu they live in and the
+  imputed-colors help popover. `wireControls` takes one row per switch (the
+  layer rows are generated from `layerSwitches`, so a layer's checkbox id, mesh
+  kinds and flag stay in one place), seeds each flag from the restored checkbox
+  and applies on change.
+- `src/debug.ts` — `MapDebug`, the surface the e2e specs and the benchmark read
+  (`map`, `scene`, `camera`, `tiles`, `stats`, `driveState`, `lightingState`,
+  `collisionAt`, `selectBuilding`). `CoolMap implements MapDebug`, so moving any
+  of them breaks the type check instead of the browser run. Everything else on
+  the map is private.
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
   squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).

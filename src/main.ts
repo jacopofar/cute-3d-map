@@ -37,15 +37,18 @@ import {
   isNightHour,
 } from "./lighting.ts";
 import { DriveMode } from "./drive_mode.ts";
+import type { MapDebug } from "./debug.ts";
 import { Selection } from "./selection.ts";
 import type { TileRecord } from "./tile_record.ts";
 import { DAY_HOUR, NIGHT_HOUR } from "./daynight.ts";
 import { escapeHtml } from "./ui/html.ts";
+import { restoreCheckboxStates, savedCheckbox } from "./ui/checkboxes.ts";
 import {
-  savedCheckbox,
-  restoreCheckboxStates,
-  saveCheckboxStates,
-} from "./ui/checkboxes.ts";
+  onCheckboxChange,
+  wireControls,
+  wireImputedHelp,
+  wireLayerMenu,
+} from "./ui/controls.ts";
 import type {
   ApronRing,
   BuildingInfo,
@@ -98,7 +101,13 @@ const SIDEWALK_MIN_ZOOM = 16;
 interface LayerSwitch {
   id: string;
   kinds: string[];
+  /** the checkbox label's id that drives it */
+  toggle: string;
+  /** store the flag; wired straight into the checkbox */
+  set: (on: boolean) => void;
+  /** when to draw, including the zoom gate */
   visible: () => boolean;
+  /** anything else that follows the same switch */
   after?: () => void;
 }
 
@@ -131,7 +140,7 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
   map: MapLibreMap;
 }
 
-class CoolMap {
+class CoolMap implements MapDebug {
   tileCenter: [number, number];
   map: MapLibreMap;
   private customLayer: ThreeJSLayerInterface;
@@ -141,6 +150,16 @@ class CoolMap {
   // e2e's `map.tiles` on the same map
   get tiles(): Map<string, TileRecord> {
     return this.loader.tiles;
+  }
+
+  // the 3D scene and camera the layer draws with; the e2e counts meshes and
+  // projects model points through them
+  get scene(): THREE.Scene {
+    return this.customLayer.scene;
+  }
+
+  get camera(): THREE.Camera {
+    return this.customLayer.camera;
   }
 
   // the click popups and the ground rings; it reads the tile store and the
@@ -725,148 +744,74 @@ class CoolMap {
     });
     syncTimeControls();
 
-    // facade and roof detail toggles: the meshes are built per tile, so these
-    // are plain visibility switches
-    const wireToggle = (id: string, apply: (on: boolean) => void): void => {
-      const input = document.querySelector<HTMLInputElement>(`${id} input`);
-      if (!input) return;
-      apply(input.checked);
-      input.addEventListener("change", () => apply(input.checked));
-    };
-    wireToggle("#windows-toggle", (on) => {
-      this.windowsEnabled = on;
-      this.applyDetailVisibility();
-    });
-    wireToggle("#balconies-toggle", (on) => {
-      this.balconiesEnabled = on;
-      this.applyDetailVisibility();
-    });
-    wireToggle("#roof-shapes-toggle", (on) => {
-      this.roofShapesEnabled = on;
-      this.applyLayer("roof");
-    });
-    wireToggle("#water-toggle", (on) => {
-      this.waterEnabled = on;
-      this.applyLayer("water");
-    });
-    wireToggle("#basemap-toggle", (on) => {
-      this.light.setBasemapEnabled(on);
-    });
-    wireToggle("#sidewalks-toggle", (on) => {
-      this.sidewalksEnabled = on;
-      this.applyLayer("sidewalk");
-    });
-    wireToggle("#walls-toggle", (on) => {
-      this.wallsEnabled = on;
-      this.applyLayer("wall");
-    });
-    wireToggle("#rooftop-toggle", (on) => {
-      this.rooftopsEnabled = on;
-      this.applyLayer("rooftop");
-    });
-    wireToggle("#power-lines-toggle", (on) => {
-      this.powerLinesEnabled = on;
-      this.applyLayer("power");
-    });
-    wireToggle("#park-paths-toggle", (on) => {
-      this.parkPathsEnabled = on;
-      this.applyLayer("park_path");
-    });
-    wireToggle("#bloom-toggle", (on) => {
-      this.bloomEnabled = on;
-    });
-    wireToggle("#benches-toggle", (on) => {
-      this.benchesEnabled = on;
-      this.applyLayer("bench");
-    });
-    wireToggle("#churches-toggle", (on) => {
-      this.churchesEnabled = on;
-      this.applyLayer("church");
-    });
-    wireToggle("#parks-toggle", (on) => {
-      this.parksEnabled = on;
-      this.applyLayer("green");
-    });
-    wireToggle("#airplanes-toggle", (on) => {
-      this.airplanesEnabled = on;
-      this.applyLayer("airplanes");
-    });
-    wireToggle("#fences-toggle", (on) => {
-      this.fencesEnabled = on;
-      this.applyLayer("fence");
-    });
-    wireToggle("#parked-cars-toggle", (on) => {
-      this.parkedCarsEnabled = on;
-      this.applyParkedCarVisibility();
-    });
-    wireToggle("#lampposts-toggle", (on) => {
-      this.lamppostsEnabled = on;
-      this.applyNightLightsVisibility();
-    });
-    wireToggle("#bridges-toggle", (on) => {
-      this.bridgesEnabled = on;
-      this.applyLayer("bridge");
-    });
-    wireToggle("#transit-toggle", (on) => {
-      this.transitEnabled = on;
-      this.applyLayer("transit");
-    });
-    wireToggle("#imputed-colors-toggle", (on) => {
-      if (on === this.imputedColorsEnabled) return;
-      // the color is baked into the geometry, so the loaded tiles have to be
-      // rebuilt: drop them and let the move pass fetch them again
-      this.imputedColorsEnabled = on;
-      void this.loader.reload();
-    });
+    // One row per checkbox: what it stores and what it re-applies. The layer
+    // rows come straight from `layerSwitches`, so a layer's checkbox id, mesh
+    // kinds and flag stay in one place; the rest are switches with no meshes.
+    wireControls([
+      ...this.layerSwitches.map((layer) => ({
+        id: layer.toggle,
+        set: layer.set,
+        apply: () => this.applyLayer(layer.id),
+      })),
+      { id: "#traffic-toggle", set: (on) => this.setTrafficEnabled(on) },
+      {
+        id: "#inspect-toggle",
+        set: (on) => (this.inspectEnabled = on),
+        apply: () => {
+          if (!this.inspectEnabled) this.selection.clear();
+        },
+      },
+      { id: "#clouds-toggle", set: (on) => this.setCloudsEnabled(on) },
+      {
+        id: "#basemap-toggle",
+        set: (on) => this.light.setBasemapEnabled(on),
+      },
+      { id: "#bloom-toggle", set: (on) => (this.bloomEnabled = on) },
+      {
+        id: "#windows-toggle",
+        set: (on) => (this.windowsEnabled = on),
+        apply: () => this.applyDetailVisibility(),
+      },
+      {
+        id: "#balconies-toggle",
+        set: (on) => (this.balconiesEnabled = on),
+        apply: () => this.applyDetailVisibility(),
+      },
+      {
+        id: "#parked-cars-toggle",
+        set: (on) => (this.parkedCarsEnabled = on),
+        apply: () => this.applyParkedCarVisibility(),
+      },
+      {
+        id: "#lampposts-toggle",
+        set: (on) => (this.lamppostsEnabled = on),
+        apply: () => this.applyNightLightsVisibility(),
+      },
+      {
+        id: "#imputed-colors-toggle",
+        set: (on) => {
+          if (on === this.imputedColorsEnabled) return;
+          // the color is baked into the geometry, so the loaded tiles have to
+          // be rebuilt: drop them and fetch them again
+          this.imputedColorsEnabled = on;
+          void this.loader.reload();
+        },
+      },
+    ]);
 
-    // the gear opens the layer list; the chevron at the top of the list folds it
-    const menuButton =
-      document.querySelector<HTMLButtonElement>("#layer-menu-button");
-    const menuPanel = document.querySelector<HTMLElement>("#layer-menu-panel");
-    const menuCollapse = document.querySelector<HTMLButtonElement>(
-      "#layer-menu-collapse",
-    );
-    const setMenuOpen = (open: boolean) => {
-      if (!menuButton || !menuPanel) return;
-      menuPanel.hidden = !open;
-      menuButton.hidden = open;
-      menuButton.setAttribute("aria-expanded", String(open));
-    };
-    menuButton?.addEventListener("click", () => setMenuOpen(true));
-    menuCollapse?.addEventListener("click", () => setMenuOpen(false));
-
-    // the question mark next to "imputed colors" explains what it means
-    const helpButton =
-      document.querySelector<HTMLButtonElement>("#imputed-help");
-    const helpText = document.querySelector<HTMLElement>("#imputed-help-text");
-    const setHelpOpen = (open: boolean) => {
-      if (!helpText || !helpButton) return;
-      helpText.hidden = !open;
-      helpButton.setAttribute("aria-expanded", String(open));
-    };
-    helpButton?.addEventListener("click", () =>
-      setHelpOpen(Boolean(helpText?.hidden)),
-    );
+    const setMenuOpen = wireLayerMenu();
+    wireImputedHelp();
+    onCheckboxChange(() => this.reportPerf({ event: "toggle" }));
 
     this.map.on("click", (event) => this.onMapClick(event));
     this.map.on("dragstart", () => this.stopFollowing());
 
-    // car mode: the button toggles it, WASD drives, Escape leaves. The keys
-    // only act while the mode is on, so typing in the page is unaffected.
-    // The Drive row lives in the menu: using it should get the panel out of the
-    // way so the chase camera is visible. The mode wires its own button.
+    // car mode wires its own button; the Drive row lives in the menu, so using
+    // it should get the panel out of the way for the chase camera
     document
       .querySelector("#drive-button")
       ?.addEventListener("click", () => setMenuOpen(false));
 
-    document.addEventListener("change", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
-        return;
-      }
-      saveCheckboxStates();
-      this.reportPerf({ event: "toggle" });
-    });
     const scheduleInitialReport = () => {
       if (!PERF_ENDPOINT) return;
       window.setTimeout(() => this.reportPerf(), 12000);
@@ -875,8 +820,6 @@ class CoolMap {
     else window.addEventListener("load", scheduleInitialReport, { once: true });
   }
 
-  // drop every loaded tile so the next load pass rebuilds them, picking up the
-  // current load-time options (imputed colors)
   // click a building or a water body to highlight it and show its info
   private onMapClick(event: {
     point: { x: number; y: number };
@@ -1215,46 +1158,96 @@ class CoolMap {
   // per layer replaced an `apply...Visibility` method each, which is where the
   // checkboxes kept drifting out of step with the meshes.
   private readonly layerSwitches: LayerSwitch[] = [
-    { id: "roof", kinds: ["roof"], visible: () => this.roofShapesEnabled },
-    { id: "water", kinds: ["water"], visible: () => this.waterEnabled },
-    { id: "bench", kinds: ["bench"], visible: () => this.benchesEnabled },
-    { id: "church", kinds: ["church"], visible: () => this.churchesEnabled },
-    { id: "green", kinds: ["green"], visible: () => this.parksEnabled },
-    { id: "rooftop", kinds: ["rooftop"], visible: () => this.rooftopsEnabled },
+    {
+      id: "roof",
+      kinds: ["roof"],
+      toggle: "#roof-shapes-toggle",
+      set: (on) => (this.roofShapesEnabled = on),
+      visible: () => this.roofShapesEnabled,
+    },
+    {
+      id: "water",
+      kinds: ["water"],
+      toggle: "#water-toggle",
+      set: (on) => (this.waterEnabled = on),
+      visible: () => this.waterEnabled,
+    },
+    {
+      id: "bench",
+      kinds: ["bench"],
+      toggle: "#benches-toggle",
+      set: (on) => (this.benchesEnabled = on),
+      visible: () => this.benchesEnabled,
+    },
+    {
+      id: "church",
+      kinds: ["church"],
+      toggle: "#churches-toggle",
+      set: (on) => (this.churchesEnabled = on),
+      visible: () => this.churchesEnabled,
+    },
+    {
+      id: "green",
+      kinds: ["green"],
+      toggle: "#parks-toggle",
+      set: (on) => (this.parksEnabled = on),
+      visible: () => this.parksEnabled,
+    },
+    {
+      id: "rooftop",
+      kinds: ["rooftop"],
+      toggle: "#rooftop-toggle",
+      set: (on) => (this.rooftopsEnabled = on),
+      visible: () => this.rooftopsEnabled,
+    },
     {
       id: "park_path",
       kinds: ["park_path"],
+      toggle: "#park-paths-toggle",
+      set: (on) => (this.parkPathsEnabled = on),
       visible: () => this.parkPathsEnabled,
     },
     {
       id: "power",
       kinds: ["power_tower", "power_wire"],
+      toggle: "#power-lines-toggle",
+      set: (on) => (this.powerLinesEnabled = on),
       visible: () => this.powerLinesEnabled,
     },
     {
       id: "wall",
       kinds: ["wall", "gate"],
+      toggle: "#walls-toggle",
+      set: (on) => (this.wallsEnabled = on),
       visible: () => this.wallsEnabled,
     },
     {
       id: "bridge",
       kinds: ["bridge", "tunnel"],
+      toggle: "#bridges-toggle",
+      set: (on) => (this.bridgesEnabled = on),
       visible: () => this.bridgesEnabled,
     },
     {
       id: "transit",
       kinds: ["transit_stop", "metro_sign", "platform", "rail"],
+      toggle: "#transit-toggle",
+      set: (on) => (this.transitEnabled = on),
       visible: () => this.transitEnabled,
     },
     {
       id: "sidewalk",
       kinds: ["sidewalk"],
+      toggle: "#sidewalks-toggle",
+      set: (on) => (this.sidewalksEnabled = on),
       visible: () =>
         this.sidewalksEnabled && this.map.getZoom() >= SIDEWALK_MIN_ZOOM,
     },
     {
       id: "fence",
       kinds: ["fence"],
+      toggle: "#fences-toggle",
+      set: (on) => (this.fencesEnabled = on),
       // the geometry is in the tile either way (it is cheap), only the drawing
       // waits for the zoom
       visible: () => this.fencesEnabled && this.map.getZoom() >= FENCE_MIN_ZOOM,
@@ -1262,6 +1255,8 @@ class CoolMap {
     {
       id: "airplanes",
       kinds: ["aeroway"],
+      toggle: "#airplanes-toggle",
+      set: (on) => (this.airplanesEnabled = on),
       visible: () => this.airplanesEnabled,
       after: () => this.airplanes?.setEnabled(this.airplanesEnabled),
     },
