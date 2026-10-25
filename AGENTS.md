@@ -38,8 +38,11 @@ decorative volumetric cloud layer.
 - `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
 - `npm run bench:gpu` — the same app in headed Chrome on the real GPU (needs a
   display), panning/tilting/zooming (~80 s); writes
-  `perf-results/latest-gpu.json`. Run it only for render/perf changes.
-- `npm run prettify` — Prettier over `src/**.ts`. It also reformats unrelated
+  `perf-results/latest-gpu.json`. Run it only for render/perf changes. It
+  records the display's idle frame interval as well: a phase whose `p50` matches
+  it is vsync-limited (`capped`), so its absolute fps says nothing about the
+  renderer and two runs on different monitors are not comparable.
+- `npm run prettify` — Prettier over `src/**/*.ts`. It also reformats unrelated
   lines, so prefer formatting only the files you touched.
 
 Per change, run `npm run test:check` and `npm run test:e2e:changed`. Run the full

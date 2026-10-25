@@ -59,6 +59,9 @@ type Sample = {
   longTasks: number;
   longTaskMs: number;
   tileFetches: number;
+  /** p50 within 10% of the idle frame interval: the run was display-capped, so
+   * the absolute fps says nothing about the renderer */
+  capped: boolean;
 };
 
 test.beforeEach(async ({ page }) => {
@@ -109,6 +112,34 @@ async function longTasks(page: import("@playwright/test").Page) {
   return page.evaluate(
     () => (window as unknown as { __long: number[] }).__long,
   );
+}
+
+// The median requestAnimationFrame interval while nothing moves. The app
+// repaints every frame, so this is the display's refresh cap; a phase whose p50
+// matches it was vsync-limited, and its fps depends on the monitor rather than
+// on the scene (a 90 Hz laptop and a 55 Hz one disagree by 60% on the same code).
+async function idleFrameInterval(
+  page: import("@playwright/test").Page,
+  ms = 1500,
+): Promise<number> {
+  return page.evaluate(async (windowMs) => {
+    const frames: number[] = [];
+    await new Promise<void>((resolve) => {
+      const start = performance.now();
+      let last = start;
+      const tick = (now: number) => {
+        frames.push(now - last);
+        last = now;
+        if (now - start >= windowMs) resolve();
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    // the first delta covers however long the browser took to start the loop
+    const sorted = frames.slice(1).sort((a, b) => a - b);
+    if (sorted.length === 0) return 0;
+    return Math.round(sorted[Math.floor(sorted.length / 2)] * 10) / 10;
+  }, ms);
 }
 
 // Drive the map each animation frame for `ms`. The time parameter runs 0..1.
@@ -182,6 +213,7 @@ function summarize(
   frames: number[],
   longTaskDurations: number[],
   tileFetches: number,
+  idleFrameMs: number,
 ): Sample {
   const f = frames.filter((x) => x > 0).sort((a, b) => a - b);
   const q = (p: number) => f[Math.min(f.length - 1, Math.floor(f.length * p))];
@@ -197,6 +229,8 @@ function summarize(
     longTasks: longTaskDurations.length,
     longTaskMs: round(longTaskDurations.reduce((a, b) => a + b, 0)),
     tileFetches,
+    // a phase that is no slower than the idle refresh rate is vsync-limited
+    capped: idleFrameMs > 0 && (f.length === 0 || q(0.5) <= idleFrameMs * 1.1),
   };
 }
 
@@ -249,6 +283,7 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
   await page.waitForTimeout(SETTLE_MS);
 
   const startup = await stats(page);
+  const idleFrameMs = await idleFrameInterval(page);
 
   const phases: Record<string, Sample> = {};
   const after: Record<string, Stats> = {};
@@ -256,7 +291,12 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
     const before = tileFetches;
     const frames = await runMotion(page, kind, PHASE_MS);
     const durations = await longTasks(page);
-    phases[kind] = summarize(frames, durations, tileFetches - before);
+    phases[kind] = summarize(
+      frames,
+      durations,
+      tileFetches - before,
+      idleFrameMs,
+    );
     after[kind] = await stats(page);
     // let the phase's tile loads, facade rebuild and the debounced shadow
     // update settle before measuring the next phase
@@ -271,6 +311,7 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
     warmupMs: WARMUP_MS,
     settleMs: SETTLE_MS,
     phaseMs: PHASE_MS,
+    idleFrameMs,
     startup,
     phases,
     after,
@@ -284,6 +325,9 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
   );
   console.log(
     `\nrenderer: ${renderer}\n` +
+      `display: idle frame ${idleFrameMs} ms` +
+      (idleFrameMs > 0 ? ` (~${Math.round(1000 / idleFrameMs)} Hz cap)` : "") +
+      "\n" +
       `startup: ${startup.tiles} tiles, ${startup.meshes} meshes, ` +
       `${startup.triangles} triangles in ${startup.drawCalls} draw calls\n` +
       ["pan", "tilt", "zoom"]
@@ -292,7 +336,8 @@ test("interactive frame times on the real GPU (pan, tilt, zoom)", async ({
             `${kind.padEnd(5)}: ${phases[kind].fps} fps ` +
             `(p50 ${phases[kind].p50} ms, p90 ${phases[kind].p90} ms, ` +
             `p99 ${phases[kind].p99} ms, ${phases[kind].tileFetches} tile ` +
-            `fetches, ${phases[kind].longTaskMs} ms long tasks)`,
+            `fetches, ${phases[kind].longTaskMs} ms long tasks)` +
+            (phases[kind].capped ? " [at the display cap]" : ""),
         )
         .join("\n") +
       "\n",
