@@ -218,9 +218,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   chases the car with MapLibre `jumpTo` (bearing = heading, fixed zoom/pitch,
   looking a little ahead), so map gestures are disabled while driving and the
   mode runs its own slower tile pass (the per-frame jump keeps the 150 ms move
-  debounce from ever firing). The car spawns on the nearest loaded car route and
-  reports `drive-start` / `drive-stop` perf events. No road graph and no physics
-  beyond the rectangle collision.
+  debounce from ever firing). On a coarse pointer it also shows `#drive-touch`,
+  two thumb clusters for steering and pedals; their input merges with the keys
+  and is cleared on exit or blur. The car spawns on the nearest loaded car route
+  and reports `drive-start` / `drive-stop` perf events. No road graph and no
+  physics beyond the rectangle collision.
 - `src/feature_pick.ts` — the pure nearest-feature picker behind the click
   popups: points by distance, lines by segment distance and areas by
   containment. `geojson_data` keeps a generic `FeatureInfo` per tile for the
@@ -465,6 +467,8 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   Collision is the car's rectangle against building footprints and fence/wall
   lines, not a physics simulation; the car spawns on the nearest loaded car
   route. Entering and leaving report `drive-start` / `drive-stop` perf events.
+  On a coarse pointer `#drive-touch` adds steer and pedal thumb clusters whose
+  input merges with the keyboard flags.
 - **generic feature** — a simple OSM feature kept as a `FeatureInfo` (id, name,
   kind, subtype, point/lines/rings) for click-picking: trees and tree rows,
   benches, parks, cemeteries, rail, park paths, power towers and lines, bridges,
@@ -508,6 +512,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   leaves it, `#drive-hud` shows the speed and the keys, and Escape also leaves.
   Choosing it closes the menu. While driving, the map handlers are disabled and
   the button reports `drive-start` / `drive-stop` events through the perf
-  endpoint.
+  endpoint. On a coarse pointer `#drive-touch` shows steer and pedal thumb
+  clusters; the keyboard hint is hidden and the pads respect the safe area.
 - Merged per-tile geometry is disposed on unload; materials are shared
   singletons and are not disposed.

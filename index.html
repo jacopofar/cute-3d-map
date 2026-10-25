@@ -19,6 +19,75 @@
       >
     </div>
 
+    <div id="drive-touch" hidden>
+      <div class="drive-touch-group" role="group" aria-label="Steering">
+        <button
+          type="button"
+          class="drive-touch-button"
+          data-drive-action="left"
+          aria-label="Steer left"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M15 4 7 12l8 8"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="drive-touch-button"
+          data-drive-action="right"
+          aria-label="Steer right"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+            <path
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="m9 4 8 8-8 8"
+            />
+          </svg>
+        </button>
+      </div>
+      <div
+        class="drive-touch-group drive-touch-pedals"
+        role="group"
+        aria-label="Pedals"
+      >
+        <button
+          type="button"
+          class="drive-touch-button"
+          data-drive-action="forward"
+          aria-label="Accelerate"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path fill="currentColor" d="m12 4 8 14H4z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="drive-touch-button"
+          data-drive-action="backward"
+          aria-label="Brake and reverse"
+          aria-pressed="false"
+        >
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path fill="currentColor" d="m12 20 8-14H4z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <div id="layer-menu">
       <button
         type="button"

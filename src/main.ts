@@ -502,6 +502,14 @@ class CoolMap {
   private driveButton?: HTMLButtonElement;
   private driveHud?: HTMLElement;
   private driveSpeed?: HTMLElement;
+  // the on-screen steering/pedal buttons, merged into the keyboard input
+  private driveTouch?: HTMLElement;
+  private driveTouchInput: DriveInput = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+  };
   private clouds?: CloudLayer;
   private airplanes?: PlaneLayer;
   // the scene lights, kept so the time-of-day model can drive them. They are
@@ -1161,10 +1169,16 @@ class CoolMap {
       document.querySelector<HTMLElement>("#drive-hud") ?? undefined;
     this.driveSpeed =
       document.querySelector<HTMLElement>("#drive-speed") ?? undefined;
+    this.driveTouch =
+      document.querySelector<HTMLElement>("#drive-touch") ?? undefined;
+    this.wireDriveTouch();
     window.addEventListener("keydown", (event) => this.onDriveKeyDown(event));
     window.addEventListener("keyup", (event) => this.onDriveKeyUp(event));
     // a key held when the window loses focus would stay "down" forever
-    window.addEventListener("blur", () => this.driveKeys.clear());
+    window.addEventListener("blur", () => {
+      this.driveKeys.clear();
+      this.clearDriveTouch();
+    });
     this.applyDriveUi();
     // The Drive row lives in the menu: entering or leaving the mode should get
     // the panel out of the way so the chase camera is visible.
@@ -2333,6 +2347,7 @@ class CoolMap {
     this.clearSelection();
     this.drivingActive = true;
     this.driveKeys.clear();
+    this.clearDriveTouch();
     if (!this.driving) this.driving = new DrivingCar(this.customLayer.scene);
     const spawn = this.driveSpawn();
     this.driving.start(spawn.lon, spawn.lat, spawn.heading);
@@ -2369,6 +2384,7 @@ class CoolMap {
     if (!this.drivingActive) return;
     this.drivingActive = false;
     this.driveKeys.clear();
+    this.clearDriveTouch();
     this.lastDriveFrame = 0;
     this.driving?.stop();
     const interactions = this.driveInteractions;
@@ -2407,6 +2423,63 @@ class CoolMap {
         label.textContent = this.drivingActive ? "Exit drive" : "Drive";
     }
     if (this.driveHud) this.driveHud.hidden = !this.drivingActive;
+    // the CSS only shows the touch pad on a coarse pointer
+    if (this.driveTouch) this.driveTouch.hidden = !this.drivingActive;
+  }
+
+  // Wire the on-screen buttons to the same input flags as the keyboard. Pointer
+  // capture keeps a thumb that slides off the button held until it lifts, and
+  // the try catches a synthetic pointer from a test (which cannot be captured).
+  private wireDriveTouch() {
+    const buttons = this.driveTouch?.querySelectorAll<HTMLButtonElement>(
+      "[data-drive-action]",
+    );
+    if (!buttons) return;
+    const actions = new Set<keyof DriveInput>([
+      "forward",
+      "backward",
+      "left",
+      "right",
+    ]);
+    buttons.forEach((button) => {
+      const action = button.dataset.driveAction as keyof DriveInput | undefined;
+      if (!action || !actions.has(action)) return;
+      const set = (on: boolean) => {
+        this.driveTouchInput[action] = on;
+        button.classList.toggle("pressed", on);
+        button.setAttribute("aria-pressed", String(on));
+      };
+      button.addEventListener("pointerdown", (event) => {
+        // no scroll, text selection or callout from a held thumb
+        event.preventDefault();
+        try {
+          button.setPointerCapture(event.pointerId);
+        } catch {
+          // a synthetic pointer has no active capture
+        }
+        set(true);
+      });
+      const release = () => set(false);
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", release);
+      button.addEventListener("contextmenu", (event) => event.preventDefault());
+    });
+  }
+
+  private clearDriveTouch() {
+    this.driveTouchInput = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+    };
+    this.driveTouch
+      ?.querySelectorAll<HTMLButtonElement>(".drive-touch-button")
+      .forEach((button) => {
+        button.classList.remove("pressed");
+        button.setAttribute("aria-pressed", "false");
+      });
   }
 
   private onDriveKeyDown(event: KeyboardEvent) {
@@ -2437,11 +2510,12 @@ class CoolMap {
 
   private driveInput(): DriveInput {
     const keys = this.driveKeys;
+    const touch = this.driveTouchInput;
     return {
-      forward: keys.has("w") || keys.has("arrowup"),
-      backward: keys.has("s") || keys.has("arrowdown"),
-      left: keys.has("a") || keys.has("arrowleft"),
-      right: keys.has("d") || keys.has("arrowright"),
+      forward: keys.has("w") || keys.has("arrowup") || touch.forward,
+      backward: keys.has("s") || keys.has("arrowdown") || touch.backward,
+      left: keys.has("a") || keys.has("arrowleft") || touch.left,
+      right: keys.has("d") || keys.has("arrowright") || touch.right,
     };
   }
 
