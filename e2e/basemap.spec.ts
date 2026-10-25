@@ -50,4 +50,16 @@ test("the basemap checkbox removes and restores the MapTiler style", async ({
     document.querySelector<HTMLInputElement>("#basemap-toggle input")!.click(),
   );
   await expect.poll(layers, { timeout: 30_000 }).toBeGreaterThan(0);
+
+  // The 3D scene has to end up on *top* of the style it comes back to: a swap
+  // used to leave the custom layer at the bottom of the stack, so the basemap
+  // painted over the whole city while the popups kept working.
+  const topLayer = () =>
+    page.evaluate(() => {
+      const order = (
+        window as unknown as { __coolMap: MapDebug }
+      ).__coolMap.layerOrder();
+      return order[order.length - 1] ?? null;
+    });
+  await expect.poll(topLayer, { timeout: 30_000 }).toBe("3d-model");
 });

@@ -676,6 +676,11 @@ class CoolMap implements MapDebug {
       if (!this.map.getLayer(this.customLayer.id)) {
         this.map.addLayer(this.customLayer);
       }
+      // A freshly loaded style can bring its own layers in after ours, which
+      // paints the basemap over the 3D scene: a swap back from the empty style
+      // left the custom layer at the bottom of the stack. Moving it is a no-op
+      // when it is already last.
+      this.map.moveLayer(this.customLayer.id);
       // load map data at setup before the user moves
       this.loader.load(this.map.getCenter());
       this.applyTrafficState();
@@ -1070,6 +1075,15 @@ class CoolMap implements MapDebug {
   // read-only shadow state for the GPU health check
   shadowState(): { castsShadow: boolean; baked: boolean } {
     return this.light.readShadowState();
+  }
+
+  // the style's layer order, bottom to top. `getLayersOrder` is not on the
+  // public MapLibre type, and `getStyle().layers` leaves custom layers out.
+  layerOrder(): string[] {
+    const style = (
+      this.map as unknown as { style?: { getLayersOrder?(): string[] } }
+    ).style;
+    return style?.getLayersOrder?.() ?? [];
   }
 
   // read-only state for the e2e (like lightingState() and stats())

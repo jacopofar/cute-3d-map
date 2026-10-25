@@ -62,6 +62,8 @@ export interface MapDebug {
   hoverState(): { kind: string | null };
   /** whether the sun casts shadows, and whether it has baked its map */
   shadowState(): { castsShadow: boolean; baked: boolean };
+  /** the style's layer ids, bottom to top; the 3D layer must be last */
+  layerOrder(): string[];
   /** open a building's popup without clicking it */
   selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void;
 }
