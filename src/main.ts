@@ -240,6 +240,76 @@ const FEATURE_PICK_RADIUS: Record<string, number> = {
 // size to 12 m, so this also covers the rim and a slightly-off click.
 const FOUNTAIN_PICK_RADIUS = 8;
 
+// Mesh kinds a click can hit, and whether the layer's checkbox gates them: a
+// hidden layer must not be pickable either. The kinds with no toggle of their
+// own (buildings, trees, painted markings, ...) are always pickable; a kind
+// missing from this table has no popup at all.
+const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {
+  building: "always",
+  glass: "always",
+  tree: "always",
+  cemetery: "always",
+  furniture: "always",
+  fountain: "always",
+  fountain_water: "always",
+  terrace: "always",
+  playground: "always",
+  monument: "always",
+  construction: "always",
+  crosswalk: "always",
+  road_marking: "always",
+  water: "when-visible",
+  roof: "when-visible",
+  church: "when-visible",
+  bench: "when-visible",
+  green: "when-visible",
+  rail: "when-visible",
+  park_path: "when-visible",
+  power_tower: "when-visible",
+  power_wire: "when-visible",
+  bridge: "when-visible",
+  tunnel: "when-visible",
+  gate: "when-visible",
+  fence: "when-visible",
+  wall: "when-visible",
+  aeroway: "when-visible",
+  platform: "when-visible",
+  transit_stop: "when-visible",
+  metro_sign: "when-visible",
+  rooftop: "when-visible",
+  custom_model: "when-visible",
+};
+
+// One entry per mesh kind that resolves to a point feature: `at` searches the
+// tile data around the hit point, `select` opens the popup for what it found.
+// The pair is type-checked at the `picker()` call and erased to `unknown`
+// afterwards, which is sound because both halves come from the same call.
+interface Picker {
+  at: (
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ) => unknown;
+  select: (info: unknown, lngLat: LngLat) => void;
+}
+
+function picker<T>(
+  owner: object,
+  at: (
+    tileKey: string,
+    point: THREE.Vector3,
+    originMeters: [number, number],
+    scaleFactor: number,
+  ) => T | undefined,
+  select: (info: T, lngLat: LngLat) => void,
+): Picker {
+  return {
+    at: at.bind(owner),
+    select: (info, lngLat) => select.call(owner, info as T, lngLat),
+  };
+}
+
 function osmLink(id: string | undefined): string | null {
   if (!id || !/^(node|way|relation)\/\d+$/.test(id)) return null;
   const url = `https://www.openstreetmap.org/${id}`;
@@ -1255,47 +1325,8 @@ class CoolMap {
     raycaster.set(near, far.sub(near).normalize());
     const pickable: THREE.Object3D[] = [];
     this.forEachMesh((mesh) => {
-      const kind = mesh.userData.kind;
-      // a hidden water layer is not pickable either
-      if (
-        kind === "building" ||
-        kind === "glass" ||
-        (kind === "water" && mesh.visible) ||
-        kind === "furniture" ||
-        kind === "fountain" ||
-        kind === "fountain_water" ||
-        kind === "playground" ||
-        kind === "monument" ||
-        kind === "construction" ||
-        kind === "crosswalk" ||
-        (kind === "custom_model" && mesh.visible) ||
-        (kind === "rooftop" && mesh.visible) ||
-        ((kind === "platform" ||
-          kind === "transit_stop" ||
-          kind === "metro_sign") &&
-          mesh.visible) ||
-        kind === "terrace" ||
-        // trees, cemeteries and painted markings have no visibility toggle;
-        // the rest are their own toggleable meshes
-        kind === "tree" ||
-        kind === "cemetery" ||
-        kind === "road_marking" ||
-        ((kind === "roof" ||
-          kind === "church" ||
-          kind === "bench" ||
-          kind === "green" ||
-          kind === "rail" ||
-          kind === "park_path" ||
-          kind === "power_tower" ||
-          kind === "power_wire" ||
-          kind === "bridge" ||
-          kind === "tunnel" ||
-          kind === "gate" ||
-          kind === "fence" ||
-          kind === "wall" ||
-          kind === "aeroway") &&
-          mesh.visible)
-      ) {
+      const rule = PICKABLE_KINDS[mesh.userData.kind as string];
+      if (rule === "always" || (rule === "when-visible" && mesh.visible)) {
         pickable.push(mesh);
       }
     });
@@ -1313,98 +1344,34 @@ class CoolMap {
       this.selectVehicle(vehicle, event.lngLat);
       return;
     }
+    this.pickStatic(hit, event.lngLat);
+  }
+
+  // resolve a static hit to what the user clicked: a point feature, a fence or
+  // wall, a generic OSM feature, a solar panel, or the building below it
+  private pickStatic(hit: THREE.Intersection, lngLat: LngLat) {
     const tileKey = (hit.object.userData.tileKey as string | undefined) ?? "";
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.tileCenter);
     const scaleFactor = scaleFactorAt(this.tileCenter[1]);
-    if (hit.object.userData.kind === "custom_model") {
+    const hitKind = hit.object.userData.kind as string | undefined;
+    if (hitKind === "custom_model") {
       const buildingId = hit.object.userData.buildingId as string | undefined;
       const info = (this.tiles.get(tileKey)?.objects.buildings ?? []).find(
         (candidate) => candidate.id === buildingId,
       );
-      if (info) this.selectBuilding(info, event.lngLat);
+      if (info) this.selectBuilding(info, lngLat);
       else this.clearSelection();
       return;
     }
-    if (hit.object.userData.kind === "water") {
-      const info = this.waterAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectWater(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "furniture") {
-      const info = this.furnitureAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectFurniture(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (
-      hit.object.userData.kind === "fountain" ||
-      hit.object.userData.kind === "fountain_water"
-    ) {
-      const info = this.fountainAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectFountain(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (
-      hit.object.userData.kind === "transit_stop" ||
-      hit.object.userData.kind === "metro_sign"
-    ) {
-      const info = this.transitAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectTransit(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "terrace") {
-      const info = this.terraceAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectTerrace(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "playground") {
-      const info = this.playgroundAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectPlayground(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "monument") {
-      const info = this.monumentAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectMonument(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "construction") {
-      const info = this.constructionAt(
-        tileKey,
-        point,
-        originMeters,
-        scaleFactor,
-      );
-      if (info) this.selectConstruction(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "crosswalk") {
-      const info = this.crosswalkAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectCrosswalk(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "platform") {
-      const info = this.platformAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectPlatform(info, event.lngLat);
-      else this.clearSelection();
-      return;
-    }
-    if (hit.object.userData.kind === "rooftop") {
-      const info = this.rooftopAt(tileKey, point, originMeters, scaleFactor);
-      if (info) this.selectRooftop(info, event.lngLat);
-      else this.clearSelection();
+    const pick = hitKind ? this.pointPickers()[hitKind] : undefined;
+    if (pick) {
+      const info = pick.at(tileKey, point, originMeters, scaleFactor);
+      if (info === undefined) this.clearSelection();
+      else pick.select(info, lngLat);
       return;
     }
     // fences and walls carry their own per-tile lines (the car collision data)
-    const hitKind = hit.object.userData.kind as string | undefined;
     if (hitKind === "fence" || hitKind === "wall") {
       const info = barrierAt(
         this.tiles.get(tileKey)?.objects.barriers ?? [],
@@ -1413,7 +1380,7 @@ class CoolMap {
         scaleFactor,
         FEATURE_PICK_RADIUS[hitKind] ?? 4,
       );
-      if (info) this.selectBarrier(info, event.lngLat);
+      if (info) this.selectBarrier(info, lngLat);
       else this.clearSelection();
       return;
     }
@@ -1432,7 +1399,7 @@ class CoolMap {
         scaleFactor,
         limit,
       );
-      if (info) this.selectFeature(info, event.lngLat);
+      if (info) this.selectFeature(info, lngLat);
       else this.clearSelection();
       return;
     }
@@ -1441,7 +1408,7 @@ class CoolMap {
     // Give the mapped solar footprint precedence over the building below it.
     const solar = this.rooftopAt(tileKey, point, originMeters, scaleFactor);
     if (this.rooftopsEnabled && solar?.kind === "solar") {
-      this.selectRooftop(solar, event.lngLat);
+      this.selectRooftop(solar, lngLat);
       return;
     }
     const candidates = this.tiles.get(tileKey)?.objects.buildings ?? [];
@@ -1467,7 +1434,28 @@ class CoolMap {
       this.clearSelection();
       return;
     }
-    this.selectBuilding(building, event.lngLat);
+    this.selectBuilding(building, lngLat);
+  }
+
+  // the point-feature pickers behind the click popups, keyed by every mesh kind
+  // that resolves to one (a fountain has two meshes, a metro stop two). The
+  // methods are bound here because the table is looked up rather than called.
+  private pointPickers(): Record<string, Picker> {
+    return {
+      water: picker(this, this.waterAt, this.selectWater),
+      furniture: picker(this, this.furnitureAt, this.selectFurniture),
+      fountain: picker(this, this.fountainAt, this.selectFountain),
+      fountain_water: picker(this, this.fountainAt, this.selectFountain),
+      transit_stop: picker(this, this.transitAt, this.selectTransit),
+      metro_sign: picker(this, this.transitAt, this.selectTransit),
+      terrace: picker(this, this.terraceAt, this.selectTerrace),
+      playground: picker(this, this.playgroundAt, this.selectPlayground),
+      monument: picker(this, this.monumentAt, this.selectMonument),
+      construction: picker(this, this.constructionAt, this.selectConstruction),
+      crosswalk: picker(this, this.crosswalkAt, this.selectCrosswalk),
+      platform: picker(this, this.platformAt, this.selectPlatform),
+      rooftop: picker(this, this.rooftopAt, this.selectRooftop),
+    };
   }
 
   // the water feature under a hit point: an area whose ring contains it, else
