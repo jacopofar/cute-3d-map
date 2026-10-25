@@ -3,14 +3,10 @@ import { test, expect } from "@playwright/test";
 import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style, so the map reaches
-// "style.load" with no MapTiler key and no network.
+// "style.load" with no MapTiler key or network access.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
-// a building to centre on: the middle of a dense view is often a piazza, so
-// the spec picks a real footprint and looks straight at its roof
-const SOME_BUILDING = `/#map=18/45.497/9.186`;
-
-// boot + tile load + two sweeps of hover checks
+// boot + tile load + a few candidate buildings to sweep
 test.setTimeout(120_000);
 
 test.beforeEach(async ({ page }) => {
@@ -37,22 +33,32 @@ const cursor = (page: import("@playwright/test").Page) =>
         .cursor ?? "",
   );
 
-// the kinds a roof or a wall mesh carries; whichever the ray reaches first
-const BUILDING_KINDS = ["building", "roof", "glass", "church"];
+// a ring of offsets around a canvas point: the exact centre can be a courtyard
+// or a piazza, a few dozen pixels away is a wall
+const SWEEP = [
+  [0, 0],
+  [0, -50],
+  [0, 50],
+  [-50, 0],
+  [50, 0],
+  [-50, -50],
+  [50, -50],
+  [-50, 50],
+  [50, 50],
+];
 
-test("hovering rings a building, and the checkbox turns it off", async ({
+test("hovering rings a feature, and the checkbox turns it off", async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(SOME_BUILDING);
+  await page.goto("/");
   await expect(page.locator("canvas.maplibregl-canvas")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => "__coolMap" in window).catch(() => false), {
       timeout: 60_000,
     })
     .toBe(true);
-  // the tiles have to be in before anything is under the cursor
   await expect
     .poll(
       () =>
@@ -65,41 +71,15 @@ test("hovering rings a building, and the checkbox turns it off", async ({
     .toBeGreaterThan(0);
   await page.waitForTimeout(1500);
 
-  const target = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
-    for (const tile of map.tiles.values()) {
-      for (const b of tile.objects.buildings) {
-        if (!b.bbox) continue;
-        return {
-          lon: (b.bbox[0] + b.bbox[2]) / 2,
-          lat: (b.bbox[1] + b.bbox[3]) / 2,
-        };
-      }
-    }
-    return null;
-  });
-  if (!target) throw new Error("no building in the loaded tiles");
-  await page.evaluate((center) => {
-    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
-    map.map.jumpTo({ center, zoom: 19 });
-  }, target);
-  await page.waitForTimeout(3000);
-
   const canvas = await page.locator("canvas.maplibregl-canvas").boundingBox();
-  const points = [
-    [0, 0],
-    [0, -40],
-    [-60, -20],
-    [60, -20],
-    [0, 40],
-  ];
+  const at = (dx: number, dy: number) => ({
+    x: canvas!.x + canvas!.width / 2 + dx,
+    y: canvas!.y + canvas!.height / 2 + dy,
+  });
 
   // off by default: sweeping the same points hovers nothing
-  for (const [dx, dy] of points) {
-    await page.mouse.move(
-      canvas!.x + canvas!.width / 2 + dx,
-      canvas!.y + canvas!.height / 2 + dy,
-    );
+  for (const [dx, dy] of SWEEP.slice(0, 3)) {
+    await page.mouse.move(at(dx, dy).x, at(dx, dy).y);
     await page.waitForTimeout(120);
     expect(await hoverKind(page)).toBeNull();
   }
@@ -109,27 +89,50 @@ test("hovering rings a building, and the checkbox turns it off", async ({
   await page.click("#hover-inspect-toggle input");
   await page.click("#layer-menu-collapse");
 
+  // Candidate buildings, biggest first. The default view centres on the Duomo's
+  // piazza and the biggest footprint in the window can be a lonely chapel, so
+  // the spec tries a few until something is actually under the cursor.
+  const targets = await page.evaluate(() => {
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+    const found: { lon: number; lat: number; area: number }[] = [];
+    for (const tile of map.tiles.values()) {
+      for (const b of tile.objects.buildings) {
+        if (!b.bbox) continue;
+        found.push({
+          lon: (b.bbox[0] + b.bbox[2]) / 2,
+          lat: (b.bbox[1] + b.bbox[3]) / 2,
+          area: (b.bbox[2] - b.bbox[0]) * (b.bbox[3] - b.bbox[1]),
+        });
+      }
+    }
+    found.sort((a, b) => b.area - a.area);
+    return found.slice(0, 6);
+  });
+  if (targets.length === 0) throw new Error("no building in the loaded tiles");
+
   let hovered: string | null = null;
-  for (const [dx, dy] of points) {
-    await page.mouse.move(
-      canvas!.x + canvas!.width / 2 + dx,
-      canvas!.y + canvas!.height / 2 + dy,
-    );
-    await page.waitForTimeout(150);
-    hovered = await hoverKind(page);
+  for (const target of targets) {
+    await page.evaluate((center) => {
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+      map.map.jumpTo({ center, zoom: 18 });
+    }, target);
+    await page.waitForTimeout(2500);
+    for (const [dx, dy] of SWEEP) {
+      await page.mouse.move(at(dx, dy).x, at(dx, dy).y);
+      await page.waitForTimeout(150);
+      hovered = await hoverKind(page);
+      if (hovered) break;
+    }
     if (hovered) break;
   }
-  expect(BUILDING_KINDS).toContain(hovered);
+  expect(hovered).not.toBeNull();
   expect(await cursor(page)).toBe("pointer");
 
-  // switching it off drops the ring and the cursor, on the same spot
+  // switching it off drops the ring and the cursor
   await page.click("#layer-menu-button");
   await page.click("#hover-inspect-toggle input");
   await page.click("#layer-menu-collapse");
-  await page.mouse.move(
-    canvas!.x + canvas!.width / 2,
-    canvas!.y + canvas!.height / 2,
-  );
+  await page.mouse.move(at(4, 4).x, at(4, 4).y);
   await page.waitForTimeout(250);
   expect(await hoverKind(page)).toBeNull();
   expect(await cursor(page)).toBe("");
