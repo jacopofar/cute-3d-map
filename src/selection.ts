@@ -114,6 +114,11 @@ const PITCH_LABELS: Record<string, string> = {
   volleyball: "Volleyball court",
   beachvolleyball: "Beach volleyball court",
   athletics: "Athletics track",
+  rugby: "Rugby pitch",
+  rugby_union: "Rugby pitch",
+  rugby_league: "Rugby league pitch",
+  baseball: "Baseball field",
+  softball: "Softball field",
 };
 
 const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {

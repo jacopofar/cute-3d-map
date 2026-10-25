@@ -54,6 +54,10 @@ const GOALS: Record<string, [number, number]> = {
   soccer: [7.32, 2.44],
   futsal: [3, 2],
   "five-a-side": [3, 2],
+  // rugby's H: 5.6 m between the posts, the crossbar at 3 m
+  rugby: [5.6, 3],
+  rugby_union: [5.6, 3],
+  rugby_league: [5.6, 3],
 };
 
 export const pitchMaterial = new THREE.MeshLambertMaterial({

@@ -38,12 +38,41 @@ const FIELDS: Record<string, [number, number]> = {
   beachvolleyball: [16, 8],
   // a 400 m track: 84.39 m straights, 36.5 m inner radius, 8 lanes of 1.22 m
   athletics: [176.91, 92.52],
+  // the rugby field of play: 100 m between the goal lines, 70 m wide
+  rugby: [100, 70],
+  rugby_union: [100, 70],
+  rugby_league: [100, 68],
+  // a baseball field is a square fan seen from home plate: the plate sits in a
+  // corner and the fence is a quarter circle of the same radius
+  baseball: [100, 100],
+  softball: [68, 68],
 };
 
+// Sports whose field opens from a corner rather than from the middle: the frame
+// is turned so +u and +v point from home plate into the footprint, so the paint
+// can measure everything from the plate whichever way OSM drew the fan.
+const ANCHORED = new Set(["baseball", "softball"]);
+
+// A footprint is sometimes a whole sports centre rather than the playing area
+// (a baseball diamond mapped once for the park). Capping the scale keeps the
+// fence at a believable distance instead of stretching it over the block.
+const MAX_SCALE: Record<string, number> = { baseball: 1.3, softball: 1.2 };
+
+// Where the baseball geometry sits inside its 100 m square, as fractions of the
+// side: 90 ft bases, a 60 ft 6 in mound and the infield grass edge.
+const BASE_FRACTION = 0.274;
+const MOUND_FRACTION = 0.184;
+const INFIELD_FRACTION = 0.29;
+const MOUND_RADIUS = 0.027;
+
 // How long the drawn field has to be to be worth painting, in meters. A
-// throwing area or a warm-up strip tagged `athletics` is not a track, and a
-// 20 m oval with eight lanes reads as scribble.
-const MIN_DRAWN_LENGTH: Record<string, number> = { athletics: 80 };
+// throwing area or a warm-up strip tagged `athletics` is not a track, a 20 m
+// oval with eight lanes reads as scribble, and a batting cage is not a field.
+const MIN_DRAWN_LENGTH: Record<string, number> = {
+  athletics: 80,
+  baseball: 60,
+  softball: 40,
+};
 
 // OSM sometimes draws the pitch with its run-off and sometimes just the playing
 // surface; a meter of margin keeps the paint off the polygon edge either way.
@@ -69,6 +98,23 @@ export function pitchSportOf(value: unknown): string | null {
  * principal axis. Null when there is no layout for the sport or the footprint is
  * degenerate.
  */
+// the polygon's area centroid (shoelace), in model space
+function areaCentroid(ring: readonly [number, number][]): [number, number] {
+  let twice = 0;
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[i + 1];
+    const cross = x0 * y1 - x1 * y0;
+    twice += cross;
+    x += (x0 + x1) * cross;
+    y += (y0 + y1) * cross;
+  }
+  if (Math.abs(twice) < 1e-9) return [0, 0];
+  return [x / (3 * twice), y / (3 * twice)];
+}
+
 export function pitchFrame(
   ring: readonly [number, number][],
   sport: string,
@@ -124,8 +170,8 @@ export function pitchFrame(
 
   // the field runs down the longer side of that rectangle
   const longU = best.maxU - best.minU >= best.maxV - best.minV;
-  const along = longU ? best.along : best.across;
-  const across = longU ? best.across : best.along;
+  let along = longU ? best.along : best.across;
+  let across = longU ? best.across : best.along;
   const minU = longU ? best.minU : best.minV;
   const maxU = longU ? best.maxU : best.maxV;
   const minV = longU ? best.minV : best.minU;
@@ -134,14 +180,35 @@ export function pitchFrame(
   const availableLength = maxU - minU - 2 * PITCH_MARGIN;
   const availableWidth = maxV - minV - 2 * PITCH_MARGIN;
   if (availableLength <= 1 || availableWidth <= 1) return null;
-  const scale = Math.min(availableLength / field[0], availableWidth / field[1]);
-  if (!Number.isFinite(scale) || scale <= MIN_SCALE) return null;
+  const fitted = Math.min(
+    availableLength / field[0],
+    availableWidth / field[1],
+  );
+  if (!Number.isFinite(fitted) || fitted <= MIN_SCALE) return null;
+  const scale = Math.min(fitted, MAX_SCALE[sport] ?? Infinity);
   if (field[0] * scale < (MIN_DRAWN_LENGTH[sport] ?? 0)) return null;
 
   const cu = (minU + maxU) / 2;
   const cv = (minV + maxV) / 2;
+  const centre: [number, number] = [
+    along[0] * cu + across[0] * cv,
+    along[1] * cu + across[1] * cv,
+  ];
+
+  if (ANCHORED.has(sport)) {
+    // An anchored field sits at the corner of the footprint that the area leans
+    // toward. The *area* centroid of a fan is a few metres in from home plate
+    // (a vertex average is not: the arc's many points drag it past the middle),
+    // so the axes are turned until it lies on the -u/-v side of the centre.
+    const centroid = areaCentroid(ring);
+    const dx = centroid[0] - centre[0];
+    const dy = centroid[1] - centre[1];
+    if (dx * along[0] + dy * along[1] > 0) along = [-along[0], -along[1]];
+    if (dx * across[0] + dy * across[1] > 0) across = [-across[0], -across[1]];
+  }
+
   return {
-    centre: [along[0] * cu + across[0] * cv, along[1] * cu + across[1] * cv],
+    centre,
     along,
     across,
     scale,
@@ -211,6 +278,37 @@ function circle(
   return out;
 }
 
+// a straight broken into dashes, which is how rugby paints its 5 m and 15 m
+// lines (solid lines would read as another boundary)
+function dashed(
+  frame: PitchFrame,
+  u1: number,
+  v1: number,
+  u2: number,
+  v2: number,
+  dash = 5,
+  gap = 5,
+): Segment[] {
+  const length = Math.hypot(u2 - u1, v2 - v1);
+  if (length <= 0) return [];
+  const stepU = (u2 - u1) / length;
+  const stepV = (v2 - v1) / length;
+  const out: Segment[] = [];
+  for (let start = 0; start < length; start += dash + gap) {
+    const end = Math.min(start + dash, length);
+    out.push(
+      line(
+        frame,
+        u1 + stepU * start,
+        v1 + stepV * start,
+        u1 + stepU * end,
+        v1 + stepV * end,
+      ),
+    );
+  }
+  return out;
+}
+
 function arc(
   frame: PitchFrame,
   cu: number,
@@ -268,9 +366,12 @@ function stadium(
 export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
   const length = frame.length / 2;
   const width = frame.width / 2;
-  // a track is an oval: its lane outlines are the boundary, so no rectangle
+  // a track is an oval and a diamond is a fan: their own outlines are the
+  // boundary, so they get no rectangle
   const out =
-    sport === "athletics" ? [] : rect(frame, -length, -width, length, width);
+    sport === "athletics" || sport === "baseball" || sport === "softball"
+      ? []
+      : rect(frame, -length, -width, length, width);
 
   if (sport === "soccer") {
     // halfway line and centre circle (9.15 m, FIFA)
@@ -383,6 +484,58 @@ export function pitchPaint(sport: string, frame: PitchFrame): Segment[] {
     }
     // the finish line, across the track at the end of the home straight
     out.push(line(frame, halfStraight, -innerRadius, halfStraight, -width));
+  }
+
+  if (
+    sport === "rugby" ||
+    sport === "rugby_union" ||
+    sport === "rugby_league"
+  ) {
+    // halfway and the 22 m lines (the goal lines are the field's ends), the two
+    // 10 m lines used at a kickoff, and the dashed 5 m and 15 m lines
+    out.push(line(frame, 0, -width, 0, width));
+    for (const end of [-1, 1]) {
+      out.push(line(frame, end * 28, -width, end * 28, width));
+      out.push(line(frame, end * 10, -width, end * 10, width));
+    }
+    for (const offset of [5, 15]) {
+      for (const side of [-1, 1]) {
+        out.push(
+          ...dashed(
+            frame,
+            -length,
+            side * (width - offset),
+            length,
+            side * (width - offset),
+          ),
+        );
+      }
+    }
+  }
+
+  if (sport === "baseball" || sport === "softball") {
+    // Everything is measured from home plate, which sits in the corner the
+    // frame's axes point away from: the two foul lines run down the edges of
+    // the square, the fence is the quarter circle between them.
+    const side = Math.min(frame.length, frame.width);
+    const homeU = -length;
+    const homeV = -width;
+    out.push(line(frame, homeU, homeV, homeU + side, homeV));
+    out.push(line(frame, homeU, homeV, homeU, homeV + side));
+    out.push(...arc(frame, homeU, homeV, side, 0, Math.PI / 2, 18));
+    // the infield: the diamond, the mound and the grass line past the bases.
+    // Home-to-first and home-to-third are the foul lines already drawn, so the
+    // diamond only adds the two sides between the bases.
+    const base = side * BASE_FRACTION;
+    const mound = side * MOUND_FRACTION;
+    out.push(line(frame, homeU + base, homeV, homeU + base, homeV + base));
+    out.push(line(frame, homeU + base, homeV + base, homeU, homeV + base));
+    out.push(
+      ...circle(frame, homeU + mound, homeV + mound, side * MOUND_RADIUS, 12),
+    );
+    out.push(
+      ...arc(frame, homeU, homeV, side * INFIELD_FRACTION, 0, Math.PI / 2, 12),
+    );
   }
 
   return out;

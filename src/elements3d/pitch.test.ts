@@ -125,6 +125,22 @@ describe("pitch", () => {
     expect(paint).toHaveLength(0);
   });
 
+  it("raises rugby goal posts and leaves baseball to the paint", () => {
+    const rugby = pitch(ORIGIN_METERS, SCALE, pitchFeature("rugby_union"));
+    // the two H frames are meshes; the pitch itself is grass
+    expect(rugby.surface).toHaveLength(1);
+    expect(rugby.paint).toHaveLength(1);
+
+    const baseball = pitch(
+      ORIGIN_METERS,
+      SCALE,
+      pitchFeature("baseball", 120, 120),
+    );
+    // a diamond is grass with white lines: no surface of its own
+    expect(baseball.surface).toHaveLength(0);
+    expect(baseball.paint).toHaveLength(1);
+  });
+
   it("merges a whole tile's worth of parts, which is how the layer draws it", () => {
     for (const sport of [
       "soccer",
@@ -135,6 +151,7 @@ describe("pitch", () => {
       "futsal",
       "beachvolleyball",
       "multi",
+      "rugby_union",
     ]) {
       const { surface } = pitch(ORIGIN_METERS, SCALE, pitchFeature(sport));
       // a mismatch in the attribute sets would return null here, and the tile
@@ -145,7 +162,7 @@ describe("pitch", () => {
   });
 
   it("keeps a green that is not a pitch, or a sport it cannot draw, plain", () => {
-    for (const sport of [undefined, "rugby", "hockey", null]) {
+    for (const sport of [undefined, "hockey", "cricket", "handball", null]) {
       const { surface, paint } = pitch(
         ORIGIN_METERS,
         SCALE,

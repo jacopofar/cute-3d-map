@@ -23,7 +23,7 @@ describe("pitchSportOf", () => {
   it("takes the first sport it can paint", () => {
     expect(pitchSportOf("soccer")).toBe("soccer");
     expect(pitchSportOf("Soccer")).toBe("soccer");
-    expect(pitchSportOf("rugby;soccer")).toBe("soccer");
+    expect(pitchSportOf("hockey;soccer")).toBe("soccer");
     expect(pitchSportOf("tennis;basketball")).toBe("tennis");
   });
 
@@ -36,7 +36,8 @@ describe("pitchSportOf", () => {
   });
 
   it("ignores sports it has no layout for, and rubbish", () => {
-    expect(pitchSportOf("rugby")).toBeNull();
+    expect(pitchSportOf("hockey")).toBeNull();
+    expect(pitchSportOf("basketball;handball")).toBe("basketball");
     expect(pitchSportOf("")).toBeNull();
     expect(pitchSportOf(undefined)).toBeNull();
     expect(pitchSportOf(42)).toBeNull();
@@ -71,7 +72,7 @@ describe("pitchFrame", () => {
 
   it("refuses a footprint too small to be a pitch", () => {
     expect(pitchFrame(box(1, 1), "soccer")).toBeNull();
-    expect(pitchFrame(box(40, 30), "rugby")).toBeNull();
+    expect(pitchFrame(box(40, 30), "hockey")).toBeNull();
     expect(
       pitchFrame(
         [
@@ -81,6 +82,36 @@ describe("pitchFrame", () => {
         "soccer",
       ),
     ).toBeNull();
+  });
+
+  it("anchors a baseball field at the corner its fan leans toward", () => {
+    // a quarter fan with home plate at (0, 0), opening to +x and +y
+    const fan: [number, number][] = [
+      [0, 0],
+      [100, 0],
+    ];
+    for (let i = 1; i < 18; i++) {
+      const angle = (i / 18) * (Math.PI / 2);
+      fan.push([Math.cos(angle) * 100, Math.sin(angle) * 100]);
+    }
+    fan.push([0, 100], [0, 0]);
+    const frame = pitchFrame(fan, "baseball")!;
+    expect(frame).not.toBeNull();
+    const home = pitchPoint(frame, -frame.length / 2, -frame.width / 2);
+    expect(Math.hypot(home[0], home[1])).toBeLessThan(2);
+
+    // mirrored, the plate still lands on the corner the fan is anchored to
+    const mirrored = fan.map(([x, y]) => [-x, y] as [number, number]);
+    const other = pitchFrame(mirrored, "baseball")!;
+    const otherHome = pitchPoint(other, -other.length / 2, -other.width / 2);
+    expect(Math.hypot(otherHome[0], otherHome[1])).toBeLessThan(2);
+  });
+
+  it("keeps a whole sports centre from stretching the diamond", () => {
+    // a 400 m footprint would draw a 400 m fence; the cap holds it at a real
+    // baseball distance instead
+    const frame = pitchFrame(box(400, 400), "baseball")!;
+    expect(frame.scale).toBeLessThanOrEqual(1.3);
   });
 
   it("refuses an athletics area too small to be a track", () => {
@@ -152,6 +183,21 @@ describe("pitchPaint", () => {
   it("draws basketball's set for a multi-use court", () => {
     expect(pitchPaint("multi", frame("multi"))).toEqual(
       pitchPaint("basketball", frame("basketball")),
+    );
+  });
+
+  it("draws the rugby union set, with dashed 5 m and 15 m lines", () => {
+    // 4 sides + halfway + two 22 m + two 10 m lines, plus four 10-dash runs
+    expect(pitchPaint("rugby_union", frame("rugby_union")).length).toBe(
+      4 + 1 + 2 + 2 + 4 * 10,
+    );
+  });
+
+  it("draws the diamond, the mound and the fence for baseball", () => {
+    // two foul lines + an 18-segment fence + two infield sides + a 12-segment
+    // mound + a 12-segment infield arc
+    expect(pitchPaint("baseball", frame("baseball")).length).toBe(
+      2 + 18 + 2 + 12 + 12,
     );
   });
 

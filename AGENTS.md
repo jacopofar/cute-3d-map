@@ -156,12 +156,19 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   so tilegen only adds its `sport`, and the court is a frontend pass over that
   polygon. The layout is pure maths and unit-tested: fit the sport's real field
   (soccer 105x68, futsal and five-a-side 40x20, tennis 23.77x10.97, padel 20x10,
-  basketball and multi 28x15, volleyball 18x9, beach volleyball 16x8, athletics
-  176.91x92.52) inside the footprint's minimum-area rectangle, so a court mapped
-  at an angle still lines up, then draw the markings in that frame. `pitch.ts`
+  basketball and multi 28x15, volleyball 18x9, beach volleyball 16x8, rugby
+  100x70, baseball and softball a 100 m square fan, athletics 176.91x92.52)
+  inside the footprint's minimum-area rectangle, so a court mapped at an angle
+  still lines up, then draw the markings in that frame. Rugby adds the 22 m,
+  10 m and dashed 5 m/15 m lines; a baseball field is anchored at home plate,
+  which sits in the corner of the footprint the area's centroid leans away from
+  (`ANCHORED`), with the foul lines along the square's edges, the fence as the
+  quarter circle between them and the diamond and mound inside. `pitch.ts`
   adds a clay/rubber/sand surface for the sports that are not grass, the goals
-  (posts and crossbar, 3 m on a small pitch), the basketball hoops (pole, board,
-  rim) and the tennis, padel and volleyball nets. A `leisure=track` mapped for
+  (posts and crossbar, 3 m on a small pitch, rugby's 5.6 m H), the basketball
+  hoops (pole, board, rim) and the tennis, padel and volleyball nets. A baseball
+  or softball footprint is capped in scale (`MAX_SCALE`), since OSM sometimes
+  maps the whole sports centre rather than the field. A `leisure=track` mapped for
   athletics or running is the same pass: tilegen emits it as a green with
   `green: "track"` and the `athletics` sport, the tartan is the ring itself
   (infield hole and all, not a fitted rectangle) and the paint is nine
@@ -492,12 +499,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 - **pitch** — a `leisure=pitch` green area carrying a `sport` tag. It is a green
   like any other (same polygon, same clipping, same parks checkbox); the sport
   just tells the frontend which court to paint. Soccer, futsal/five-a-side,
-  tennis, padel, basketball, multi-use, volleyball, beach volleyball and
-  athletics have a layout; the markings and the goals, hoops and nets are their
-  own per-tile kinds (`pitch` and `pitch_paint`), so `#pitches-toggle` hides the
-  court and leaves the lawn. `sport` may be a ";" list, and the frontend paints
-  the first entry it has a layout for; rugby, hockey, baseball and the rest stay
-  flat green.
+  tennis, padel, basketball, multi-use, volleyball, beach volleyball, rugby
+  (union and league), baseball, softball and athletics have a layout; the
+  markings and the goals, hoops and nets are their own per-tile kinds (`pitch`
+  and `pitch_paint`), so `#pitches-toggle` hides the court and leaves the lawn.
+  `sport` may be a ";" list, and the frontend paints the first entry it has a
+  layout for; hockey, handball, cricket and the rest stay flat green.
 - **track** — a `leisure=track` mapped for athletics or running, emitted as a
   green with `green: "track"` and the `athletics` sport. Its polygon is the
   tartan ring (the infield is a hole), so the pitch pass fills the ring rather
