@@ -311,9 +311,15 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `{ "color", "length" }`, and the frontend scales the fleet body to the loop's
   `vehicle_length`. Model files are copied into the tile's `{y}_assets/` folder
   and loaded by the frontend.
-- `tilegen/features.py` — pure OSM-tag predicates and tile feature builders
-  (`to_building`, `to_water`, `to_park_path`, ...). No parquet I/O; the loaders
-  and pipeline import it.
+- `tilegen/features/` — pure OSM-tag predicates and tile feature builders
+  (`to_building`, `to_water`, `to_park_path`, ...), one module per kind of thing
+  it produces: `common` (parsing and geometry helpers), `buildings`,
+  `vegetation`, `water`, `green` (parks, park paths, cemeteries), `roads`
+  (crossings, signals, paint), `bridges`, `rail`, `street` (benches, furniture,
+  terraces), `amenities` (construction, playgrounds, monuments, transit stops,
+  fountains), `barriers`, `power`, `aeroways`. `__init__` re-exports the whole
+  surface, so `from features import ...` does not care which module a builder
+  lives in. No parquet I/O; the loaders and pipeline import it.
 - `tilegen/loaders.py` — parquet/DuckDB loaders and per-tile authoring helpers
   (parking rows, sidewalks, rooftop gear, road data).
 - `tilegen/pipeline.py` — tile assembly and serialization; `tile_to_geojson`,
@@ -344,9 +350,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   with `BUS_GTFS_CONFIG`/`TRAM_GTFS_CONFIG`, and attaches line/route/headsign
   metadata for the moving-vehicle popup. The feed is opt-in via `--gtfs`; the
   default OSM rail logic remains when it is absent.
-- `tilegen/features.py` walls/gates — `WALL_BARRIERS`, `GATE_BARRIERS`,
-  `to_wall`, `to_gate`; gate nodes get their bearing from the nearest wall way
-  (`loaders.load_gate_bearings`). Walls clip like fences.
+- `tilegen/features/barriers.py` walls/gates — `WALL_BARRIERS`,
+  `GATE_BARRIERS`, `to_wall`, `to_gate`; gate nodes get their bearing from the
+  nearest wall way (`loaders.load_gate_bearings`). Walls clip like fences.
 - `tilegen/sidewalks.py` — authors sidewalk centre lines from car roads
   (default both sides; explicit `sidewalk:left/right`, `sidewalk` and
   `sidewalk=separate` honoured) and feeds mapped `footway=sidewalk` ways into
