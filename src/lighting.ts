@@ -373,6 +373,17 @@ export class LightingRig {
     }, 230);
   }
 
+  // Whether the sun casts shadows and whether its map has been baked. On a real
+  // GPU the second one must be true: an unbaked map makes every
+  // shadow-sampling draw fail with GL_INVALID_OPERATION, which the headless
+  // SwiftShader suite cannot see because the pass is off there.
+  readShadowState(): { castsShadow: boolean; baked: boolean } {
+    return {
+      castsShadow: this.sun.castShadow,
+      baked: this.sun.shadow.map !== null,
+    };
+  }
+
   // read-only day/night state for the e2e (like stats()): the current hour, the
   // 0..1 night factor and the key-light intensity
   readState(): { hour: number; night: number; sunIntensity: number } {

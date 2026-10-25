@@ -1063,6 +1063,11 @@ class CoolMap implements MapDebug {
     return this.light.readState();
   }
 
+  // read-only shadow state for the GPU health check
+  shadowState(): { castsShadow: boolean; baked: boolean } {
+    return this.light.readShadowState();
+  }
+
   // read-only state for the e2e (like lightingState() and stats())
   driveState(): {
     active: boolean;

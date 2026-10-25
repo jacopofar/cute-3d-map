@@ -12,7 +12,9 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./perf",
-  testMatch: "**/interactive.spec.ts",
+  // the health check runs first: it is the only place that can see the
+  // shadow path, which the SwiftShader suite never exercises
+  testMatch: ["**/gpu_health.spec.ts", "**/interactive.spec.ts"],
   fullyParallel: false,
   workers: 1,
   reporter: "list",

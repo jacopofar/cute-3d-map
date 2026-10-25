@@ -60,6 +60,8 @@ export interface MapDebug {
   collisionAt(lon: number, lat: number, heading?: number): boolean;
   /** the mesh kind under the cursor, or null when nothing is hovered */
   hoverState(): { kind: string | null };
+  /** whether the sun casts shadows, and whether it has baked its map */
+  shadowState(): { castsShadow: boolean; baked: boolean };
   /** open a building's popup without clicking it */
   selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void;
 }
