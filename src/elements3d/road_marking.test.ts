@@ -103,3 +103,50 @@ describe("roadMarking", () => {
     expect(roadMarking(ORIGIN_METERS, SCALE, feature(base))).toEqual([]);
   });
 });
+
+describe("turn-lane paint", () => {
+  // bearing 0 is north: "before the node" is negative y in model space
+  const approachNorth = (lanes: number, oneway: string) =>
+    roadMarking(
+      ORIGIN_METERS,
+      SCALE,
+      feature({
+        cmtype: "road_marking",
+        kind: "signal",
+        directions: [0],
+        width: 3.5 * lanes,
+        lanes,
+        oneway,
+        turn_lanes: undefined,
+      }),
+    )[0];
+
+  it("paints the pocket from the stop line back along the approach", () => {
+    const geometry = approachNorth(2, "yes");
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox!;
+    // 3.2 m to the stop line, then the 22 m pocket, plus the outline
+    expect(box.min.y).toBeCloseTo(-(3.2 + 22 + 0.06), 0);
+    // and the paint stops at the stop line, not at the node
+    expect(box.max.y).toBeCloseTo(-3.2 + 0.31, 0);
+  });
+
+  it("puts the separators on the lane boundaries", () => {
+    // four lanes one way: three boundaries, at -1, 0 and +1 lane widths from
+    // the centre
+    const single = approachNorth(1, "yes");
+    single.computeBoundingBox();
+    const narrow = single.boundingBox!;
+    const four = approachNorth(4, "yes");
+    four.computeBoundingBox();
+    const wide = four.boundingBox!;
+
+    // one lane has only the stop line, so its span is the line's thickness
+    expect(narrow.max.x - narrow.min.x).toBeCloseTo(3.5 + 2 * 0.06, 0);
+    // ... while four lanes paint out to the outer boundaries
+    expect(wide.max.x - wide.min.x).toBeCloseTo(
+      3.5 * 4 + 2 * 0.06 + 2 * 0.08,
+      0,
+    );
+  });
+});

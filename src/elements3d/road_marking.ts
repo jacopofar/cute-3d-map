@@ -18,6 +18,11 @@ const OUTLINE_LIFT = 0.041;
 const OUTLINE = 0.06;
 const STOP_OFFSET = 3.2;
 const ARROW_OFFSET = 7.5;
+// how far back from the stop line the lane boundaries are painted solid, and how
+// wide that paint is. This is the turn-lane pocket: the arrows sit inside it and
+// the solid edges are what say "you are committed to this lane now".
+const TURN_LANE_LENGTH = 22;
+const LANE_LINE_WIDTH = 0.16;
 const WHITE = new THREE.Color("#ffffff");
 const OUTLINE_COLOR = new THREE.Color("#4c4c48");
 
@@ -265,6 +270,38 @@ export function roadMarking(
         lineStart,
         lineEnd,
         0.5,
+        WHITE,
+        LIFT,
+      );
+    }
+
+    // Turn-lane paint: the approach's lane boundaries go solid, from the stop
+    // line back the length of the pocket. A through lane and a turning lane are
+    // otherwise drawn identically on the road, so this plus the arrow is what
+    // separates them.
+    const separatorCenter = front(STOP_OFFSET + TURN_LANE_LENGTH / 2);
+    for (let k = 1; k < approachLanes; k++) {
+      const offset =
+        (oneWay ? 0 : width / 4) + (k - approachLanes / 2) * laneWidth;
+      stopLine(
+        buffers,
+        separatorCenter,
+        [fx, fy],
+        [rx, ry],
+        offset - LANE_LINE_WIDTH / 2 - OUTLINE,
+        offset + LANE_LINE_WIDTH / 2 + OUTLINE,
+        TURN_LANE_LENGTH + 2 * OUTLINE,
+        OUTLINE_COLOR,
+        OUTLINE_LIFT,
+      );
+      stopLine(
+        buffers,
+        separatorCenter,
+        [fx, fy],
+        [rx, ry],
+        offset - LANE_LINE_WIDTH / 2,
+        offset + LANE_LINE_WIDTH / 2,
+        TURN_LANE_LENGTH,
         WHITE,
         LIFT,
       );

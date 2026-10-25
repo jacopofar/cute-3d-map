@@ -135,11 +135,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   bars along the road, repeated across it, using the tile's `bearing` and
   `width`; merged per tile (kind `crosswalk`), clickable. The plain `crossing`
   point stays data-only for the cosmetic traffic slowdown.
-- `src/elements3d/road_marking.ts` — stop lines and lane arrows for
-  `highway=stop`/`give_way`/`traffic_signals` nodes, using the tile's approach
-  directions, width, lanes and `turn:lanes`; merged per tile (kind
-  `road_marking`), no popup. A two-way road gets the line on the right half,
-  a one-way road the full width; arrows appear only on multi-lane approaches.
+- `src/elements3d/road_marking.ts` — stop lines, turn-lane pockets and lane
+  arrows for `highway=stop`/`give_way`/`traffic_signals` nodes, using the tile's
+  approach directions, width, lanes and `turn:lanes`; merged per tile (kind
+  `road_marking`), no popup. A two-way road gets the line on the right half, a
+  one-way road the full width; the approach's lane boundaries are painted solid
+  for the 22 m pocket behind the stop line, and arrows appear only on
+  multi-lane approaches.
 - `src/elements3d/lane.ts` / `lane_layout.ts` — the lane paint: the layout is
   pure maths (which dividers a carriageway gets, and how a dash pattern runs
   along a polyline without restarting at every corner), unit-tested like the
@@ -472,6 +474,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   road, the full width on a one-way one.
 - **lane arrow** — one white arrow per multi-lane approach, turned by
   `turn:lanes`; a single-lane approach gets no arrow.
+- **turn-lane pocket** — the 22 m of lane boundary painted solid behind the stop
+  line, which is what makes an arrowed lane read as a committed turning lane
+  rather than a through one. Drawn with the stop line, from the same data (no
+  tile field of its own).
 - **rooftop accessory** — a mapped water tower, chimney, antenna/mast or solar
   generator, lifted to the roof of the containing building. A solar polygon is
   drawn as a flat panel surface over its own footprint; solar buildings keep a
