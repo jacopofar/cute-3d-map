@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 
 /*
  * Rail platforms: a low concrete slab with a white edge line. OSM mostly maps
@@ -79,8 +79,7 @@ function edgeGeometry(rings: Point[][]): THREE.BufferGeometry | null {
       const ay3 = ay - ny;
       const bx3 = bx - nx;
       const by3 = by - ny;
-      const cross =
-        (bx3 - ax3) * (by2 - ay3) - (by3 - ay3) * (bx2 - ax3);
+      const cross = (bx3 - ax3) * (by2 - ay3) - (by3 - ay3) * (bx2 - ax3);
       if (cross < 0) {
         push(ax3, ay3);
         push(bx2, by2);

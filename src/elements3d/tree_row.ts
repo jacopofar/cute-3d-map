@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 import * as turf from "@turf/turf";
 
-import {tree} from "./tree";
+import { tree } from "./tree";
 
 export function tree_row(
   originMeters: [number, number],

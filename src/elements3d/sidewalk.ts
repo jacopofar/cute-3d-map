@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../geojson_data";
+import { toModelCoords } from "../projection";
 
 /*
  * Sidewalk slabs authored as centre lines by tilegen. Each segment gets a flat
@@ -19,8 +19,6 @@ const KERB = new THREE.Color("#8b877f");
 export const sidewalkMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
 });
-
-type Point = [number, number];
 
 function polygonGeometry(
   rings: Geojson.Position[][],

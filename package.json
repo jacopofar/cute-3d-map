@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "prettify": "npx prettier src/**.ts --write",
+    "prettify": "npx prettier \"src/**/*.ts\" --write",
     "test:types": "tsc --noEmit",
     "test:unit:fast": "vitest run",
     "test:check": "npm run test:types && npm run test:unit:fast",

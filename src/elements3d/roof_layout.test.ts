@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_RISE,
   MIN_RISE,
-  ROOF_KINDS,
   frameToWorld,
   ridgeAxis,
   ridgeExtent,
