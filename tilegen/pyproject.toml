@@ -41,6 +41,7 @@ source = [
     "parking",
     "sidewalks",
     "tile_inspector",
+    "tiles",
     "traffic",
 ]
 

@@ -7,6 +7,8 @@ import json
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import _flatten, parse_length
 
 # barriers drawn as a line the frontend can build a fence band along. `fence` is
@@ -40,7 +42,7 @@ def fence_lines(geometry, tile_box, min_length: float = MIN_FENCE_LENGTH):
     return shapely.MultiLineString(parts)
 
 
-def to_wall(feature_id, tags, s, tile_box) -> dict | None:
+def to_wall(feature_id, tags, s, tile_box) -> TileFeature | None:
     """Build a low wall feature clipped to the tile."""
     barrier = tags.get("barrier")
     if barrier not in WALL_BARRIERS and not tags.get("wall"):
@@ -64,7 +66,9 @@ def to_wall(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
-def to_gate(feature_id, tags, s, gate_bearings: dict[int, float] | None) -> dict | None:
+def to_gate(
+    feature_id, tags, s, gate_bearings: dict[int, float] | None
+) -> TileFeature | None:
     """Build a gate as two posts and a leaf."""
     if s.geom_type != "Point" or tags.get("barrier") not in GATE_BARRIERS:
         return None
@@ -83,7 +87,7 @@ def to_gate(feature_id, tags, s, gate_bearings: dict[int, float] | None) -> dict
     }
 
 
-def to_fence(feature_id, tags, s, tile_box) -> dict | None:
+def to_fence(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A barrier as a line the frontend turns into a fence band: a
     `barrier=fence` way (or guard rail / railing), or the outline of one drawn
     as a closed area.

@@ -7,6 +7,8 @@ import json
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import _flatten, area_square_meters, parse_length
 
 RAIL_KINDS = frozenset({"rail", "tram"})
@@ -30,7 +32,7 @@ def is_rail_platform(tags) -> bool:
     )
 
 
-def to_platform(feature_id, tags, s, tile_box) -> dict | None:
+def to_platform(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A rail platform as a clipped area. OSM often maps the platform as an
     edge line rather than a closed polygon, so buffer those to a 4 m ribbon."""
     if tags.get("bus") == "yes" and not (
@@ -56,7 +58,7 @@ def to_platform(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
-def to_rail(feature_id, tags, s, tile_box) -> dict | None:
+def to_rail(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A rail or tram way clipped to the tile. Underground, covered and
     bridge-deck tracks are skipped: the first are invisible and the last would
     otherwise be painted on the ground under the deck."""

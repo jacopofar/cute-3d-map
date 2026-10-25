@@ -7,6 +7,8 @@ import json
 
 import shapely
 
+from tiles import TileFeature
+
 from .buildings import vertical_level
 from .common import _flatten
 
@@ -41,7 +43,7 @@ def is_water(tags) -> bool:
     return water_kind(tags) is not None or tags.get("waterway") in WATERWAY_KINDS
 
 
-def to_water(feature_id, tags, s, tile_box) -> dict | None:
+def to_water(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A water body as a render feature: an area (polygon), or a waterway line
     the frontend buffers into a ribbon.
 

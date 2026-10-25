@@ -13,12 +13,14 @@ from math import atan2, cos, degrees, radians
 import shapely
 from shapely.geometry import LineString, Point
 
+from tiles import TileFeature
+
 from .common import parse_length
 
 logger = logging.getLogger(__name__)
 
 
-def to_stop_point(feature_id, tags, s, cmtype: str) -> dict | None:
+def to_stop_point(feature_id, tags, s, cmtype: str) -> TileFeature | None:
     """A signal or crossing as a Point feature. Data-only for the frontend (the
     vehicles that yield to it are gated from the precomputed traffic block); it
     exists so the tiles and the debug GeoJSON can show where the yields are."""
@@ -33,12 +35,12 @@ def to_stop_point(feature_id, tags, s, cmtype: str) -> dict | None:
     }
 
 
-def to_traffic_signal(feature_id, tags, s) -> dict | None:
+def to_traffic_signal(feature_id, tags, s) -> TileFeature | None:
     """Build the data-only signal point."""
     return to_stop_point(feature_id, tags, s, "traffic_signal")
 
 
-def to_crossing(feature_id, tags, s) -> dict | None:
+def to_crossing(feature_id, tags, s) -> TileFeature | None:
     """Build the data-only crossing point."""
     return to_stop_point(feature_id, tags, s, "crossing")
 
@@ -174,7 +176,7 @@ def approach_bearings(tags, road: RoadData) -> list[float]:
 
 def to_road_marking(
     feature_id, tags, s, road_data: dict[int, RoadData] | None
-) -> dict | None:
+) -> TileFeature | None:
     """Stop lines and lane arrows for a stop, give-way or signal node."""
     if s.geom_type != "Point":
         return None
@@ -207,7 +209,7 @@ def to_road_marking(
 
 def to_crosswalk(
     feature_id, tags, s, road_data: dict[int, RoadData] | None
-) -> dict | None:
+) -> TileFeature | None:
     """A marked crossing as its own Point, with the road bearing and width.
     The plain `crossing` Point stays data-only for the traffic slowdown."""
     if s.geom_type != "Point" or not crossing_is_marked(tags):

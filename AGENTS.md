@@ -320,6 +320,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   fountains), `barriers`, `power`, `aeroways`. `__init__` re-exports the whole
   surface, so `from features import ...` does not care which module a builder
   lives in. No parquet I/O; the loaders and pipeline import it.
+- `tilegen/tiles.py` — the tile contract: `TileFeature` (what a builder returns)
+  and one `TypedDict` per `cmtype` for the properties inside it, plus
+  `TileDocument`. A builder drops the keys whose value is `None`, so every
+  property is optional except `cmtype`; `tests/test_tiles.py` checks the emitted
+  keys against it, which is the tilegen half of the contract the frontend
+  re-states in TypeScript.
 - `tilegen/loaders.py` — parquet/DuckDB loaders and per-tile authoring helpers
   (parking rows, sidewalks, rooftop gear, road data).
 - `tilegen/pipeline.py` — tile assembly and serialization; `tile_to_geojson`,

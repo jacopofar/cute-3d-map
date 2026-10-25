@@ -8,6 +8,8 @@ import math
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import _flatten, area_square_meters
 
 
@@ -16,7 +18,7 @@ def is_construction(tags) -> bool:
     return tags.get("landuse") == "construction"
 
 
-def to_construction(feature_id, tags, s, tile_box) -> dict | None:
+def to_construction(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A construction site clipped to the tile like a park. The tile that holds
     the site centroid also carries the crane flag and the full site area, so a
     site spanning several tiles builds its cranes only once."""
@@ -47,7 +49,7 @@ def is_playground(tags) -> bool:
     return tags.get("leisure") == "playground"
 
 
-def to_playground(feature_id, tags, s) -> dict | None:
+def to_playground(feature_id, tags, s) -> TileFeature | None:
     """A playground as a point with a radius-like size. The equipment is
     procedural; a mapped polygon gives a sensible spread, a node a default
     ten-meter playground."""
@@ -93,7 +95,7 @@ def is_monument(tags) -> bool:
     return monument_kind(tags) is not None
 
 
-def to_monument(feature_id, tags, s) -> dict | None:
+def to_monument(feature_id, tags, s) -> TileFeature | None:
     """A monument/memorial as a point; the frontend picks a pedestal/statue/
     obelisk/plaque from the kind and the `memorial` sub-tag."""
     kind = monument_kind(tags)
@@ -135,7 +137,7 @@ def transit_kind(tags) -> str | None:
     return None
 
 
-def to_transit_stop(feature_id, tags, s) -> dict | None:
+def to_transit_stop(feature_id, tags, s) -> TileFeature | None:
     """A metro entrance, tram stop or bus stop as a point. Shelters are a
     property (both the covered and the implied ones); the frontend draws the
     pole/sign for all stops and adds the shelter when it is set."""
@@ -167,7 +169,7 @@ def to_transit_stop(feature_id, tags, s) -> dict | None:
     }
 
 
-def to_fountain(feature_id, tags, s) -> dict | None:
+def to_fountain(feature_id, tags, s) -> TileFeature | None:
     """A fountain as a point render feature. A mapped area collapses to its
     centroid and its equivalent diameter (clamped, so a whole square mapped as
     one fountain does not become a lake); a node keeps a small default size."""

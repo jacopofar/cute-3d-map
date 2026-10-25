@@ -7,6 +7,8 @@ import json
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import parse_length
 
 POWER_LINE_KINDS = frozenset({"line", "minor_line"})
@@ -37,7 +39,7 @@ def power_wire_height(tags) -> float:
     return 16.0
 
 
-def to_power_tower(feature_id, tags, s) -> dict | None:
+def to_power_tower(feature_id, tags, s) -> TileFeature | None:
     """Build a power-tower point feature."""
     if s.geom_type != "Point":
         return None
@@ -55,12 +57,12 @@ def to_power_tower(feature_id, tags, s) -> dict | None:
     }
 
 
-def to_power_line(feature_id, tags, s, tile_box) -> list[dict]:
+def to_power_line(feature_id, tags, s, tile_box) -> list[TileFeature]:
     """Clip one overhead line to the tile; the frontend draws the catenary."""
     if not is_power_line(tags) or s.geom_type not in ("LineString", "MultiLineString"):
         return []
     clipped = s.intersection(tile_box)
-    features: list[dict] = []
+    features: list[TileFeature] = []
     for part in shapely.get_parts(clipped):
         if part.geom_type != "LineString" or part.length < 1e-5:
             continue

@@ -9,6 +9,8 @@ import zlib
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import parse_length
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,7 @@ def tree_type_size(tags, seed: int) -> tuple[str, float]:
     return tree_type, round(size, 2)
 
 
-def to_tree(feature_id, tags, s) -> dict | None:
+def to_tree(feature_id, tags, s) -> TileFeature | None:
     """Build a point tree feature."""
     if s.geom_type != "Point":
         logger.warning(f"non-point tree?? {feature_id}")
@@ -69,7 +71,7 @@ def to_tree(feature_id, tags, s) -> dict | None:
     }
 
 
-def to_tree_row(feature_id, tags, s) -> dict | None:
+def to_tree_row(feature_id, tags, s) -> TileFeature | None:
     """Build a line tree-row feature."""
     if s.geom_type != "LineString":
         logger.warning(f"non-line tree_row?? {feature_id}")

@@ -9,6 +9,8 @@ import logging
 import shapely
 from shapely.geometry import Point
 
+from tiles import TileFeature
+
 from .common import COMPASS, line_bearing
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ def bench_direction(tags) -> float | None:
         return None
 
 
-def to_bench(feature_id, tags, s) -> dict | None:
+def to_bench(feature_id, tags, s) -> TileFeature | None:
     """A bench as a point render feature. A bench mapped as a way collapses to
     the midpoint of the line, with the facing taken along it; benches come in
     thousands, so the properties stay minimal (the frontend derives everything
@@ -119,7 +121,7 @@ def terrace_place(point, road, building_tree, buildings, offset_max: float = 8.0
     return nearest
 
 
-def to_terrace(feature_id, tags, s, position=None) -> dict | None:
+def to_terrace(feature_id, tags, s, position=None) -> TileFeature | None:
     """An outdoor terrace as a point. The umbrellas/tables are procedural; the
     amenity value only picks the popup label and the OSM link. `position` is the
     precomputed sidewalk point (see terrace_positions_from_parquet)."""
@@ -148,7 +150,7 @@ def to_terrace(feature_id, tags, s, position=None) -> dict | None:
     }
 
 
-def to_furniture(feature_id, tags, s) -> dict | None:
+def to_furniture(feature_id, tags, s) -> TileFeature | None:
     """A street-furniture point. Areas (bike parking) collapse to their
     centroid; a line (a rack mapped as a way) keeps its bearing so the frontend
     can line the rack up with the kerb."""

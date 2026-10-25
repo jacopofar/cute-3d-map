@@ -9,6 +9,8 @@ import math
 import shapely
 from shapely.geometry import Point
 
+from tiles import TileFeature
+
 from .buildings import vertical_level
 from .common import _flatten, transport_class
 
@@ -64,7 +66,7 @@ PORTAL_CLASSES = frozenset(
 )
 
 
-def to_bridge(feature_id, tags, s, tile_box) -> dict | None:
+def to_bridge(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A bridge as a render feature: a way's line (the deck the frontend raises
     into a slab), or a `man_made=bridge` / `building=bridge` polygon (the deck
     footprint, drawn as a slab).
@@ -130,7 +132,7 @@ def tunnel_portals(s, tile_box) -> list[tuple[Point, float]]:
     return ends
 
 
-def to_tunnel(feature_id, tags, s, tile_box) -> list[dict]:
+def to_tunnel(feature_id, tags, s, tile_box) -> list[TileFeature]:
     """A tunnel's portal(s): a Point per end of the way that falls in the tile,
     carrying the tunnel's direction. The underground part is deliberately not
     drawn — a tunnel is invisible, and the honest, visible thing is the opening

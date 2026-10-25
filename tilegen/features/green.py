@@ -7,6 +7,8 @@ import json
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import _flatten, area_square_meters, parse_length
 
 # green areas: parks, woods, lawns and pitches. The frontend draws them with a
@@ -92,7 +94,7 @@ def park_path_kind(tags) -> str:
     return "walk"
 
 
-def to_park_path(feature_id, tags, s, green_union, tile_box) -> dict | None:
+def to_park_path(feature_id, tags, s, green_union, tile_box) -> TileFeature | None:
     """The part of a foot/cycle path that falls inside green space and the tile.
 
     Clipping to the union of the tile's green polygons means a long riverside
@@ -129,7 +131,7 @@ def is_cemetery(tags) -> bool:
     return tags.get("landuse") == "cemetery" or tags.get("amenity") == "grave_yard"
 
 
-def to_cemetery(feature_id, tags, s, tile_box) -> dict | None:
+def to_cemetery(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A cemetery area, clipped to the tile like a park. The individual graves
     are not mapped in enough places to render, so the frontend lays out rows of
     simple tombstones inside this polygon."""
@@ -150,7 +152,7 @@ def to_cemetery(feature_id, tags, s, tile_box) -> dict | None:
     }
 
 
-def to_green(feature_id, tags, s, tile_box) -> dict | None:
+def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A green area as a render feature, clipped to the tile like water (a park
     spans many tiles). The `green` sub-kind selects the frontend shader style."""
     kind = green_kind(tags)

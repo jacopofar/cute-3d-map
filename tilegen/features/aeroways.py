@@ -8,6 +8,8 @@ import logging
 
 import shapely
 
+from tiles import TileFeature
+
 from .common import parse_length
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ AEROWAY_AREA_KINDS = frozenset({"apron", "helipad"})
 DEFAULT_AEROWAY_WIDTH = {"runway": 45.0, "taxiway": 15.0}
 
 
-def to_aeroway(feature_id, tags, s) -> dict | None:
+def to_aeroway(feature_id, tags, s) -> TileFeature | None:
     """An airport surface as a render feature: a runway/taxiway line (the
     frontend buffers it with the width below) or an apron/helipad area.
 

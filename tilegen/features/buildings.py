@@ -10,6 +10,7 @@ import shapely
 
 from city import BuildingOverride
 from impute import impute
+from tiles import TileFeature
 
 from .common import parse_length, parse_level
 
@@ -75,7 +76,7 @@ def to_building(
     distributions=None,
     solar_buildings=None,
     override: BuildingOverride | None = None,
-) -> dict | None:
+) -> TileFeature | None:
     """Build a building or building-part feature with imputed tags."""
     if s.geom_type == "Point":
         logger.warning(f"Point building?? {feature_id}")
