@@ -26,8 +26,9 @@ decorative volumetric cloud layer.
 ## Build, test, verify
 
 - `npm run dev` — Vite dev server (needs `VITE_MAPTILER_KEY` in `.env`).
-- `npm run test:check` — type check plus the unit suite without coverage, the
-  default per-change loop (~5 s).
+- `npm run test:check` — the default per-change loop (~6 s): the app type check
+  (`test:types`), the Playwright specs' type check (`test:types:e2e`, see
+  `tsconfig.e2e.json`) and the unit suite without coverage.
 - `npm run build` — type check plus production build.
 - `npm run test:unit` — vitest for the pure modules, with coverage (~4 s).
 - `npm run test:e2e:changed` — Playwright specs selected from the diff against
@@ -48,26 +49,59 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 ## Architecture
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
-  `CustomLayerInterface`. Loads/unloads tiles within a 3-tile margin of the
-  center (`loadUnloadCoord`), debounced 150 ms. The map carries its view in a
-  `#map=zoom/lat/lon` permalink (`hash: "map"`, so MapLibre reads and writes it)
-  and the projection origin is seeded from wherever the map opens. The scene
-  lights, sun shadows (a 2 km cascade following the view, received only by the
-  ground catcher), sky/fog, the dawn/dusk grade and the night-light visibility
-  are driven from `applyLighting()`.
+  `CustomLayerInterface`, then wires the modules below together. It keeps the
+  map's view, hands the layers their tile unions and exposes the read-only
+  probes the e2e uses (`stats`, `collisionAt`, `driveState`, `lightingState`,
+  `selectBuilding`). The per-tile layers whose checkbox is a plain visibility
+  switch are rows in `layerSwitches` (mesh kinds, when to draw, anything else
+  that follows the same switch). Every loaded tile is one `TileRecord` in the
+  `tiles` map: the merged meshes in the scene plus everything the pickers, the
+  drive collision and the moving layers read back, so a layer is one field, not
+  a map of its own. The map carries its view in a `#map=zoom/lat/lon` permalink
+  (`hash: "map"`, so MapLibre reads and writes it) and the projection origin is
+  seeded from wherever the map opens. The view is debounced 150 ms before the
+  tile pass runs.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
   kind per tile (vertex colors, so a tile is a handful of draw calls).
+- `src/ui/html.ts` — `escapeHtml` and the OSM link the click popups are built
+  from. `src/ui/checkboxes.ts` — the layer checkboxes' state, remembered in one
+  cookie keyed by the label id, with `restoreCheckboxStates` /
+  `saveCheckboxStates` / `savedCheckbox` as the whole surface.
+- `src/ui/controls.ts` — the layer checkboxes, the menu they live in and the
+  imputed-colors help popover. `wireControls` takes one row per switch (the
+  layer rows are generated from `layerSwitches`, so a layer's checkbox id, mesh
+  kinds and flag stay in one place), seeds each flag from the restored checkbox
+  and applies on change.
+- `src/debug.ts` — `MapDebug`, the surface the e2e specs and the benchmark read
+  (`map`, `scene`, `camera`, `tiles`, `tileCenter`, `originTransform`, `stats`,
+  `driveState`, `lightingState`, `collisionAt`, `selectBuilding`). `CoolMap
+  implements MapDebug` and the specs cast `__coolMap` to it, so moving any of
+  them breaks `npm run test:check` instead of the browser run. Everything else
+  on the map is private. `tsconfig.e2e.json` is the specs' program (it needs the
+  node types for the GLB and benchmark files, which the app does not).
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
-  squeeze). It lives on its own so the geometry builders, the pickers and their
-  unit tests do not import `geojson_data` just to convert a coordinate.
+  squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).
+  It lives on its own so the geometry builders, the pickers and their unit
+  tests do not import `geojson_data` just to convert a coordinate.
+- `src/tile_loader.ts` — the tile window: which tiles to fetch and keep (a
+  3-tile margin, `RENDER_TILE_MARGIN`), the store itself, disposal, the in-flight
+  set and the origin generation. It reports that tiles came, went or were
+  dropped (`onTileAdded`, `onTilesChanged`, `onReload`) and the map re-feeds its
+  layers, which is what keeps a tile and its data appearing and disappearing
+  together. The margin and the origin drift check (2 tiles) live here.
+- `src/lighting.ts` — the day/night rig: the sun, fill and hemisphere lights,
+  the ground and the shadow catcher, and everything that follows the sun
+  (exposure, the window/glass/water uniforms, the fog, the MapLibre sky, the
+  `#grade` overlay, the basemap style swap and the shadow debounce). The solar
+  model stays in `daynight.ts`; this only pushes it onto a scene.
 - `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,
   since OSM rings come in both windings). `CoolMap` builds it only above zoom 17
-  and only for the tiles around the center (`loadedDetail`), and drops it when
-  zoomed out or when the origin resets.
+  and only for the tiles around the center (`TileRecord.detail`), and drops it
+  when zoomed out or when the origin resets.
 - `src/elements3d/water.ts` — lakes, ponds and reservoirs as flat polygons and
   rivers/canals/streams as flat ribbons at ground level, drawn by one animated
   `ShaderMaterial` (procedural ripples, `uTime` advanced each frame). A negative
@@ -185,6 +219,15 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   sinks; a footprint too complex to roof keeps its flat cap and the cross stands
   just above it. The cross is its own per-tile kind (`church`), so its checkbox
   hides just the ornament.
+- `src/selection.ts` — the click selection: which mesh a ray hit, the ground ring
+  that marks it and the popup that describes it. One `Selection` owns the ring
+  and the popup; the point-feature pickers (`waterAt`, `furnitureAt`, ...) are a
+  table keyed by mesh kind, so a new layer is a row, and `pickStatic` resolves a
+  hit to a point feature, a fence or wall, a generic OSM feature, a solar panel
+  or the building below it. It reaches the map through a four-field
+  `SelectionHost` (`tiles`, `map`, `scene`, `center`, `rooftopsVisible`).
+  `TileRecord` (in `src/tile_record.ts`) is one loaded tile: its meshes and the
+  tile data the pickers read back.
 - `src/traffic.ts` — `TrafficRenderer`: stateless renderer of the precomputed
   routes; one instance per fleet (`CAR_TRAFFIC`, `TRAIN_TRAFFIC`, `BUS_TRAFFIC`,
   `TRAM_TRAFFIC`). It places a slice of vehicles per update at ~30 Hz (spread
@@ -208,6 +251,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   culls separately. `#parked-cars-toggle` is a plain visibility switch. Uses a
   lit material (unlike the moving fleet's unlit basic one), so parked cars
   darken at night.
+- `src/drive_mode.ts` — car mode's shell: the keys, the touch pad, the chase
+  camera, the HUD and the map handlers it borrows while driving. The mode owns
+  its state machine and its DOM nodes; the physics is `driving.ts`, the mesh
+  `driving_car.ts` and the obstacle tests `collision.ts`. It reads the
+  obstacles from the tile store through `DriveHost`, and asks the map to catch
+  its tile window up between frames (the per-frame camera jump keeps the move
+  debounce from ever firing).
 - `src/driving.ts` / `src/driving_car.ts` / `src/collision.ts` — car mode, the
   **Drive** button's free-driving car. `driving.ts` is the pure arcade model
   (accelerate/brake, a speed-scaled bicycle turn, lon/lat integration in
@@ -242,6 +292,9 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   above `NIGHT_LIGHT_MIN_ZOOM` (15), and only for the 3x3 centre tiles. The
   `#lampposts-toggle` checkbox hides the lamps/pools/posts only; signal heads
   stay.
+- `src/perf.ts` — frame timing (`PerfReporter`, a two-second fps window), the
+  fire-and-forget perf POST (`VITE_PERF_ENDPOINT`, a no-op when unset) and
+  `sceneStats`: the read-only counters the benchmark and the e2e read back.
 - `src/daynight.ts` — the approximate solar model (Milan, local mean solar
   time): sun altitude/azimuth, key/fill/hemisphere colors, sky and fog colors,
   dawn/dusk warmth and the screen grade. Pure and unit-tested.
@@ -318,7 +371,7 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
 ## Domain lexicon
 
 - **tile** — a `public/tiles/{x}/{y}.json` file at `TILE_ZOOM` (15).
-- **tile key** — the `x_y` string used in `loadedTiles` / `pendingTiles`.
+- **tile key** — the `x_y` string used in `tiles` / `pendingTiles`.
 - **origin** — the projection origin (`tileCenter`) in EPSG:3857; model
   coordinates are meters relative to it, scaled by `cos(latitude)`.
 - **origin reset** — recentering the origin when the view drifts more than 2

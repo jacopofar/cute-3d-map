@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { stat } from "node:fs/promises";
+import type { MapDebug } from "../src/debug";
 
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
@@ -20,17 +21,20 @@ test("a building popup downloads a GLB", async ({ page }) => {
       () =>
         page.evaluate(
           () =>
-            Object.values(
-              (window as unknown as { __coolMap: any }).__coolMap
-                .loadedBuildings,
-            ).flat().length,
+            [
+              ...(
+                window as unknown as { __coolMap: MapDebug }
+              ).__coolMap.tiles.values(),
+            ].flatMap((t) => t.objects.buildings).length,
         ),
       { timeout: 60_000 },
     )
     .toBeGreaterThan(0);
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
-    const info = Object.values(map.loadedBuildings).flat()[0] as any;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+    const info = [...map.tiles.values()]
+      .map((t) => t.objects.buildings)
+      .flat()[0] as any;
     map.selectBuilding(info, map.map.getCenter());
   });
   const downloadPromise = page.waitForEvent("download");

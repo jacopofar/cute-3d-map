@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -22,14 +23,14 @@ interface DriveProbe {
     getPitch(): number;
     dragPan: { isEnabled(): boolean };
   };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
+  scene: { traverse(cb: (o: any) => void): void };
 }
 
 const probe = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
     const map = (window as unknown as { __coolMap: DriveProbe }).__coolMap;
     let carVisible: boolean | null = null;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind === "driving_car") carVisible = object.visible;
     });
     return {
@@ -113,9 +114,11 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     .poll(
       () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           let count = 0;
-          for (const list of Object.values(map.loadedBuildings ?? {})) {
+          for (const list of [...map.tiles.values()].map(
+            (t) => t.objects.buildings,
+          )) {
             count += (list as unknown[]).length;
           }
           return count;
@@ -124,10 +127,12 @@ test("drive mode follows a WASD car and exits cleanly", async ({ page }) => {
     )
     .toBeGreaterThan(0);
   const collision = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const spawn = map.driveState();
     let blocked: string | null = null;
-    for (const list of Object.values(map.loadedBuildings ?? {})) {
+    for (const list of [...map.tiles.values()].map(
+      (t) => t.objects.buildings,
+    )) {
       for (const b of list as any[]) {
         if (!b.bbox) continue;
         const lon = (b.bbox[0] + b.bbox[2]) / 2;

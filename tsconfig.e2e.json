@@ -1,0 +1,12 @@
+// The Playwright specs are their own program: they run in Node (so they need
+// the node types) and they read the map through `../src/debug`, which the app
+// tsconfig already covers. Keeping them separate means `npm run test:types`
+// still type-checks only the app, while `test:types:e2e` catches a spec that
+// calls a probe the map no longer has.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/vite-env.d.ts", "e2e", "perf", "playwright.config.ts", "playwright.bench.config.ts", "playwright.gpu.config.ts"]
+}

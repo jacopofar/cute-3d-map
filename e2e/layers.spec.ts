@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -8,18 +9,11 @@ const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 // heavy, so this test takes longer than the default budget
 test.setTimeout(120_000);
 
-interface Probe {
-  map: { jumpTo(options: { zoom: number }): void };
-  customLayer: {
-    scene: { traverse(cb: (o: any) => void): void };
-  };
-}
-
 const countMeshes = (page: import("@playwright/test").Page, kind: string) =>
   page.evaluate((wanted) => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const counts = { total: 0, visible: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== wanted) return;
       counts.total += 1;
       if (object.visible) counts.visible += 1;
@@ -93,16 +87,16 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
 
   // the facade detail needs the zoom gate to open
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo({ zoom: 18 });
   });
   await expect
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           let total = 0;
-          map.customLayer.scene.traverse((object: any) => {
+          map.scene.traverse((object: any) => {
             if (object.userData?.group === "windows") total += 1;
           });
           return total;
@@ -113,9 +107,9 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
 
   await page.click("#windows-toggle input");
   const windowsHidden = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let hidden = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.group === "windows" && !object.visible) hidden += 1;
     });
     return hidden;
@@ -147,9 +141,9 @@ test("the layer menu folds the checkboxes behind a gear button", async ({
 // uniform (via the shared material on a windows mesh)
 const readDayNight = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let uNight = null;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.group !== "windows") return;
       const value = object.material?.uniforms?.uNight?.value;
       if (typeof value === "number") uNight = value;
@@ -210,16 +204,16 @@ test("the night toggle darkens the scene and lights the windows", async ({
   // the window meshes use the shader material, so the uniform reaches them:
   // zoom in so the facade detail exists, then confirm uNight is night
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo({ zoom: 18 });
   });
   await expect
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           let total = 0;
-          map.customLayer.scene.traverse((object: any) => {
+          map.scene.traverse((object: any) => {
             if (object.userData?.group === "windows") total += 1;
           });
           return total;

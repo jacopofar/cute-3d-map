@@ -42,3 +42,31 @@ export function toModelCoords(
 export function scaleFactorAt(latitude: number): number {
   return Math.cos((2 * Math.PI * latitude) / 360);
 }
+
+// The slippy-tile index a lon/lat falls in, at the data's TILE_ZOOM.
+export function getTileIndex(point: {
+  lng: number;
+  lat: number;
+}): [number, number] {
+  const lon2tile = (lon: number) =>
+    Math.floor(((lon + 180) / 360) * Math.pow(2, TILE_ZOOM));
+  const lat2tile = (lat: number) =>
+    Math.floor(
+      ((1 -
+        Math.log(
+          Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180),
+        ) /
+          Math.PI) /
+        2) *
+        Math.pow(2, TILE_ZOOM),
+    );
+
+  return [lon2tile(point.lng), lat2tile(point.lat)];
+}
+
+// "x_y" back to slippy-tile indices. The unload pass, the drive obstacle pass
+// and the e2e helpers all read tile keys, so parse them in one place.
+export function parseTileKey(key: string): [number, number] {
+  const [x, y] = key.split("_");
+  return [Number(x), Number(y)];
+}

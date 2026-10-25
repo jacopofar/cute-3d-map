@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -8,19 +9,14 @@ const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 test.setTimeout(120_000);
 
 // central Milan, above the facade-detail zoom where parked cars appear
-const VIEW = { center: [9.1919, 45.4641], zoom: 17.5 };
-
-interface Probe {
-  map: { jumpTo(options: { center?: [number, number]; zoom?: number }): void };
-  customLayer: { scene: { traverse(cb: (o: any) => void): void } };
-}
+const VIEW = { center: [9.1919, 45.4641] as [number, number], zoom: 17.5 };
 
 const parkedCars = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     // one InstancedMesh per tile, so sum them instead of reading the last one
     const counts = { count: 0, visible: true, meshes: 0 };
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "parked_car") return;
       counts.count += object.count;
       counts.visible = counts.visible && object.visible;
@@ -54,7 +50,7 @@ test("parked cars appear at the windows zoom and follow their checkbox", async (
     .toBe(true);
 
   await page.evaluate((view) => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo(view);
   }, VIEW);
 
@@ -74,7 +70,7 @@ test("parked cars appear at the windows zoom and follow their checkbox", async (
 
   // below the facade-detail zoom the layer is hidden, like the windows
   await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     map.map.jumpTo({ zoom: 16 });
   });
   await expect

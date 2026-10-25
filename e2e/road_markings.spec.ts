@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box
 test.setTimeout(90_000);
@@ -31,7 +32,7 @@ test("stop lines and lane arrows load at Viale Zara", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.road_marking?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -39,11 +40,11 @@ test("stop lines and lane arrows load at Viale Zara", async ({ page }) => {
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let meshes = 0;
     let vertices = 0;
     let maxHeight = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "road_marking") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;
@@ -69,13 +70,13 @@ test("stop lines and lane arrows load at Viale Zara", async ({ page }) => {
     slider.value = "1";
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     let material: any = null;
-    (
-      window as unknown as { __coolMap: any }
-    ).__coolMap.customLayer.scene.traverse((object: any) => {
-      if (object.userData?.kind === "road_marking" && !material) {
-        material = object.material;
-      }
-    });
+    (window as unknown as { __coolMap: MapDebug }).__coolMap.scene.traverse(
+      (object: any) => {
+        if (object.userData?.kind === "road_marking" && !material) {
+          material = object.material;
+        }
+      },
+    );
     return { type: material?.type, r: material?.color?.r };
   });
   expect(night.type).toBe("MeshLambertMaterial");
@@ -86,13 +87,13 @@ test("stop lines and lane arrows load at Viale Zara", async ({ page }) => {
     slider.value = "13";
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     let material: any = null;
-    (
-      window as unknown as { __coolMap: any }
-    ).__coolMap.customLayer.scene.traverse((object: any) => {
-      if (object.userData?.kind === "road_marking" && !material) {
-        material = object.material;
-      }
-    });
+    (window as unknown as { __coolMap: MapDebug }).__coolMap.scene.traverse(
+      (object: any) => {
+        if (object.userData?.kind === "road_marking" && !material) {
+          material = object.material;
+        }
+      },
+    );
     return { r: material?.color?.r };
   });
   expect(day.r).toBeGreaterThan(0.9);

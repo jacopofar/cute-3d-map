@@ -1,18 +1,14 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
 
-interface Probe {
-  map: { jumpTo(options: { zoom: number }): void };
-  stats(): { facadeTiles: number; facadeVertices: number };
-}
-
 // __coolMap is exposed by src/main.ts for the benchmark
 const probe = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
-    const w = window as unknown as { __coolMap?: Probe };
+    const w = window as unknown as { __coolMap?: MapDebug };
     return w.__coolMap
       ? { ready: true as const, stats: w.__coolMap.stats() }
       : { ready: false as const };
@@ -45,7 +41,7 @@ test("builds facade detail only once zoomed in", async ({ page }) => {
 
   // zoom in past the gate and let the debounced move pass build the detail
   await page.evaluate(() => {
-    const w = window as unknown as { __coolMap: Probe };
+    const w = window as unknown as { __coolMap: MapDebug };
     w.__coolMap.map.jumpTo({ zoom: 17 });
   });
   await expect

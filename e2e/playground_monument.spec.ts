@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probes need room
 test.setTimeout(90_000);
@@ -22,9 +23,11 @@ async function clickFirst(
 ): Promise<{ name?: string }> {
   const target = await page.evaluate(
     ({ listName }) => {
-      const map = (window as unknown as { __coolMap: any }).__coolMap;
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
       const container = map.map.getContainer() as HTMLElement;
-      const infos = Object.values(map[listName] ?? {}).flat() as Array<{
+      const infos = [...map.tiles.values()].flatMap(
+        (t) => (t.objects as Record<string, any>)[listName],
+      ) as Array<{
         name?: string;
         lon: number;
         lat: number;
@@ -67,13 +70,13 @@ test("playgrounds load and open an OSM popup", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.playground?.meshes ?? 0;
         }),
       { timeout: 45_000 },
     )
     .toBeGreaterThan(0);
-  const info = await clickFirst(page, "playground", "loadedPlaygrounds");
+  const info = await clickFirst(page, "playground", "playgrounds");
   const popup = page.locator(".maplibregl-popup-content");
   await expect(popup).toContainText("Playground");
   if (info.name) await expect(popup).toContainText(info.name);
@@ -94,13 +97,13 @@ test("monuments load and open an OSM popup", async ({ page }) => {
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.monument?.meshes ?? 0;
         }),
       { timeout: 45_000 },
     )
     .toBeGreaterThan(0);
-  const info = await clickFirst(page, "monument", "loadedMonuments");
+  const info = await clickFirst(page, "monument", "monuments");
   const popup = page.locator(".maplibregl-popup-content");
   await expect(popup).toContainText(
     /monument|memorial|statue|bust|plaque|obelisk|stele/i,

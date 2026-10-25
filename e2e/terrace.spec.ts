@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // tile parsing and SwiftShader are slow on this box; the click probe needs room
 test.setTimeout(90_000);
@@ -33,7 +34,7 @@ test("outdoor terraces load in Brera and open an OSM popup", async ({
     .poll(
       async () =>
         page.evaluate(() => {
-          const map = (window as unknown as { __coolMap: any }).__coolMap;
+          const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
           return map.stats().byKind.terrace?.meshes ?? 0;
         }),
       { timeout: 45_000 },
@@ -41,10 +42,10 @@ test("outdoor terraces load in Brera and open an OSM popup", async ({
     .toBeGreaterThan(0);
 
   const state = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     let meshes = 0;
     let vertices = 0;
-    map.customLayer.scene.traverse((object: any) => {
+    map.scene.traverse((object: any) => {
       if (object.userData?.kind !== "terrace") return;
       meshes += 1;
       vertices += object.geometry.getAttribute("position").count;
@@ -60,9 +61,11 @@ test("outdoor terraces load in Brera and open an OSM popup", async ({
   expect(state.triangles).toBeGreaterThan(100);
 
   const target = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    const infos = Object.values(map.loadedTerraces ?? {}).flat() as Array<{
+    const infos = [...map.tiles.values()]
+      .map((t) => t.objects.terraces)
+      .flat() as Array<{
       name?: string;
       kind: string;
       lon: number;

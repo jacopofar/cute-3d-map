@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "prettify": "npx prettier \"src/**/*.ts\" --write",
     "test:types": "tsc --noEmit",
+    "test:types:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "test:unit:fast": "vitest run",
-    "test:check": "npm run test:types && npm run test:unit:fast",
+    "test:check": "npm run test:types && npm run test:types:e2e && npm run test:unit:fast",
     "test:e2e:smoke": "playwright test e2e/smoke.spec.ts e2e/permalink.spec.ts",
     "test:e2e:changed": "node scripts/e2e-changed.mjs",
     "test:unit": "vitest run --coverage",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@types/node": "^26.6.5",
     "@types/three": "^0.186.0",
     "@vitest/coverage-v8": "^4.1.12",
     "prettier": "3.9.10",

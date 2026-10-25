@@ -1,18 +1,9 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the smoke tests: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
 const EMPTY_STYLE = { version: 8 as const, sources: {}, layers: [] };
-
-interface Probe {
-  map: {
-    getCenter(): { lng: number; lat: number };
-    getZoom(): number;
-    jumpTo(options: { center: [number, number]; zoom: number }): void;
-  };
-  tileCenter: [number, number];
-  modelTransform: { translateX: number; translateY: number };
-}
 
 const HASH = /#map=([\d.-]+)\/([\d.-]+)\/([\d.-]+)/;
 
@@ -42,7 +33,7 @@ test("a #map= fragment sets the view and then follows the map", async ({
     .toBe(true);
 
   const view = await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: Probe }).__coolMap.map;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap.map;
     const center = map.getCenter();
     return { zoom: map.getZoom(), lat: center.lat, lng: center.lng };
   });
@@ -52,7 +43,7 @@ test("a #map= fragment sets the view and then follows the map", async ({
 
   // moving the map rewrites the fragment, so the position can be copied
   await page.evaluate(() => {
-    (window as unknown as { __coolMap: Probe }).__coolMap.map.jumpTo({
+    (window as unknown as { __coolMap: MapDebug }).__coolMap.map.jumpTo({
       center: [9.2, 45.5],
       zoom: 17,
     });
@@ -81,10 +72,10 @@ test("anchors the 3D model at the opened hash center", async ({ page }) => {
     .toBe(true);
 
   const probe = await page.evaluate(() => {
-    const c = (window as unknown as { __coolMap: Probe }).__coolMap;
+    const c = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     return {
       tileCenter: c.tileCenter,
-      transform: c.modelTransform,
+      transform: c.originTransform,
       center: c.map.getCenter(),
     };
   });

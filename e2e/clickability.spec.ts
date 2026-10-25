@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { MapDebug } from "../src/debug";
 
 // Same trick as the other specs: a minimal valid style, so the map reaches
 // "style.load" with no MapTiler key and no network.
@@ -21,7 +22,8 @@ test.beforeEach(async ({ page }) => {
 const popupText = (page: import("@playwright/test").Page) =>
   page.evaluate(
     () =>
-      document.querySelector(".maplibregl-popup-content")?.innerText ?? null,
+      document.querySelector<HTMLElement>(".maplibregl-popup-content")
+        ?.innerText ?? null,
   );
 
 test("benches, trees and park paths open their OSM popups", async ({
@@ -42,10 +44,12 @@ test("benches, trees and park paths open their OSM popups", async ({
   // 60 m, the reload below can exercise a point, a line and an area in one view
   const benchHandle = await page.waitForFunction(
     () => {
-      const map = (window as unknown as { __coolMap: any }).__coolMap;
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
       const seen = new Set<string>();
       const all: any[] = [];
-      for (const list of Object.values(map.loadedFeatures ?? {})) {
+      for (const list of [...map.tiles.values()].map(
+        (t) => t.objects.features,
+      )) {
         for (const f of list as any[]) {
           if (!f.id || seen.has(f.id)) continue;
           seen.add(f.id);
@@ -106,15 +110,43 @@ test("benches, trees and park paths open their OSM popups", async ({
     .toBe(true);
   await page.waitForFunction(
     (id) => {
-      const map = (window as unknown as { __coolMap: any }).__coolMap;
-      return Object.values(map.loadedFeatures ?? {}).some((list) =>
-        (list as any[]).some((f) => f.id === id),
-      );
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+      return [...map.tiles.values()]
+        .map((t) => t.objects.features)
+        .some((list) => (list as any[]).some((f) => f.id === id));
     },
     bench.id,
     { timeout: 45_000 },
   );
-  await page.waitForTimeout(800);
+  // the trees are in the neighbouring tiles, which can still be in flight when
+  // the bench's own tile lands: wait for one to be in view instead of guessing
+  // with a fixed delay (the sweep below tries several of them anyway)
+  await page.waitForFunction(
+    () => {
+      const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+      const container = map.map.getContainer() as HTMLElement;
+      let inView = 0;
+      for (const list of [...map.tiles.values()].map(
+        (t) => t.objects.features,
+      )) {
+        for (const f of list as any[]) {
+          if (f.kind !== "tree" || f.lon === undefined) continue;
+          const p = map.map.project([f.lon, f.lat]);
+          if (
+            p.x > 100 &&
+            p.y > 150 &&
+            p.x < container.clientWidth - 100 &&
+            p.y < container.clientHeight - 100
+          ) {
+            inView += 1;
+          }
+        }
+      }
+      return inView >= 1;
+    },
+    null,
+    { timeout: 45_000 },
+  );
 
   const canvas = await page.locator("canvas.maplibregl-canvas").boundingBox();
   const clickAt = async (x: number, y: number) => {
@@ -125,8 +157,8 @@ test("benches, trees and park paths open their OSM popups", async ({
 
   // the bench is at the map center; the seat sits a few pixels above the point
   const benchPoint = await page.evaluate((id) => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.id !== id || f.lon === undefined) continue;
         const p = map.map.project([f.lon, f.lat]);
@@ -149,10 +181,10 @@ test("benches, trees and park paths open their OSM popups", async ({
 
   // a tree's canopy is above its trunk point; sweep a few pixels up
   const trees = (await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
     const out: { id: string; x: number; y: number }[] = [];
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.kind !== "tree" || f.lon === undefined) continue;
         const p = map.map.project([f.lon, f.lat]);
@@ -186,9 +218,9 @@ test("benches, trees and park paths open their OSM popups", async ({
 
   // a park path is a flat ribbon: its own vertex is a reliable click point
   const path = (await page.evaluate(() => {
-    const map = (window as unknown as { __coolMap: any }).__coolMap;
+    const map = (window as unknown as { __coolMap: MapDebug }).__coolMap;
     const container = map.map.getContainer() as HTMLElement;
-    for (const list of Object.values(map.loadedFeatures ?? {})) {
+    for (const list of [...map.tiles.values()].map((t) => t.objects.features)) {
       for (const f of list as any[]) {
         if (f.kind !== "park_path" || !f.lines) continue;
         for (const line of f.lines) {
