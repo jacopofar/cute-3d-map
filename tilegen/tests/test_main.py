@@ -295,6 +295,35 @@ def test_crosswalk_carries_the_road_bearing_and_width():
     )
 
 
+def test_a_pitch_carries_its_sport_for_the_frontend_to_paint():
+    tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
+    pitch = geom(
+        "POLYGON ((9.0 45.0, 9.004 45.0, 9.004 45.0025, 9.0 45.0025, 9.0 45.0))"
+    )
+
+    f = main.to_green("way/1", {"leisure": "pitch", "sport": "soccer"}, pitch, tile_box)
+    assert f is not None
+    # still a green area: the sport rides along, the paint is frontend-side
+    assert f["properties"]["cmtype"] == "green"
+    assert f["properties"]["green"] == "grass"
+    assert f["properties"]["sport"] == "soccer"
+
+    # a ";" list travels whole; the frontend picks the entry it can paint
+    multi = main.to_green(
+        "way/2", {"leisure": "pitch", "sport": "Soccer;Tennis"}, pitch, tile_box
+    )
+    assert multi is not None
+    assert multi["properties"]["sport"] == "soccer;tennis"
+
+    # not a pitch, or a pitch with no sport: no field at all
+    park = main.to_green("way/3", {"leisure": "park"}, pitch, tile_box)
+    assert park is not None
+    assert "sport" not in park["properties"]
+    untagged = main.to_green("way/4", {"leisure": "pitch"}, pitch, tile_box)
+    assert untagged is not None
+    assert "sport" not in untagged["properties"]
+
+
 def test_lane_features_carry_width_lanes_and_direction():
     tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
     road = geom("LINESTRING (9.0 45.0, 9.02 45.02)")

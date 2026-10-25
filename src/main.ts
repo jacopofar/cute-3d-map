@@ -102,6 +102,9 @@ const HOVER_THROTTLE_MS = 80;
 const SIDEWALK_MIN_ZOOM = 16;
 // lane paint only reads once the road is wide enough on screen to carry it
 const LANE_MIN_ZOOM = 16;
+// a pitch is a couple of hundred meters of court: below this it is a green
+// rectangle with a white smudge on it
+const PITCH_MIN_ZOOM = 16;
 // One per-tile layer whose checkbox is a plain visibility switch.
 interface LayerSwitch {
   id: string;
@@ -227,6 +230,9 @@ class CoolMap implements MapDebug {
   private wallsEnabled = true;
   private rooftopsEnabled = true;
   private parkPathsEnabled = true;
+  // the court and its paint are their own per-tile meshes (a pitch's green is
+  // in the parks layer), gated on the zoom like the lane paint
+  private pitchesEnabled = true;
   private powerLinesEnabled = true;
   // when false, a color tilegen had to impute is ignored (needs a tile reload,
   // since the colors are baked into the geometry)
@@ -1326,6 +1332,15 @@ class CoolMap implements MapDebug {
       set: (on) => (this.lanesEnabled = on),
       // paint is noise at city scale: it appears with the sidewalks
       visible: () => this.lanesEnabled && this.map.getZoom() >= LANE_MIN_ZOOM,
+    },
+    {
+      id: "pitch",
+      kinds: ["pitch", "pitch_paint"],
+      toggle: "#pitches-toggle",
+      set: (on) => (this.pitchesEnabled = on),
+      // the markings are unreadable from further out; the green stays
+      visible: () =>
+        this.pitchesEnabled && this.map.getZoom() >= PITCH_MIN_ZOOM,
     },
     {
       id: "fence",

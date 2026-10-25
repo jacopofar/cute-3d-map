@@ -67,6 +67,8 @@ class WaterProperties(TypedDict, total=False):
 class GreenProperties(TypedDict, total=False):
     cmtype: Required[Literal["green"]]
     green: str
+    # a sports pitch: the `sport` tag, passed through for the frontend's paint
+    sport: str
     name: str
 
 

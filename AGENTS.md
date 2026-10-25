@@ -151,6 +151,19 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   facade and tombstone layouts; `lane.ts` turns the segments into one
   `LineSegments` per tile (kind `lane`). The road surface itself is the
   basemap's, so this is paint only, gated at zoom 16.
+- `src/elements3d/pitch_layout.ts` / `pitch.ts` — sports pitches. A pitch is
+  already a green area (`leisure=pitch` is a grass polygon), so tilegen only
+  adds its `sport`, and the court is a frontend pass over that polygon.
+  The layout is pure maths and unit-tested: fit the sport's real field (soccer
+  105x68, tennis 23.77x10.97, basketball 28x15, volleyball 18x9) inside the
+  footprint's minimum-area rectangle, so a court mapped at an angle or a 30 m
+  five-a-side still lines up, then draw the markings in that frame. `pitch.ts`
+  adds a clay/rubber/sand surface for the sports that are not grass, the goals
+  (posts and crossbar), the basketball hoops (pole, board, rim) and the tennis
+  and volleyball nets. Two kinds per tile: `pitch` (the merged Lambert mesh) and
+  `pitch_paint` (the white `LineSegments`), since a kind cannot be both. Gated
+  at zoom 16 behind `#pitches-toggle`; the lawn underneath stays the parks
+  layer. A sport without a layout keeps its plain green.
 - `src/elements3d/rooftop.ts` — mapped water towers, chimneys, antennas and
   solar generators placed on the carrying building's roof (`base` from
   tilegen); a solar polygon keeps its footprint as a flat panel surface, a
@@ -469,6 +482,13 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   drawn as `LineSegments` (a dash is two vertices), one solid centre line for a
   two-way road and a 3 m / 6 m dash per interior lane edge, gated at zoom 16
   behind `#lanes-toggle`.
+- **pitch** — a `leisure=pitch` green area carrying a `sport` tag. It is a green
+  like any other (same polygon, same clipping, same parks checkbox); the sport
+  just tells the frontend which court to paint. The markings and the goals,
+  hoops and nets are their own per-tile kinds (`pitch` and `pitch_paint`), so
+  `#pitches-toggle` hides the court and leaves the lawn. `sport` may be a ";"
+  list; the frontend paints the first entry it has a layout for, and everything
+  else (rugby, hockey, padel, futsal) stays flat green.
 - **road marking** — a stop, give-way or signal node with approach directions,
   width, lanes and turn tags; the frontend draws a stop/give-way line and lane
   arrows. It is paint, not a clickable object.
@@ -598,11 +618,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`, `#fences-toggle`,
   `#bridges-toggle`, `#parked-cars-toggle`, `#lampposts-toggle`,
   `#transit-toggle`, `#sidewalks-toggle`, `#lanes-toggle`, `#walls-toggle`,
-  `#rooftop-toggle`,
+  `#rooftop-toggle`, `#pitches-toggle`,
   `#power-lines-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
-  balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
-  bridges & tunnels, parked cars, lamp posts and power lines are their own
-  meshes, so those are plain visibility switches; the basemap checkbox swaps the
+  balconies, roofs, water, benches, church crosses, parks, pitches, airplanes,
+  fences, bridges & tunnels, parked cars, lamp posts and power lines are their
+  own meshes, so those are plain visibility switches (the pitches are gated on
+  the zoom); the basemap checkbox swaps the
   MapTiler style for an empty style while keeping the 3D layer; imputed colors
   are baked into the geometry, so changing that one reloads the loaded tiles.
 - Hovering is opt-in: `#hover-inspect-toggle` turns on a throttled raycast that

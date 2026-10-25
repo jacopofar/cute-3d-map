@@ -21,6 +21,7 @@ import {
 } from "./feature_pick";
 import { building } from "./elements3d/building";
 import { waterwayWidth } from "./elements3d/water";
+import { pitchSportOf } from "./elements3d/pitch_layout";
 import type {
   BarrierInfo,
   BuildingInfo,
@@ -900,6 +901,15 @@ export class Selection {
       case "bench":
         return "Bench";
       case "green":
+        // a pitch keeps its green style but deserves its own name
+        if (info.sport) {
+          const sport = pitchSportOf(info.sport);
+          if (sport === "soccer") return "Soccer pitch";
+          if (sport === "tennis") return "Tennis court";
+          if (sport === "basketball") return "Basketball court";
+          if (sport === "volleyball") return "Volleyball court";
+          return "Sports pitch";
+        }
         return info.subtype === "dense" ? "Park" : "Green area";
       case "cemetery":
         return "Cemetery";

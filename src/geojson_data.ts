@@ -26,6 +26,7 @@ import { gate, gateMaterial } from "./elements3d/gate";
 import { rooftop, rooftopMaterial } from "./elements3d/rooftop";
 import { parkPath, parkPathMaterial } from "./elements3d/park_path";
 import { lane, laneMaterial } from "./elements3d/lane";
+import { pitch, pitchMaterial, pitchPaintMaterial } from "./elements3d/pitch";
 import {
   powerTower,
   powerTowerMaterial,
@@ -95,6 +96,8 @@ const MATERIALS: Record<string, () => THREE.Material> = {
   crosswalk: () => crosswalkMaterial,
   road_marking: () => roadMarkingMaterial,
   lane: () => laneMaterial,
+  pitch: () => pitchMaterial,
+  pitch_paint: () => pitchPaintMaterial,
   platform: () => platformMaterial,
   rail: () => railMaterial,
   sidewalk: () => sidewalkMaterial,
@@ -112,7 +115,7 @@ const MATERIALS: Record<string, () => THREE.Material> = {
 };
 
 // kinds drawn as line segments rather than triangles
-const LINE_KINDS = new Set(["power_wire", "lane"]);
+const LINE_KINDS = new Set(["power_wire", "lane", "pitch_paint"]);
 
 function materialFor(kind: string): THREE.Material {
   return MATERIALS[kind]?.() ?? treeSurfaceMaterial;
@@ -154,6 +157,8 @@ export function geoJSONtoGeometries(
     | "power_tower"
     | "power_wire"
     | "lane"
+    | "pitch"
+    | "pitch_paint"
     | "aeroway"
     | "fence"
     | "bridge"
@@ -214,7 +219,20 @@ export function geoJSONtoGeometries(
     return [{ kind: "bench", geometries: bench(originMeters, scaleFactor, f) }];
   }
   if (f.properties.cmtype === "green") {
-    return [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
+    // a pitch is a green with a `sport`: same polygon, plus the court and its
+    // paint as their own kinds so the checkbox can leave the lawn alone
+    const groups: {
+      kind: "green" | "pitch" | "pitch_paint";
+      geometries: THREE.BufferGeometry[];
+    }[] = [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
+    const court = pitch(originMeters, scaleFactor, f);
+    if (court.surface.length > 0) {
+      groups.push({ kind: "pitch", geometries: court.surface });
+    }
+    if (court.paint.length > 0) {
+      groups.push({ kind: "pitch_paint", geometries: court.paint });
+    }
+    return groups;
   }
   if (f.properties.cmtype === "cemetery") {
     return [
@@ -603,6 +621,8 @@ export interface FeatureInfo {
   kind: string;
   // the semantic sub-kind: tree type, green style, rail kind, bridge class, ...
   subtype?: string;
+  // a green area's `sport`, when it is a pitch; the raw tag, ";" list and all
+  sport?: string;
   lon?: number;
   lat?: number;
   lines?: [number, number][][];
@@ -1027,6 +1047,7 @@ function featureInfo(f: Geojson.Feature): FeatureInfo | null {
     info.subtype = typeof props.type === "string" ? props.type : undefined;
   } else if (kind === "green") {
     info.subtype = typeof props.green === "string" ? props.green : undefined;
+    info.sport = typeof props.sport === "string" ? props.sport : undefined;
   } else if (
     kind === "rail" ||
     kind === "park_path" ||

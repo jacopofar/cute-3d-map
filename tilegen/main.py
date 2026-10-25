@@ -80,6 +80,7 @@ from features import (  # noqa: F401 - re-exported for the existing API/tests
     parse_lane_count,
     parse_length,
     parse_level,
+    pitch_sport,
     portal_angle,
     power_wire_height,
     road_width,

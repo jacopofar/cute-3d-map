@@ -152,6 +152,21 @@ def to_cemetery(feature_id, tags, s, tile_box) -> TileFeature | None:
     }
 
 
+def pitch_sport(tags) -> str | None:
+    """The `sport` of a pitch, passed through for the frontend to paint.
+
+    A pitch is already a green area (``leisure=pitch`` is in
+    ``GREEN_GRASS_LEISURE``), so nothing here draws it: the frontend decides
+    which sports it has a layout for. ``sport`` can be a ";" list, so the raw
+    value travels and the frontend picks the first entry it knows."""
+    if tags.get("leisure") != "pitch":
+        return None
+    value = tags.get("sport")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip().lower()
+
+
 def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
     """A green area as a render feature, clipped to the tile like water (a park
     spans many tiles). The `green` sub-kind selects the frontend shader style."""
@@ -164,6 +179,7 @@ def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
     properties = {
         "cmtype": "green",
         "green": kind,
+        "sport": pitch_sport(tags),
         "name": tags.get("name"),
     }
     return {

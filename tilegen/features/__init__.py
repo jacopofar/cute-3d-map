@@ -205,6 +205,9 @@ from .green import (
     park_path_kind as park_path_kind,
 )
 from .green import (
+    pitch_sport as pitch_sport,
+)
+from .green import (
     to_cemetery as to_cemetery,
 )
 from .green import (
