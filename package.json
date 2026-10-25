@@ -32,7 +32,7 @@
   "dependencies": {
     "@turf/turf": "^7.4.0",
     "@types/geojson": "^7946.0.16",
-    "maplibre-gl": "^6.15.0",
+    "maplibre-gl": "^6.16.0",
     "three": "^0.186.1"
   }
 }
