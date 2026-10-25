@@ -89,6 +89,7 @@ from loaders import (
     load_parking_ways,
     load_road_data,
     load_rooftop_accessories,
+    load_track_lines,
     load_ways,
     outside_cemeteries,
     parking_rows_by_tile,
@@ -610,7 +611,8 @@ def _static_layers(
             )
         parking_ways = kept
         if parking:
-            parking_data = parking_rows(parking_ways)
+            tracks = load_track_lines(input_parquet)
+            parking_data = parking_rows(parking_ways, tracks)
             parking_by_tile = parking_rows_by_tile(parking_data, zoom)
             logger.info(
                 "parking: %d ways -> %d rows in %d tiles",

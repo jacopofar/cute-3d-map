@@ -75,11 +75,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   and applies on change.
 - `src/debug.ts` — `MapDebug`, the surface the e2e specs and the benchmark read
   (`map`, `scene`, `camera`, `tiles`, `tileCenter`, `originTransform`, `stats`,
-  `driveState`, `lightingState`, `collisionAt`, `selectBuilding`). `CoolMap
-  implements MapDebug` and the specs cast `__coolMap` to it, so moving any of
-  them breaks `npm run test:check` instead of the browser run. Everything else
-  on the map is private. `tsconfig.e2e.json` is the specs' program (it needs the
-  node types for the GLB and benchmark files, which the app does not).
+  `driveState`, `lightingState`, `collisionAt`, `hoverState`,
+  `selectBuilding`). `CoolMap implements MapDebug` and the specs cast
+  `__coolMap` to it, so moving any of them breaks `npm run test:check` instead
+  of the browser run. Everything else on the map is private.
+  `tsconfig.e2e.json` is the specs' program (it needs the node types for the GLB
+  and benchmark files, which the app does not).
 - `src/projection.ts` — the lon/lat to model-space maths: `TILE_ZOOM`,
   `epsg4326toEpsg3857`, `toModelCoords` and `scaleFactorAt` (the cos(latitude)
   squeeze), plus the slippy-tile grid helpers (`getTileIndex`, `parseTileKey`).
@@ -375,7 +376,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   parking stops before junctions; pedestrian areas are not included. Pure (plain `ParkingWay`
   inputs; `main.load_parking_ways` reads the parquet), so it is unit-tested like
   `traffic.py`. `main.outside_cemeteries` drops ways whose midpoint is inside a
-  cemetery, so the grave paths do not fill with cars.
+  cemetery, so the grave paths do not fill with cars; `parking.outside_tracks`
+  drops a row whose kerb line comes within `TRACK_CLEARANCE` of a tram or
+  surface-rail centreline (`loaders.load_track_lines`), so the cars do not park
+  on the rails.
 - `tilegen/lamps.py` — street lamps for the night glow: one every `LAMP_SPACING`
   (55 m) on both sides of every parking-eligible road, just beyond the kerb,
   grouped per tile. Pure and unit-tested; uses the same `ParkingWay` inputs.
@@ -566,17 +570,22 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   `index.html` (`#layer-menu-button` opens `#layer-menu-panel`,
   `#layer-menu-collapse` folds it, `#imputed-help` explains the imputed
   colors), styled in `src/map_style.css`, wired in `CoolMap`. The checkbox ids
-  are `#traffic-toggle`, `#inspect-toggle`, `#clouds-toggle`, `#windows-toggle`,
-  `#balconies-toggle`, `#roof-shapes-toggle`, `#water-toggle`,
-  `#basemap-toggle`, `#benches-toggle`, `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`,
-  `#fences-toggle`, `#bridges-toggle`, `#parked-cars-toggle`,
-  `#lampposts-toggle`, `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`,
-  `#rooftop-toggle`, `#power-lines-toggle`, `#bloom-toggle`,
-  `#imputed-colors-toggle`. Windows, balconies, roofs, water, benches, church
-  crosses, parks, airplanes, fences, bridges & tunnels, parked cars, lamp posts
-  and power lines are their own meshes, so those are plain visibility switches; the basemap checkbox swaps the MapTiler style
-  for an empty style while keeping the 3D layer; imputed colors are baked into
-  the geometry, so changing that one reloads the loaded tiles.
+  are `#traffic-toggle`, `#inspect-toggle`, `#hover-inspect-toggle`,
+  `#clouds-toggle`, `#windows-toggle`, `#balconies-toggle`,
+  `#roof-shapes-toggle`, `#water-toggle`, `#basemap-toggle`, `#benches-toggle`,
+  `#churches-toggle`, `#parks-toggle`, `#airplanes-toggle`, `#fences-toggle`,
+  `#bridges-toggle`, `#parked-cars-toggle`, `#lampposts-toggle`,
+  `#transit-toggle`, `#sidewalks-toggle`, `#walls-toggle`, `#rooftop-toggle`,
+  `#power-lines-toggle`, `#bloom-toggle`, `#imputed-colors-toggle`. Windows,
+  balconies, roofs, water, benches, church crosses, parks, airplanes, fences,
+  bridges & tunnels, parked cars, lamp posts and power lines are their own
+  meshes, so those are plain visibility switches; the basemap checkbox swaps the
+  MapTiler style for an empty style while keeping the 3D layer; imputed colors
+  are baked into the geometry, so changing that one reloads the loaded tiles.
+- Hovering is opt-in: `#hover-inspect-toggle` turns on a throttled raycast that
+  rings the feature under the cursor and shows a pointer. It is off by default
+  because it raycasts the pickable set on every mouse move (12 Hz), and the ring
+  it draws is its own mesh, so a click's highlight does not dispose it.
 - Car mode is not a checkbox: `#drive-button` in the layers menu enters and
   leaves it, `#drive-hud` shows the speed and the keys, and Escape also leaves.
   Choosing it closes the menu. While driving, the map handlers are disabled and

@@ -58,6 +58,8 @@ export interface MapDebug {
   /** whether a car at this position and heading would hit a building or a
    * visible barrier */
   collisionAt(lon: number, lat: number, heading?: number): boolean;
+  /** the mesh kind under the cursor, or null when nothing is hovered */
+  hoverState(): { kind: string | null };
   /** open a building's popup without clicking it */
   selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void;
 }

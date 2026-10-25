@@ -227,3 +227,39 @@ def test_dedupe_drops_two_cars_closer_than_the_spacing():
     # 1.5 m north of the first
     b = (9.0, 45.0 + 1.5 / parking.METERS_PER_DEG_LAT, 0.0)
     assert len(parking._dedupe([a, b])) == 1
+
+
+def test_parking_on_a_way_drops_only_the_side_with_a_track():
+    way = parking.ParkingWay(
+        id="way/1", coords=[(9.0, 45.0), (9.0, 45.004)], highway="residential"
+    )
+    rows = parking.parking_rows([way])
+    assert len(rows) == 2  # one per side
+    west = next(row for row in rows if row.coords[0][0] < 9.0)
+    east = next(row for row in rows if row.coords[0][0] > 9.0)
+
+    # a tram down the west kerb, where that row's cars would sit
+    track = shapely.LineString(
+        [(west.coords[0][0], 45.0), (west.coords[-1][0], 45.004)]
+    )
+    kept = parking.parking_rows([way], [track])
+
+    ids = {row.id for row in kept}
+    assert west.id not in ids
+    assert east.id in ids
+
+
+def test_parking_keeps_the_kerb_when_the_track_runs_down_the_middle():
+    way = parking.ParkingWay(
+        id="way/1", coords=[(9.0, 45.0), (9.0, 45.004)], highway="residential"
+    )
+    # the rails sit on the road centreline: both kerbs stay parkable
+    middle = shapely.LineString([(9.0, 45.0), (9.0, 45.004)])
+    assert len(parking.parking_rows([way], [middle])) == 2
+
+
+def test_no_tracks_means_no_filtering():
+    way = parking.ParkingWay(
+        id="way/1", coords=[(9.0, 45.0), (9.0, 45.004)], highway="residential"
+    )
+    assert parking.parking_rows([way]) == parking.parking_rows([way], [])

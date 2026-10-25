@@ -223,6 +223,31 @@ def load_parking_ways(input_parquet: Path) -> list[ParkingWay]:
     return ways
 
 
+def load_track_lines(input_parquet: Path) -> list[LineString]:
+    """Tram and surface-rail centrelines, for the parking author.
+
+    Tunnels are left out: a tram under the street does not put rails in the
+    kerb lane, so it must not cost the street its parking.
+    """
+    rows = duckdb.execute(
+        """
+        select ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['railway'] in ('rail', 'tram')
+          and (tags['tunnel'] is null or tags['tunnel'] = 'no')
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    lines: list[LineString] = []
+    for (wkb,) in rows:
+        geometry = shapely.from_wkb(wkb)
+        parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
+        for part in parts:
+            if isinstance(part, LineString):
+                lines.append(part)
+    return lines
+
+
 def load_cemetery_areas(input_parquet: Path) -> BaseGeometry | None:
     """All cemetery polygons of the extract as one prepared-able geometry, or
     None when there are none. Used to keep parked cars and lamps out of the

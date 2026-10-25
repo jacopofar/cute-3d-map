@@ -18,6 +18,7 @@ pure (plain `ParkingWay` inputs) so it is unit-tested like `traffic.py`.
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -504,7 +505,52 @@ def clear_pieces(
     return pieces
 
 
-def parking_rows(ways: list[ParkingWay]) -> list[ParkingRow]:
+# A tram or surface rail runs inside the carriageway, so a kerb row that comes
+# this close to its centreline would park the cars on the rails. Half a car
+# plus the rail's own slack.
+TRACK_CLEARANCE = 2.0
+
+
+def _local_meters(
+    coords: Iterable[tuple[float, ...]], cos_ref: float
+) -> list[tuple[float, float]]:
+    """Degrees to meters around a reference latitude, so a clearance can be a
+    distance instead of a degree (the module works in degrees everywhere else)."""
+    return [
+        (point[0] * METERS_PER_DEG_LON * cos_ref, point[1] * METERS_PER_DEG_LAT)
+        for point in coords
+    ]
+
+
+def outside_tracks(
+    rows: list[ParkingRow], tracks: Sequence[shapely.LineString]
+) -> list[ParkingRow]:
+    """Drop the parking rows that would sit on a tram or rail track.
+
+    A row is parametric, so cutting just the bays that overlap would need a new
+    interval model (and the frontend walks rows, not intervals). Dropping the
+    side is the honest cheap answer: the kerb still gets parked on where the
+    track runs beside it rather than through it.
+    """
+    if not tracks or not rows:
+        return rows
+    lats = [lat for row in rows for _, lat in row.coords]
+    cos_ref = math.cos(math.radians(sum(lats) / len(lats)))
+    track_lines = [
+        shapely.LineString(_local_meters(track.coords, cos_ref)) for track in tracks
+    ]
+    tree = shapely.STRtree(track_lines)
+    kept: list[ParkingRow] = []
+    for row in rows:
+        line = shapely.LineString(_local_meters(row.coords, cos_ref))
+        if not len(tree.query(line.buffer(TRACK_CLEARANCE), predicate="intersects")):
+            kept.append(row)
+    return kept
+
+
+def parking_rows(
+    ways: list[ParkingWay], tracks: Sequence[shapely.LineString] | None = None
+) -> list[ParkingRow]:
     """Author kerb-side parking as rows, in priority order and deduped.
 
     A row is one side of one way at the style's car-centre offset. Overlapping
@@ -575,7 +621,7 @@ def parking_rows(ways: list[ParkingWay]) -> list[ParkingRow]:
                         side=side,
                     )
                 )
-    return rows
+    return outside_tracks(rows, tracks or [])
 
 
 def _dedupe(

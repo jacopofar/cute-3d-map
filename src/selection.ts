@@ -137,6 +137,11 @@ const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {
   custom_model: "when-visible",
 };
 
+// The hover ring: small enough to read as "this object", bright enough to see
+// over both grass and asphalt without competing with the click highlight.
+const HOVER_RADIUS = 1.4;
+const HOVER_Z = 0.14;
+
 // One entry per mesh kind that resolves to a point feature: `at` searches the
 // tile data around the hit point, `select` opens the popup for what it found.
 // The pair is type-checked at the `picker()` call and erased to `unknown`
@@ -184,6 +189,10 @@ export interface SelectionHost {
 export class Selection {
   private highlight?: THREE.Object3D;
   private popup?: Popup;
+  // one ring, reused and moved: a fresh LineLoop per mouse tick would churn
+  // geometry 16 times a second for a decoration
+  private hoverRing?: THREE.LineLoop;
+  private hovered?: string;
 
   private readonly host: SelectionHost;
 
@@ -203,6 +212,57 @@ export class Selection {
       }
     }
     return pickable;
+  }
+
+  // What is under the cursor: a small ring at the hit point and the mesh kind,
+  // so the map can show a pointer. Unlike `pickStatic` this opens nothing and
+  // leaves any open popup alone.
+  hover(hit: THREE.Intersection | undefined): string | null {
+    const kind = hit ? ((hit.object.userData.kind as string) ?? null) : null;
+    if (!hit || !kind || !(kind in PICKABLE_KINDS)) {
+      this.clearHover();
+      return null;
+    }
+    const ring = this.hoverMark();
+    ring.position.set(hit.point.x, hit.point.y, HOVER_Z);
+    ring.visible = true;
+    this.hovered = kind;
+    return kind;
+  }
+
+  clearHover(): void {
+    if (this.hoverRing) this.hoverRing.visible = false;
+    this.hovered = undefined;
+  }
+
+  // the kind under the cursor, for the e2e probe
+  get hoverKind(): string | null {
+    return this.hovered ?? null;
+  }
+
+  private hoverMark(): THREE.LineLoop {
+    if (!this.hoverRing) {
+      const ring: THREE.Vector3[] = [];
+      for (let i = 0; i < 32; i++) {
+        const angle = (i / 32) * Math.PI * 2;
+        ring.push(new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0));
+      }
+      // a unit circle in the ground plane, scaled to HOVER_RADIUS: moving it is
+      // the only per-tick work
+      this.hoverRing = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(ring),
+        new THREE.LineBasicMaterial({
+          color: 0x7fe3ff,
+          depthTest: false,
+          transparent: true,
+        }),
+      );
+      this.hoverRing.scale.setScalar(HOVER_RADIUS);
+      this.hoverRing.renderOrder = 998;
+      this.hoverRing.visible = false;
+      this.host.scene.add(this.hoverRing);
+    }
+    return this.hoverRing;
   }
 
   // keep the open popup over a followed vehicle

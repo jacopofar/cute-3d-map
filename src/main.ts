@@ -95,6 +95,9 @@ const FACADE_TILE_MARGIN = 1;
 // the whole city, so show them where they read (measured: posts and rails from
 // 19, a dotted line at 18, noise at 17)
 const FENCE_MIN_ZOOM = 18;
+// hovering raycasts the pickable sets; 12 Hz reads as instant and costs a
+// twelfth of what per-frame would
+const HOVER_THROTTLE_MS = 80;
 // sidewalks are a street-level detail; the slabs are cheap but there are many
 const SIDEWALK_MIN_ZOOM = 16;
 // One per-tile layer whose checkbox is a plain visibility switch.
@@ -170,6 +173,9 @@ class CoolMap implements MapDebug {
   // the click popups and the ground rings; it reads the tile store and the
   // scene above, so it is created in the constructor once they exist
   private readonly selection: Selection;
+  // hovering is a per-frame raycast, so it is opt-in and throttled
+  private hoverEnabled = false;
+  private lastHoverAt = 0;
 
   // read-only probe for the e2e specs: open a building's popup without a click
   selectBuilding(info: BuildingInfo, lngLat: LngLatLike): void {
@@ -766,6 +772,16 @@ class CoolMap implements MapDebug {
           if (!this.inspectEnabled) this.selection.clear();
         },
       },
+      {
+        id: "#hover-inspect-toggle",
+        set: (on) => (this.hoverEnabled = on),
+        apply: () => {
+          if (this.hoverEnabled) return;
+          this.selection.clearHover();
+          const canvas = this.map.getCanvas();
+          if (canvas.style.cursor) canvas.style.cursor = "";
+        },
+      },
       { id: "#clouds-toggle", set: (on) => this.setCloudsEnabled(on) },
       {
         id: "#basemap-toggle",
@@ -810,6 +826,9 @@ class CoolMap implements MapDebug {
 
     this.map.on("click", (event) => this.onMapClick(event));
     this.map.on("dragstart", () => this.stopFollowing());
+    this.map.on("mousemove", (event) => this.onHover(event));
+    // leaving the canvas must drop the ring, or it lingers where the mouse left
+    this.map.on("mouseout", () => this.selection.clearHover());
 
     // car mode wires its own button; the Drive row lives in the menu, so using
     // it should get the panel out of the way for the chase camera
@@ -837,20 +856,7 @@ class CoolMap implements MapDebug {
     // yank the camera, and the drive button / Escape leaves the mode
     if (this.drive.active) return;
     if (!this.inspectEnabled) return;
-    const canvas = this.map.getCanvas();
-    // event.point is already in CSS pixels relative to the map canvas
-    const ndc = new THREE.Vector2(
-      (event.point.x / canvas.clientWidth) * 2 - 1,
-      -(event.point.y / canvas.clientHeight) * 2 + 1,
-    );
-    const raycaster = new THREE.Raycaster();
-    // MapLibre bakes the view into the projection matrix, so build the ray
-    // from two unprojected points instead of setFromCamera (which assumes the
-    // camera sits at the world origin)
-    const inv = this.customLayer.camera.projectionMatrixInverse;
-    const near = new THREE.Vector3(ndc.x, ndc.y, -1).applyMatrix4(inv);
-    const far = new THREE.Vector3(ndc.x, ndc.y, 1).applyMatrix4(inv);
-    raycaster.set(near, far.sub(near).normalize());
+    const raycaster = this.rayAt(event.point);
     const hits = raycaster.intersectObjects(
       this.selection.pickableMeshes(),
       true,
@@ -1002,6 +1008,47 @@ class CoolMap implements MapDebug {
     // current switches here (this covers the power and park-path layers too)
     this.applyTileVisibility();
     this.light.refreshSunShadow();
+  }
+
+  // A ray through a point on the canvas. MapLibre bakes the view into the
+  // projection matrix, so build it from two unprojected points instead of
+  // setFromCamera (which assumes the camera sits at the world origin).
+  private rayAt(point: { x: number; y: number }): THREE.Raycaster {
+    const canvas = this.map.getCanvas();
+    // point is already in CSS pixels relative to the map canvas
+    const ndc = new THREE.Vector2(
+      (point.x / canvas.clientWidth) * 2 - 1,
+      -(point.y / canvas.clientHeight) * 2 + 1,
+    );
+    const raycaster = new THREE.Raycaster();
+    const inv = this.customLayer.camera.projectionMatrixInverse;
+    const near = new THREE.Vector3(ndc.x, ndc.y, -1).applyMatrix4(inv);
+    const far = new THREE.Vector3(ndc.x, ndc.y, 1).applyMatrix4(inv);
+    raycaster.set(near, far.sub(near).normalize());
+    return raycaster;
+  }
+
+  // Mouse over the map: ring whatever is under the cursor and turn it into a
+  // pointer. Throttled because it raycasts the whole pickable set, and off while
+  // driving, where the map belongs to the car.
+  private onHover(event: { point: { x: number; y: number } }): void {
+    if (!this.hoverEnabled || this.drive.active) return;
+    const now = performance.now();
+    if (now - this.lastHoverAt < HOVER_THROTTLE_MS) return;
+    this.lastHoverAt = now;
+    const hits = this.rayAt(event.point).intersectObjects(
+      this.selection.pickableMeshes(),
+      true,
+    );
+    const kind = this.selection.hover(hits[0]);
+    const cursor = kind ? "pointer" : "";
+    const canvas = this.map.getCanvas();
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+  }
+
+  // read-only hover state for the e2e (like stats())
+  hoverState(): { kind: string | null } {
+    return { kind: this.selection.hoverKind };
   }
 
   // read-only collision probe for the e2e: whether a car at this position and
