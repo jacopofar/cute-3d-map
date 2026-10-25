@@ -60,6 +60,9 @@ export function isNightHour(hour: number): boolean {
 export interface LightingHost {
   readonly map: MapLibreMap;
   readonly scene: THREE.Scene;
+  /** the renderer, which `onAdd` creates halfway through: read it lazily or the
+   * rig captures undefined and never bakes a shadow map */
+  renderer(): THREE.WebGLRenderer | undefined;
   /** the projection origin, in lon/lat */
   center(): [number, number];
   /** the cloud layer and the street lamps follow the same night factor */
@@ -78,7 +81,8 @@ export class LightingRig {
   private darkBasemap: boolean;
   private basemapEnabled = true;
   private softwareRenderer = false;
-  private renderer?: THREE.WebGLRenderer;
+  // one warning is enough to notice an ordering mistake in the custom layer
+  private warnedNoRenderer = false;
   private shadowTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly host: LightingHost;
@@ -160,11 +164,6 @@ export class LightingRig {
     return this.hour;
   }
 
-  // the renderer arrives with the custom layer, after the rig is built
-  setRenderer(renderer: THREE.WebGLRenderer): void {
-    this.renderer = renderer;
-  }
-
   // headless CI renders on SwiftShader, where the shadow pass roughly doubles
   // the frame time, so it is off there
   setSoftwareRenderer(software: boolean): void {
@@ -182,6 +181,7 @@ export class LightingRig {
   // once from the layer's onAdd, not every frame.
   apply(): void {
     const lighting = (this.state = lightingAt(this.hour));
+    const renderer = this.host.renderer();
     this.sun.color.setHex(lighting.keyColor);
     this.sun.intensity = lighting.keyIntensity;
     this.sun.position.set(...lighting.keyDirection).normalize();
@@ -199,8 +199,8 @@ export class LightingRig {
     const paint = 1 - 0.72 * lighting.night;
     crosswalkMaterial.color.setScalar(paint);
     roadMarkingMaterial.color.setScalar(paint);
-    if (this.renderer) {
-      this.renderer.toneMappingExposure = lighting.exposure;
+    if (renderer) {
+      renderer.toneMappingExposure = lighting.exposure;
     }
     // the window shader reads the same key light, so the glass tracks dawn/dusk
     windowMaterial.uniforms.uNight.value = lighting.night;
@@ -246,6 +246,20 @@ export class LightingRig {
     );
     this.applySky(lighting);
     this.host.onNight(lighting.night);
+    // Bake the shadow map before the first frame rather than 200 ms into it:
+    // with `autoUpdate` off, a light that casts shadows but has no map yet makes
+    // every shadow-sampling draw fail (a real GPU rejects the null depth
+    // texture; SwiftShader never notices because the pass is off there).
+    if (!renderer && !this.softwareRenderer && !this.warnedNoRenderer) {
+      // the layer creates its renderer halfway through onAdd; reading it too
+      // early leaves the shadow map unbaked and every shadow-sampling draw
+      // failing on a real GPU (SwiftShader hides it: the pass is off there)
+      this.warnedNoRenderer = true;
+      console.warn("lighting: no renderer yet, so the shadow map stays empty");
+    }
+    if (renderer && !this.softwareRenderer && !this.sun.shadow.map) {
+      renderer.shadowMap.needsUpdate = true;
+    }
     this.refreshSunShadow();
     const grade = document.querySelector<HTMLElement>("#grade");
     if (grade) {
@@ -305,7 +319,8 @@ export class LightingRig {
       direction[2] * 3000,
     );
     this.sun.updateMatrixWorld();
-    if (this.renderer) this.renderer.shadowMap.needsUpdate = true;
+    const renderer = this.host.renderer();
+    if (renderer) renderer.shadowMap.needsUpdate = true;
   }
 
   // Swap the basemap to the dark MapTiler style at night (and back by day).

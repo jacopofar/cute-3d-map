@@ -346,6 +346,7 @@ class CoolMap implements MapDebug {
       {
         map: this.map,
         scene: selectionScene,
+        renderer: () => this.customLayer.renderer,
         center: () => this.tileCenter,
         onNight: (night: number) => {
           this.clouds?.setNight(night);
@@ -450,10 +451,10 @@ class CoolMap implements MapDebug {
           /swiftshader|llvmpipe|softpipe|software/i.test(rendererName);
 
         // the lights, the ground and the shadow catcher belong to the rig,
-        // which is built with the scene; it only needs the renderer and the
-        // SwiftShader verdict
+        // which is built with the scene; it reads the renderer through its host
+        // (it is created further down this callback) and needs the SwiftShader
+        // verdict to decide about the shadow pass
         coolMap.light.setSoftwareRenderer(coolMap.softwareRenderer);
-        if (this.renderer) coolMap.light.setRenderer(this.renderer);
 
         // this.scene.add(heartMesh());
 
