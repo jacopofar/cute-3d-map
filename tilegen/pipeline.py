@@ -621,50 +621,53 @@ def _static_layers(
     rooftop_by_tile: dict[tuple[int, int], list[dict]] = {}
     solar_buildings: set[str] = set()
     lamp_by_tile: dict[tuple[int, int], list[list[float]]] = {}
-    if parking or lamps:
-        logger.info("Building parked cars and street lamps")
-        parking_ways = load_parking_ways(input_parquet)
-        cemetery_area = load_cemetery_areas(input_parquet)
-        kept = outside_cemeteries(parking_ways, cemetery_area)
-        if len(kept) != len(parking_ways):
-            logger.info(
-                "parking: dropped %d ways inside cemeteries",
-                len(parking_ways) - len(kept),
-            )
-        parking_ways = kept
-        if parking:
-            tracks = load_track_lines(input_parquet)
-            parking_data = parking_rows(parking_ways, tracks)
-            parking_by_tile = parking_rows_by_tile(parking_data, zoom)
-            logger.info(
-                "parking: %d ways -> %d rows in %d tiles",
-                len(parking_ways),
-                sum(len(rows) for rows in parking_by_tile.values()),
-                len(parking_by_tile),
-            )
-        sidewalk_data = sidewalk_centerlines(parking_ways)
-        mapped_sidewalks = load_footway_sidewalks(input_parquet)
-        sidewalk_data.extend(mapped_sidewalks)
+    # The three layers share the same road source, so it is read once, but each
+    # one is built on its own flag: sidewalks used to sit inside the parking/
+    # lamps branch, so --no-parking --no-lamps silently dropped a layer that has
+    # no flag of its own.
+    logger.info("Building sidewalks, parked cars and street lamps")
+    parking_ways = load_parking_ways(input_parquet)
+    cemetery_area = load_cemetery_areas(input_parquet)
+    kept = outside_cemeteries(parking_ways, cemetery_area)
+    if len(kept) != len(parking_ways):
         logger.info(
-            "sidewalks: %d procedural + %d mapped",
-            len(sidewalk_data) - len(mapped_sidewalks),
-            len(mapped_sidewalks),
+            "parking: dropped %d ways inside cemeteries",
+            len(parking_ways) - len(kept),
         )
-        sidewalk_by_tile = sidewalk_polygons_by_tile(sidewalk_data, parking_ways, zoom)
+    parking_ways = kept
+    if parking:
+        tracks = load_track_lines(input_parquet)
+        parking_data = parking_rows(parking_ways, tracks)
+        parking_by_tile = parking_rows_by_tile(parking_data, zoom)
         logger.info(
-            "sidewalks: %d ways -> %d polygons in %d tiles",
+            "parking: %d ways -> %d rows in %d tiles",
             len(parking_ways),
-            sum(len(rows) for rows in sidewalk_by_tile.values()),
-            len(sidewalk_by_tile),
+            sum(len(rows) for rows in parking_by_tile.values()),
+            len(parking_by_tile),
         )
-        if lamps:
-            lamp_by_tile = lamp_spots(parking_ways, zoom)
-            logger.info(
-                "lamps: %d ways -> %d lamps in %d tiles",
-                len(parking_ways),
-                sum(len(spots) for spots in lamp_by_tile.values()),
-                len(lamp_by_tile),
-            )
+    sidewalk_data = sidewalk_centerlines(parking_ways)
+    mapped_sidewalks = load_footway_sidewalks(input_parquet)
+    sidewalk_data.extend(mapped_sidewalks)
+    logger.info(
+        "sidewalks: %d procedural + %d mapped",
+        len(sidewalk_data) - len(mapped_sidewalks),
+        len(mapped_sidewalks),
+    )
+    sidewalk_by_tile = sidewalk_polygons_by_tile(sidewalk_data, parking_ways, zoom)
+    logger.info(
+        "sidewalks: %d ways -> %d polygons in %d tiles",
+        len(parking_ways),
+        sum(len(rows) for rows in sidewalk_by_tile.values()),
+        len(sidewalk_by_tile),
+    )
+    if lamps:
+        lamp_by_tile = lamp_spots(parking_ways, zoom)
+        logger.info(
+            "lamps: %d ways -> %d lamps in %d tiles",
+            len(parking_ways),
+            sum(len(spots) for spots in lamp_by_tile.values()),
+            len(lamp_by_tile),
+        )
     # Rooftop equipment is independent of the parking/lamps pass.
     rooftop_by_tile, solar_buildings = load_rooftop_accessories(input_parquet)
     logger.info(
