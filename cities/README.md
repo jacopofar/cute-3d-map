@@ -1,8 +1,21 @@
 # City profiles
 
-Optional file-driven overrides for the tile generator. The Milan profile is
-used automatically; copy this folder for another city and pass
+You can provide config to customize the look of the map for a specific area/city.
+
+The one for Milano is already included as an example.
+
+You can generate multiple cities in different pass and simply put all the tiles
+together.
+
+Copy this folder for another city and pass
 `--city-dir ../cities/<name>` from `tilegen/`.
+
+
+You can set:
+
+* overrides for building colors
+* whole GLTF models for a building (replacing the original)
+* colors and lengths of public transport vehicles, overall and by line
 
 ## `city.json`
 

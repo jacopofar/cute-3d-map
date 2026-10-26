@@ -1,6 +1,9 @@
 # tilegen
 This is the component that can read a PBF file and generate the data tiles for the 3D visualization.
 
+Optionally GTFS data can be used for public transport, in that case the user can
+click e.g. on a bus and see its name and direction which is nice.
+
 Usage:
 
 ```bash

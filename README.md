@@ -1,19 +1,21 @@
 # Demo: MapLibre + Three.js + GeoJSON 3D buildings and trees
 
-This project renders OSM-derived 3D content (extruded buildings, trees, tree
-rows, animated water) on top of a MapLibre map, using Three.js as a custom
-layer. Unlike the original
-[MapLibre 3D model example](https://maplibre.org/maplibre-gl-js/docs/examples/add-3d-model/),
-the geometry is not a GLTF model: it is generated at runtime from GeoJSON tiles,
-converted from EPSG:4326 to local meters and extruded into meshes.
+This project renders OSM-derived 3D diorama (animated vehicles, buildings, trees,
+ water) on top of a MapLibre map, using Three.js as a custom layer.
+
+The diorama is interactive, you can see details of elements by clicking, follow
+cars and public transport and **drive around**. The map even changes look depending
+on the day/night cycle.
+
 
 ![A map with buildings rendered in red](example.png)
 
 ## How it works
 
-The project has two halves:
+The project has two halves: `tilegen` to process the data nd generate tiles and
+a frontend to render it, statically serving them.
 
-1. **`tilegen/`** (Python, run offline) — reads an OSM PBF extract, converts it
+1. **`tilegen/`** (Python, runs offline) — reads an OSM PBF extract, converts it
    to GeoParquet with [QuackOSM](https://github.com/InsightSoftwareConsortium/QuackOSM),
    then uses [DuckDB](https://duckdb.org) with the `spatial` extension to slice
    the data into static JSON tiles at Web-Mercator zoom 15 (`public/tiles/{x}/{y}.json`).
@@ -108,14 +110,15 @@ The project has two halves:
 
 ### Imputed tags
 
-Only a couple of percent of buildings carry `building:colour` (0.5%),
-`roof:shape` (2.1%) or `roof:colour` (1.5%), so the generator fills each of those
-in rather than leave the tiles nearly featureless. A missing value is **drawn
-from the distribution of the values that are present** in the same extract — a
-dataset that is 30% red roofs yields 30% red imputed roofs — and the draw is
-seeded from the building's id, so a rebuild reproduces the same tiles. The
-frontend never imputes: it reads `color`, `roof_shape` and `roof_color` and maps
-anything it cannot draw (e.g. `roof:shape=skillion`) to a flat roof.
+Only a small percent of buildings carry `*colour*` tags, so the generator fills
+each of those in rather than leave the tiles nearly featureless.
+A missing value is **drawn from the distribution of the values that are present**
+in the same extract — a dataset that is 30% red roofs yields 30% red imputed
+roofs — and the draw is seeded from the building's id, so a rebuild reproduces
+the same colors. The frontend never imputes: it reads `color`, `roof_shape`
+and `roof_color` and maps anything it cannot draw (e.g. `roof:shape=skillion`)
+to a flat roof. In the frontend is posible to disable the imputed colors on the
+fly.
 
 ### Buildings
 
@@ -126,20 +129,16 @@ The popup also has a **G** button that downloads the building as a `.glb`.
 The layers menu (the gear at the top left) turns the **windows**, **balconies**,
 **roof shapes**, **water**, **church crosses**, **parked cars**, **lamp posts**
 and **imputed colors** on and off, with a question mark beside the last one
-explaining what imputation means. All but imputed colors are mesh visibility switches (water's is
-all-or-nothing: unchecked, no water is drawn); imputed colors are baked into the
-geometry and so reload the loaded tiles.
+explaining what imputation means.
 
 ### Light and atmosphere
 
-The scene opens on the real sun over Milan (`src/daynight.ts`): the date's solar
-declination and the hour angle (the slider is local mean solar time) give the key
-light's direction and altitude. The directional light casts soft shadows over a
-2 km cascade that follows the view; a transparent `ShadowMaterial` plane is the
-only shadow receiver, so the shadows stay on the ground instead of banding roofs
-and walls. Sky/fog colors, ambient warmth
-and a whole-canvas warm multiply (`#grade`) follow the same model, so golden hour
-is warm with long shadows while noon is neutral.
+The scene opens on the real sun over Milan (`src/daynight.ts`): the current sun
+position over Milan is used, you need to change the code for other coordinates.
+
+The directional light casts soft shadows over a 2 km cascade following the view;
+Sky/fog colors, ambient warmth and a whole-canvas warm multiply (`#grade`)
+follow the same model, so golden hour is warm with long shadows.
 
 The **basemap** checkbox swaps the MapTiler style for an empty one, leaving the
 3D scene on its own; unchecking it is useful for screenshots and for checking
@@ -789,15 +788,3 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
   stubbed tiles and assert by mesh kind, and a pytest suite for `tilegen/`
   (reported with coverage, floor 80%). The Playwright specs do assert geometry,
   through `__coolMap`'s read-only probes (`src/debug.ts`).
-
-## Ideas / TODO
-
-The working list lives in local, uncommitted notes. Highlights:
-
-- dwells at tram stops and junctions (a time keyframe table instead of a single
-  constant speed per loop)
-- more rail coverage: rails form few closed loops, so most track (lines and
-  termini) carries no train; a there-and-back route would cover it
-- drive speeds and volumes from data (census counts, GTFS schedules)
-- a server that generates tiles on demand with a backing database
-  (pyosmium/quackosm + SQLite/JSON), or shortbread/vector tiles

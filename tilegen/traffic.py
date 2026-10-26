@@ -587,8 +587,7 @@ def find_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[L
         if loop is not None:
             loop.kind = kind
             loops.append(loop)
-            if len(loops) % 100 == 0:
-                logger.info(f"Found {len(loops)} so far")
+            logger.info(f"Found {len(loops)} so far")
     loops.sort(key=lambda loop: loop.id)
     return loops
 
