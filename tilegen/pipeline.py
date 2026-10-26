@@ -809,6 +809,7 @@ def parquet_to_tiles(
     city_dir: Path | None = None,
 ) -> None:
     """Build every render tile from one parquet, including optional layers."""
+    duckdb.install_extension("spatial")
     duckdb.load_extension("spatial")
     zoom = TILE_ZOOM
     city = load_city(city_dir)

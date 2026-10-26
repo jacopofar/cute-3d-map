@@ -1140,6 +1140,7 @@ def test_rooftop_kind_maps_the_supported_tags():
 
 
 def test_load_rooftop_accessories_marks_the_solar_building(tmp_path):
+    duckdb.install_extension("spatial")
     duckdb.load_extension("spatial")
     path = tmp_path / "rooftops.parquet"
     con = duckdb.connect()
