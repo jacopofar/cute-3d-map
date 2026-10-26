@@ -24,7 +24,12 @@ import {
   type SceneStats,
 } from "./perf.ts";
 import { TileLoader, disposeFacadeDetail } from "./tile_loader.ts";
-import { asSceneKind, type MeshKind, type SceneKind } from "./mesh_kinds.ts";
+import {
+  asSceneKind,
+  isMeshKind,
+  type MeshKind,
+  type SceneKind,
+} from "./mesh_kinds.ts";
 import {
   BASEMAP_DAY,
   BASEMAP_NIGHT,
@@ -146,6 +151,9 @@ interface ThreeJSLayerInterface extends CustomLayerInterface {
   renderer?: THREE.WebGLRenderer;
   map: MapLibreMap;
 }
+
+// MapLibre's second argument to the custom layer's render callback
+type RenderArgs = Parameters<NonNullable<CustomLayerInterface["render"]>>[1];
 
 class CoolMap implements MapDebug {
   tileCenter: [number, number];
@@ -275,6 +283,10 @@ class CoolMap implements MapDebug {
   private cloudsEnabled = true;
   // move fires continuously; debounce the tile load/unload pass
   private moveDebounce: ReturnType<typeof setTimeout> | undefined;
+  // model to Mercator, rebuilt only when the origin moves: it was three
+  // rotation matrices and a translation allocated every frame for a value that
+  // changes once per origin reset
+  private readonly localMatrix = new THREE.Matrix4();
 
   private modelTransform: {
     translateX: number;
@@ -431,6 +443,7 @@ class CoolMap implements MapDebug {
       // in this case is 3.5646655226473536e-8
       scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits(),
     };
+    this.rebuildLocalMatrix();
     // the render callback is invoked with the layer as `this`, so capture
     // the map instance to reach the (mutable) modelTransform
     const coolMap = this;
@@ -532,146 +545,7 @@ class CoolMap implements MapDebug {
       },
       // the renderer owns its own GL context; this argument is unused
       render(_gl, args) {
-        coolMap.perf.recordFrame(performance.now());
-        const modelTransform = coolMap.modelTransform;
-        const rotationX = new THREE.Matrix4().makeRotationAxis(
-          new THREE.Vector3(1, 0, 0),
-          modelTransform.rotateX,
-        );
-        const rotationY = new THREE.Matrix4().makeRotationAxis(
-          new THREE.Vector3(0, 1, 0),
-          modelTransform.rotateY,
-        );
-        const rotationZ = new THREE.Matrix4().makeRotationAxis(
-          new THREE.Vector3(0, 0, 1),
-          modelTransform.rotateZ,
-        );
-
-        const m = new THREE.Matrix4().fromArray(
-          args.defaultProjectionData.mainMatrix,
-        );
-        const l = new THREE.Matrix4()
-          .makeTranslation(
-            modelTransform.translateX,
-            modelTransform.translateY,
-            modelTransform.translateZ,
-          )
-          .scale(
-            new THREE.Vector3(
-              modelTransform.scale,
-              -modelTransform.scale,
-              modelTransform.scale,
-            ),
-          )
-          .multiply(rotationX)
-          .multiply(rotationY)
-          .multiply(rotationZ);
-
-        // Alternatively, you can use this API to get the correct model matrix.
-        // It will work regardless of current projection.
-        // Also see the example "globe-3d-model.html".
-        //
-        // const modelMatrix = args.getMatrixForModel(modelOrigin, modelAltitude);
-        // const m = new THREE.Matrix4().fromArray(matrix);
-        // const l = new THREE.Matrix4().fromArray(modelMatrix);
-
-        this.camera.projectionMatrix = m.multiply(l);
-        // raycaster (for click-picking) needs the inverse to unproject NDC
-        this.camera.projectionMatrixInverse
-          .copy(this.camera.projectionMatrix)
-          .invert();
-        const originMeters = epsg4326toEpsg3857(coolMap.tileCenter);
-        const scaleFactor = Math.cos(
-          (2 * Math.PI * coolMap.tileCenter[1]) / 360,
-        );
-        // cull vehicles whose run is outside what the camera can see; the
-        // renderer pads this window before dropping anything
-        const bounds = coolMap.map.getBounds();
-        const view = {
-          west: bounds.getWest(),
-          south: bounds.getSouth(),
-          east: bounds.getEast(),
-          north: bounds.getNorth(),
-        };
-        if (coolMap.carsTraffic) {
-          coolMap.carsTraffic.update(originMeters, scaleFactor, view);
-        }
-        if (coolMap.trainsTraffic) {
-          coolMap.trainsTraffic.update(originMeters, scaleFactor, view);
-        }
-        if (coolMap.busesTraffic) {
-          coolMap.busesTraffic.update(originMeters, scaleFactor, view);
-        }
-        if (coolMap.tramsTraffic) {
-          coolMap.tramsTraffic.update(originMeters, scaleFactor, view);
-        }
-        coolMap.updateFollow();
-        coolMap.drive.update(originMeters, scaleFactor);
-        coolMap.updateClouds(originMeters, scaleFactor);
-        // planes are placed from wall-clock time and the loaded runways
-        coolMap.airplanes?.update(originMeters, scaleFactor, {
-          zoom: coolMap.map.getZoom(),
-          now: performance.now(),
-        });
-        // drive the water ripples from wall-clock time (the render loop runs
-        // every frame via triggerRepaint)
-        waterMaterial.uniforms.uTime.value = performance.now() / 1000;
-        fountainWaterMaterial.uniforms.uTime.value = performance.now() / 1000;
-        // MapLibre bakes the view into the projection, so recover the eye from
-        // it each frame: the glitter path needs a view direction that follows
-        // a pan or a tilt
-        cameraCenter(
-          this.camera.projectionMatrix,
-          waterMaterial.uniforms.uCameraPosition.value as THREE.Vector3,
-        );
-        greenMaterial.uniforms.uTime.value = performance.now() / 1000;
-        // the trees' canopy sway, patched into their Lambert material
-        treeSway.value = performance.now() / 1000;
-        coolMap.nightLights?.update(performance.now() / 1000);
-        if (this.renderer) {
-          this.renderer.resetState();
-          // bloom only at night, where the lit windows and lamps are; by day it
-          // would just soften the whole city and cost two extra passes
-          let bloomed = false;
-          if (
-            coolMap.bloom &&
-            coolMap.bloomEnabled &&
-            !coolMap.softwareRenderer &&
-            coolMap.light.night > BLOOM_NIGHT_AT
-          ) {
-            try {
-              bloomed = coolMap.bloom.render(this.scene, this.camera);
-            } catch (error) {
-              // a failed pass must never cost us the frame: fall through to the
-              // direct render, and try the pass again next frame
-              console.warn(
-                "bloom pass failed, falling back to direct render",
-                error,
-              );
-              bloomed = false;
-            }
-          }
-          if (!bloomed) {
-            this.renderer.render(this.scene, this.camera);
-            // renderer.info now describes the scene, before the bloom passes
-            // (which render quads) overwrite it
-            coolMap.lastSceneDraw.calls = this.renderer.info.render.calls;
-            coolMap.lastSceneDraw.triangles =
-              this.renderer.info.render.triangles;
-          } else if (coolMap.bloom) {
-            coolMap.lastSceneDraw.calls = coolMap.bloom.lastSceneInfo.calls;
-            coolMap.lastSceneDraw.triangles =
-              coolMap.bloom.lastSceneInfo.triangles;
-          }
-          // hand a clean context back to MapLibre: resetState unbinds our
-          // targets and restores the default framebuffer
-          this.renderer.resetState();
-        } else {
-          // this.renderer is set up on onAdd, so it should always be present
-          // but typescript does not know that
-          throw Error("render called when renderer is missing!!");
-        }
-        this.map.triggerRepaint();
+        coolMap.renderFrame(this, args);
       },
     };
 
@@ -829,6 +703,151 @@ class CoolMap implements MapDebug {
   }
 
   // click a building or a water body to highlight it and show its info
+  // The model-to-Mercator matrix: translate to the origin, scale from meters
+  // to Mercator units (Y flipped, since Mercator's Y counts south), then the
+  // model's own rotation. Rebuilt on an origin reset, not per frame.
+  private rebuildLocalMatrix(): void {
+    const transform = this.modelTransform;
+    this.localMatrix
+      .makeTranslation(
+        transform.translateX,
+        transform.translateY,
+        transform.translateZ,
+      )
+      .scale(
+        new THREE.Vector3(transform.scale, -transform.scale, transform.scale),
+      )
+      .multiply(
+        new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(1, 0, 0),
+          transform.rotateX,
+        ),
+      )
+      .multiply(
+        new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(0, 1, 0),
+          transform.rotateY,
+        ),
+      )
+      .multiply(
+        new THREE.Matrix4().makeRotationAxis(
+          new THREE.Vector3(0, 0, 1),
+          transform.rotateZ,
+        ),
+      );
+  }
+
+  // One frame of the custom layer. Kept out of the layer literal so the literal
+  // stays a description of the layer and this reads as the frame it is.
+  private renderFrame(layer: ThreeJSLayerInterface, args: RenderArgs): void {
+    this.perf.recordFrame(performance.now());
+    const m = new THREE.Matrix4().fromArray(
+      args.defaultProjectionData.mainMatrix,
+    );
+
+    // Alternatively, you can use this API to get the correct model matrix.
+    // It will work regardless of current projection.
+    // Also see the example "globe-3d-model.html".
+    //
+    // const modelMatrix = args.getMatrixForModel(modelOrigin, modelAltitude);
+    // const m = new THREE.Matrix4().fromArray(matrix);
+    // const l = new THREE.Matrix4().fromArray(modelMatrix);
+
+    layer.camera.projectionMatrix = m.multiply(this.localMatrix);
+    // raycaster (for click-picking) needs the inverse to unproject NDC
+    layer.camera.projectionMatrixInverse
+      .copy(layer.camera.projectionMatrix)
+      .invert();
+    const originMeters = epsg4326toEpsg3857(this.tileCenter);
+    const scaleFactor = Math.cos((2 * Math.PI * this.tileCenter[1]) / 360);
+    // cull vehicles whose run is outside what the camera can see; the
+    // renderer pads this window before dropping anything
+    const bounds = this.map.getBounds();
+    const view = {
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    };
+    if (this.carsTraffic) {
+      this.carsTraffic.update(originMeters, scaleFactor, view);
+    }
+    if (this.trainsTraffic) {
+      this.trainsTraffic.update(originMeters, scaleFactor, view);
+    }
+    if (this.busesTraffic) {
+      this.busesTraffic.update(originMeters, scaleFactor, view);
+    }
+    if (this.tramsTraffic) {
+      this.tramsTraffic.update(originMeters, scaleFactor, view);
+    }
+    this.updateFollow();
+    this.drive.update(originMeters, scaleFactor);
+    this.updateClouds(originMeters, scaleFactor);
+    // planes are placed from wall-clock time and the loaded runways
+    this.airplanes?.update(originMeters, scaleFactor, {
+      zoom: this.map.getZoom(),
+      now: performance.now(),
+    });
+    // drive the water ripples from wall-clock time (the render loop runs
+    // every frame via triggerRepaint)
+    waterMaterial.uniforms.uTime.value = performance.now() / 1000;
+    fountainWaterMaterial.uniforms.uTime.value = performance.now() / 1000;
+    // MapLibre bakes the view into the projection, so recover the eye from
+    // it each frame: the glitter path needs a view direction that follows
+    // a pan or a tilt
+    cameraCenter(
+      layer.camera.projectionMatrix,
+      waterMaterial.uniforms.uCameraPosition.value as THREE.Vector3,
+    );
+    greenMaterial.uniforms.uTime.value = performance.now() / 1000;
+    // the trees' canopy sway, patched into their Lambert material
+    treeSway.value = performance.now() / 1000;
+    this.nightLights?.update(performance.now() / 1000);
+    if (layer.renderer) {
+      layer.renderer.resetState();
+      // bloom only at night, where the lit windows and lamps are; by day it
+      // would just soften the whole city and cost two extra passes
+      let bloomed = false;
+      if (
+        this.bloom &&
+        this.bloomEnabled &&
+        !this.softwareRenderer &&
+        this.light.night > BLOOM_NIGHT_AT
+      ) {
+        try {
+          bloomed = this.bloom.render(layer.scene, layer.camera);
+        } catch (error) {
+          // a failed pass must never cost us the frame: fall through to the
+          // direct render, and try the pass again next frame
+          console.warn(
+            "bloom pass failed, falling back to direct render",
+            error,
+          );
+          bloomed = false;
+        }
+      }
+      if (!bloomed) {
+        layer.renderer.render(layer.scene, layer.camera);
+        // renderer.info now describes the scene, before the bloom passes
+        // (which render quads) overwrite it
+        this.lastSceneDraw.calls = layer.renderer.info.render.calls;
+        this.lastSceneDraw.triangles = layer.renderer.info.render.triangles;
+      } else if (this.bloom) {
+        this.lastSceneDraw.calls = this.bloom.lastSceneInfo.calls;
+        this.lastSceneDraw.triangles = this.bloom.lastSceneInfo.triangles;
+      }
+      // hand a clean context back to MapLibre: resetState unbinds our
+      // targets and restores the default framebuffer
+      layer.renderer.resetState();
+    } else {
+      // layer.renderer is set up on onAdd, so it should always be present
+      // but typescript does not know that
+      throw Error("render called when renderer is missing!!");
+    }
+    this.map.triggerRepaint();
+  }
+
   private onMapClick(event: {
     point: { x: number; y: number };
     lngLat: LngLat;
@@ -987,10 +1006,10 @@ class CoolMap implements MapDebug {
   private syncAfterTileLoad() {
     this.syncTraffic();
     this.syncAirplanes();
+    // syncBuildingDetail ends by applying the tile visibility, which is what
+    // makes a tile that arrived after its checkbox was toggled pick up the
+    // current switches (the power and park-path layers too)
     this.syncBuildingDetail();
-    // a tile can arrive after its checkbox was toggled, so it picks up the
-    // current switches here (this covers the power and park-path layers too)
-    this.applyTileVisibility();
     this.light.refreshSunShadow();
   }
 
@@ -1099,6 +1118,7 @@ class CoolMap implements MapDebug {
       rotateZ: 0,
       scale: newScale,
     };
+    this.rebuildLocalMatrix();
     this.tileCenter = [center.lng, center.lat];
     // the highlight is in the old origin's model space; drop it
     this.selection.clear();
@@ -1129,6 +1149,35 @@ class CoolMap implements MapDebug {
     if (on) this.syncTraffic();
   }
 
+  // The few layers that only cover the tiles around the view centre (facade,
+  // parked cars, night lights) need the same 3x3 window. The whole loaded window
+  // is seven tiles across, which is far more detail than the view can show.
+  private centerTileRecords(): Map<string, TileRecord> {
+    const [cx, cy] = getTileIndex(this.map.getCenter());
+    const records = new Map<string, TileRecord>();
+    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
+      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
+        const key = `${x}_${y}`;
+        const record = this.tiles.get(key);
+        if (record) records.set(key, record);
+      }
+    }
+    return records;
+  }
+
+  // The frame every model coordinate is relative to. Rebuilt rather than cached
+  // because an origin reset changes it, and a reset mid-frame would otherwise
+  // place a layer one origin behind.
+  private modelFrame(): {
+    originMeters: [number, number];
+    scaleFactor: number;
+  } {
+    return {
+      originMeters: epsg4326toEpsg3857(this.tileCenter),
+      scaleFactor: scaleFactorAt(this.tileCenter[1]),
+    };
+  }
+
   // build the window/door meshes for the tiles around the centre, and drop the
   // rest. Called on the debounced move, on tile load/unload and after an origin
   // reset, so it is cheap when nothing changed (it only checks keys).
@@ -1141,30 +1190,23 @@ class CoolMap implements MapDebug {
       this.clearBuildingDetail();
       return;
     }
-    const [cx, cy] = getTileIndex(this.map.getCenter());
-    const keep = new Set<string>();
-    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
-      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
-        const key = `${x}_${y}`;
-        keep.add(key);
-        const record = this.tiles.get(key);
-        // not loaded yet: loadTile runs this again when it arrives
-        if (!record || record.detail) continue;
-        const originMeters = epsg4326toEpsg3857(this.tileCenter);
-        const scaleFactor = scaleFactorAt(this.tileCenter[1]);
-        const detail = tileFacadeDetail(
-          originMeters,
-          scaleFactor,
-          record.objects.buildings,
-        );
-        record.detail = {
-          windows: this.addDetailMesh(key, "windows", detail.windows),
-          balconies: this.addDetailMesh(key, "balconies", detail.balconies),
-        };
-      }
+    const center = this.centerTileRecords();
+    const { originMeters, scaleFactor } = this.modelFrame();
+    for (const [key, record] of center) {
+      // already built: a later move only re-checks the window
+      if (record.detail) continue;
+      const detail = tileFacadeDetail(
+        originMeters,
+        scaleFactor,
+        record.objects.buildings,
+      );
+      record.detail = {
+        windows: this.addDetailMesh(key, "windows", detail.windows),
+        balconies: this.addDetailMesh(key, "balconies", detail.balconies),
+      };
     }
     for (const [key, record] of this.tiles) {
-      if (keep.has(key) || !record.detail) continue;
+      if (center.has(key) || !record.detail) continue;
       disposeFacadeDetail(this.customLayer.scene, record.detail);
       record.detail = undefined;
     }
@@ -1352,8 +1394,9 @@ class CoolMap implements MapDebug {
     const on = layer.visible();
     this.loader.forEachMesh((mesh) => {
       const kind = asSceneKind(mesh.userData.kind);
-      // a city-profile model is not owned by any visibility switch
-      if (kind && kind !== "custom_model" && layer.kinds.includes(kind)) {
+      // the scene-only kinds (a city-profile model, a parked car) are not owned
+      // by any visibility switch
+      if (kind && isMeshKind(kind) && layer.kinds.includes(kind)) {
         mesh.visible = on;
       }
     });
@@ -1468,17 +1511,13 @@ class CoolMap implements MapDebug {
       this.applyParkedCarVisibility();
       return;
     }
-    const [cx, cy] = getTileIndex(this.map.getCenter());
     const tiles: ParkedTile[] = [];
-    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
-      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
-        const key = `${x}_${y}`;
-        const spots = this.tiles.get(key)?.objects.parking;
-        if (spots) tiles.push({ key, spots });
+    for (const [key, record] of this.centerTileRecords()) {
+      if (record.objects.parking) {
+        tiles.push({ key, spots: record.objects.parking });
       }
     }
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
+    const { originMeters, scaleFactor } = this.modelFrame();
     // the distance LOD follows the view center: cars within
     // PARKED_CAR_DETAIL_RADIUS get the full body, the rest a box. The layer
     // quantizes this, so only a meaningful move rebuilds the split.
@@ -1502,23 +1541,16 @@ class CoolMap implements MapDebug {
   // night and zoom in the layer.
   private syncNightLights() {
     if (!this.nightLights) return;
-    const [cx, cy] = getTileIndex(this.map.getCenter());
     const tiles: NightLightTile[] = [];
-    for (let x = cx - FACADE_TILE_MARGIN; x <= cx + FACADE_TILE_MARGIN; x++) {
-      for (let y = cy - FACADE_TILE_MARGIN; y <= cy + FACADE_TILE_MARGIN; y++) {
-        const key = `${x}_${y}`;
-        const lamps = this.tiles.get(key)?.objects.lamps ?? [];
-        const signals = this.tiles.get(key)?.objects.signals ?? [];
-        const floods = this.tiles.get(key)?.objects.floodlights ?? [];
-        if (lamps.length > 0 || signals.length > 0 || floods.length > 0) {
-          // the raw per-tile arrays are the identity the layer diffs on, so do
-          // not copy them here
-          tiles.push({ key, lamps, signals, floods });
-        }
+    for (const [key, record] of this.centerTileRecords()) {
+      const { lamps, signals, floodlights: floods } = record.objects;
+      if (lamps.length > 0 || signals.length > 0 || floods.length > 0) {
+        // the raw per-tile arrays are the identity the layer diffs on, so do
+        // not copy them here
+        tiles.push({ key, lamps, signals, floods });
       }
     }
-    const originMeters = epsg4326toEpsg3857(this.tileCenter);
-    const scaleFactor = scaleFactorAt(this.tileCenter[1]);
+    const { originMeters, scaleFactor } = this.modelFrame();
     this.nightLights.setTiles(tiles, originMeters, scaleFactor);
     this.applyNightLightsVisibility();
   }

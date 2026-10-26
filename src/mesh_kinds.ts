@@ -49,13 +49,38 @@ export const MESH_KINDS = [
 
 export type MeshKind = (typeof MESH_KINDS)[number];
 
-// A city-profile GLTF replaces a building's generated volume and carries its
-// own materials, so it is a mesh the scene can hold but not a kind a tile
-// builder produces. Everything that reads `userData.kind` off a scene object
-// has to accept it.
-export const SCENE_KINDS = [...MESH_KINDS, "custom_model"] as const;
+// Scene kinds that are not produced by a tile builder: the scene layers that
+// own their own meshes (parked cars, the fleet bodies, the facade detail, the
+// night sprites) and a city-profile GLTF, which replaces a building's volume
+// and carries its own materials. Everything that reads `userData.kind` off a
+// scene object accepts these too, so the perf counters keep reporting them as
+// their own bucket instead of lumping them into "other".
+export const SCENE_ONLY_KINDS = [
+  "airplane",
+  "custom_model",
+  "driving_car",
+  "facade",
+  "floodlight",
+  "floodlight_mast",
+  "floodlight_pool",
+  "lamplight",
+  "lamp_pool",
+  "lamppost",
+  "parked_car",
+  "signal_light",
+  "signal_post",
+] as const;
+
+export const SCENE_KINDS = [...MESH_KINDS, ...SCENE_ONLY_KINDS] as const;
 
 export type SceneKind = (typeof SCENE_KINDS)[number];
+
+const MESH_KIND_SET: ReadonlySet<string> = new Set(MESH_KINDS);
+
+/** Narrows a scene kind to one a tile builder can produce. */
+export function isMeshKind(kind: SceneKind): kind is MeshKind {
+  return MESH_KIND_SET.has(kind);
+}
 
 /**
  * The kind tag on a scene object, or undefined when it is not one this module
