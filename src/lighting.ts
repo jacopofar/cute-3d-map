@@ -50,7 +50,10 @@ export const basemapStyleUrl = (name: string): string =>
 // one the user last chose instead of a frame of the other one.
 export function initialHour(savedNight: boolean | undefined): number {
   if (savedNight !== undefined) return savedNight ? NIGHT_HOUR : DAY_HOUR;
-  return Math.round(currentMilanSolarHour() * 4) / 4;
+  // a quarter-hour step, wrapped: the last minutes of the solar day round up to
+  // 24, which is 0 of the next one (the sun model handles 24, but the slider and
+  // the read-back state are documented as 0..24)
+  return (Math.round(currentMilanSolarHour() * 4) / 4) % 24;
 }
 
 export function isNightHour(hour: number): boolean {
