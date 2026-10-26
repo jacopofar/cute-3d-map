@@ -91,11 +91,13 @@ from loaders import (
     load_parking_ways,
     load_road_data,
     load_rooftop_accessories,
+    load_route_lines,
     load_track_lines,
     load_ways,
     outside_cemeteries,
     parking_rows_by_tile,
     sidewalk_polygons_by_tile,
+    snap_underground,
     terrace_positions_from_parquet,
 )
 from parking import parking_rows
@@ -110,6 +112,7 @@ from traffic import (
     TrafficConfig,
     Way,
     build_fleets,
+    fill_hidden,
     fleets_cache_key,
     fleets_from_records,
     fleets_to_records,
@@ -572,6 +575,21 @@ def _traffic_layers(
         logger.info(
             "GTFS paths: %s",
             {kind: len(loops) for kind, loops in gtfs_fleets.items()},
+        )
+    # every fleet learns where it runs under something by snapping onto the OSM
+    # network it follows: exact for a loop edge (it snaps to its own way, at
+    # zero distance) and the only way for a GTFS shape, which is feed geometry.
+    # Done after the cache, so the cached loops keep their plain shape.
+    networks = load_route_lines(input_parquet)
+    for kind, loops in fleets.items():
+        lines = networks["rail" if kind in ("train", "tram") else "road"]
+        for loop in loops:
+            fill_hidden(loop, [snap_underground(lines, seg) for seg in loop.segs])
+        logger.info(
+            "traffic %s: %d loops, %d with an underground stretch",
+            kind,
+            len(loops),
+            sum(1 for loop in loops if loop.hidden),
         )
     for fleet_type, loops in fleets.items():
         logger.info(f"for {fleet_type=} got {len(loops)} loops")

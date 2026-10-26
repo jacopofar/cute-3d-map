@@ -391,6 +391,38 @@ def test_a_running_track_is_green_ground_with_an_athletics_oval():
         assert not main.is_green(tags)
 
 
+def test_a_way_under_something_is_flagged_for_hiding():
+    # a tunnel, a covered section or anything mapped below ground hides its
+    # vehicles; building passages draw no portal but are under a building
+    assert main.runs_underground({"tunnel": "yes"})
+    assert main.runs_underground({"tunnel": "building_passage"})
+    assert main.runs_underground({"covered": "yes"})
+    assert main.runs_underground({"layer": "-1"})
+    assert not main.runs_underground({"tunnel": "no"})
+    assert not main.runs_underground({"tunnel": "culvert"})
+    assert not main.runs_underground({"layer": "1"})
+    assert not main.runs_underground({"bridge": "yes"})
+
+
+def test_a_shape_snaps_to_the_nearest_line_of_its_network():
+    from shapely.geometry import LineString
+
+    from loaders import route_network
+
+    surface = (LineString([(9.0, 45.0), (9.01, 45.0)]), False)
+    tunnel = (LineString([(9.0, 45.001), (9.01, 45.001)]), True)
+    network = route_network([surface, tunnel])
+
+    # five meters off the tunnel line: the offset does not matter, the way it
+    # follows does
+    assert main.snap_underground(network, [(9.005, 45.00095)]) == [True]
+    # the same shape over the surface line
+    assert main.snap_underground(network, [(9.005, 45.0)]) == [False]
+    # far from both networks: nothing to inherit
+    assert main.snap_underground(network, [(9.005, 45.02)]) == [False]
+    assert main.snap_underground(route_network([]), [(9.005, 45.0)]) == [False]
+
+
 def test_lane_features_carry_width_lanes_and_direction():
     tile_box = shapely.box(9.0, 45.0, 9.01, 45.01)
     road = geom("LINESTRING (9.0 45.0, 9.02 45.02)")

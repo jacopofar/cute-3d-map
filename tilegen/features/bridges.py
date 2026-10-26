@@ -42,6 +42,27 @@ def is_tunnel(tags) -> bool:
 # the only tunnels worth a portal: roads and railways. Most `tunnel=yes` ways in
 # the extract are footway/steps underpasses (thousands of them), which are not
 # the road tunnel the user pictures and would bury the scene in tiny frames.
+def runs_underground(tags) -> bool:
+    """Whether a way runs under something, for hiding vehicles on it.
+
+    Broader than `is_tunnel` on purpose: a building passage draws no portal
+    (thousands of footway underpasses would bury the scene in frames) but a
+    vehicle inside one has to be off the map, and a way mapped below ground is
+    under it whatever its tunnel tag says."""
+    tunnel = tags.get("tunnel")
+    # `building_passage` is in TUNNEL_SKIP for portals, but it is exactly a way
+    # under a building, so only "no" and a culvert are excluded here
+    if tunnel is not None and tunnel not in ("no", "culvert"):
+        return True
+    if tags.get("covered") == "yes":
+        return True
+    layer = tags.get("layer")
+    try:
+        return layer is not None and float(layer) < 0
+    except (TypeError, ValueError):
+        return False
+
+
 PORTAL_CLASSES = frozenset(
     {
         "motorway",

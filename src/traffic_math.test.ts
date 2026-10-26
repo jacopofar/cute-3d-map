@@ -10,6 +10,7 @@ import {
   VIEW_PADDING,
   axisOf,
   compactSlots,
+  hiddenAt,
   coordKey,
   crossingShift,
   crossingsAlongLoop,
@@ -270,5 +271,25 @@ describe("crossingsAlongLoop", () => {
     // no geometry behind it, so the braking side collapses
     expect(found[0].brake).toBe(0);
     expect(found[0].recover).toBeGreaterThan(10);
+  });
+});
+
+describe("hiddenAt", () => {
+  it("is half-open, so a portal is not both in and out", () => {
+    const windows: [number, number][] = [
+      [10, 20],
+      [30, 40],
+    ];
+    expect(hiddenAt(windows, 9.99)).toBe(false);
+    expect(hiddenAt(windows, 10)).toBe(true);
+    expect(hiddenAt(windows, 19.99)).toBe(true);
+    expect(hiddenAt(windows, 20)).toBe(false);
+    expect(hiddenAt(windows, 35)).toBe(true);
+    expect(hiddenAt(windows, 45)).toBe(false);
+  });
+
+  it("hides nothing on a route with no underground stretch", () => {
+    expect(hiddenAt([], 0)).toBe(false);
+    expect(hiddenAt([], 1234.5)).toBe(false);
   });
 });

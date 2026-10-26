@@ -278,7 +278,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   over frames) and culls runs outside the map bounds, so the CPU only samples
   what is on screen; positions stay a pure function of time. `pick()` raycasts
   the visible instances and returns the loop's GTFS `meta` for the click popup;
-  `positionAt()` gives the camera follow its exact drawn lon/lat/heading.
+  `positionAt()` gives the camera follow its exact drawn lon/lat/heading. A
+  vehicle whose loop time falls in one of the loop's `hidden` windows is not
+  placed at all (zero matrix) and cannot be picked: there is no ground geometry
+  to hide it behind, so a car under a tunnel would otherwise drive over the park
+  above it. It pops out at the far portal, which is what the eye expects.
 - `src/parking_layout.ts` — walks the tile's authored parking rows (kerb line,
   style, pitch, side, occupancy) and places the occupied cars in model space.
   Pure and unit-tested; `geojson_data` turns the result into `ParkedCar`s.
@@ -376,7 +380,12 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   keys against it, which is the tilegen half of the contract the frontend
   re-states in TypeScript.
 - `tilegen/loaders.py` — parquet/DuckDB loaders and per-tile authoring helpers
-  (parking rows, sidewalks, rooftop gear, road data).
+  (parking rows, sidewalks, rooftop gear, road data). `load_route_lines` reads
+  every railed/road way with its underground flag for `snap_underground`, which
+  is how a GTFS shape learns where it runs under something: the shape is the
+  feed's own geometry and sits a median of ~20 m off the OSM alignment, so it is
+  snapped to the nearest line of its own network (60 m) and inherits that way's
+  flag rather than testing distance to the tunnels themselves.
 - `tilegen/pipeline.py` — tile assembly and serialization; `tile_to_geojson`,
   `parquet_to_tiles` and the fleet/report stages.
 - `tilegen/impute.py` — fills a building's missing color/roof tags by sampling
@@ -390,7 +399,10 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   Takes plain `Way` inputs and does no OSM I/O itself (`loaders.load_ways` reads
   the parquet), so it is dependency-free and unit-tested in `tilegen/tests/`.
   A loop may carry `meta` (GTFS line/route/headsign); it survives the cache and
-  the per-tile traffic block.
+  the per-tile traffic block. `Way.underground` (a tunnel, a covered section,
+  `layer < 0`, or a `tunnel=building_passage`) becomes the loop's `hidden`
+  windows through `hidden_windows`, computed on the same clock `split_runs`
+  walks, so a window lines up with the drawn vehicle.
 - `tilegen/tile_inspector.py` — flat SVG/PNG inspector for an area of generated
   tiles. Reads `public/tiles/{x}/{y}.json`, draws one logical color per
   `cmtype` with no basemap or decoration; Pillow is only needed for PNG.
@@ -466,6 +478,11 @@ layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
   fleet and body. GTFS loops also carry a `meta` block for the popup.
 - **run** — the piece of a loop that falls inside one tile, with `[t0, t1)`
   seconds into the loop's `period` and a `times` keyframe per coordinate.
+- **hidden window** — `[t0, t1)` loop seconds where a route runs under something
+  and its vehicles are not drawn at all. Tilegen derives them from the ways'
+  tags (`runs_underground`: tunnel, covered, `layer < 0`, building passage), or
+  for GTFS from the shape snapped onto the OSM network. A window that falls over
+  the period seam is split in two, since a run's times never wrap.
 - **phase** — a vehicle's 0..1 offset along its loop; vehicles are spread
   `k/n` so spacing is even.
 - **period** — seconds for one lap of a loop (the sum of its seg times, since

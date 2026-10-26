@@ -220,6 +220,9 @@ class Loop:
     meta: dict | None = None
     # optional body length override, e.g. a shorter tram on some lines
     vehicle_length: float | None = None
+    # loop-time seconds where the vehicle is under something and must not be
+    # drawn: [(t0, t1), ...], sorted, inside [0, period)
+    hidden: list[tuple[float, float]] = field(default_factory=list)
 
     @property
     def v(self) -> float:
@@ -469,6 +472,107 @@ def _face_to_loop(graph: Graph, walk: list[tuple[str, str]], config: TrafficConf
         length=length,
         period=loop_period(segs, speeds),
     )
+
+
+def hidden_windows(
+    segs: list[list[tuple[float, float]]],
+    seg_starts: list[float],
+    seg_durations: list[float],
+    underground: list[list[bool]],
+    period: float,
+) -> list[tuple[float, float]]:
+    """The loop-time intervals where the vehicle is out of sight.
+
+    `underground[i][j]` says whether point j of seg i runs under something. A
+    window opens on the first such point and closes on the first surface point
+    after it, which is exactly a portal for an OSM edge (an edge ends where the
+    way does) and one sample of slack for a GTFS shape. A window that falls over
+    the period seam is split in two, since a run's times never wrap.
+    """
+    # one (time, hidden) sample per point, in loop order
+    samples: list[tuple[float, bool]] = []
+    for index, coords in enumerate(segs):
+        if not coords:
+            continue
+        lengths = [haversine_m(p, q) for p, q in pairwise(coords)]
+        total = sum(lengths)
+        covered = underground[index] if index < len(underground) else []
+        walked = 0.0
+        for point, length in enumerate(lengths):
+            fraction = walked / total if total else 0.0
+            samples.append(
+                (
+                    seg_starts[index] + seg_durations[index] * fraction,
+                    bool(covered[point]) if point < len(covered) else False,
+                )
+            )
+            walked += length
+        # the last point closes the segment at its end time
+        samples.append(
+            (
+                seg_starts[index] + seg_durations[index],
+                bool(covered[-1]) if covered else False,
+            )
+        )
+
+    windows: list[tuple[float, float]] = []
+    start: float | None = None
+    for time, covered_now in samples:
+        if covered_now and start is None:
+            start = time
+        elif not covered_now and start is not None:
+            windows.append((start, time))
+            start = None
+    if start is not None and samples:
+        end = max(period, samples[-1][0])
+        windows.append((start, end))
+        # a tunnel the loop starts inside: the tail is the part before the seam
+        first_surface = next(
+            (time for time, covered_now in samples if not covered_now), None
+        )
+        if first_surface is not None and first_surface > 0:
+            windows.append((0.0, first_surface))
+    return [(round(a, 3), round(b, 3)) for a, b in windows if b > a]
+
+
+def loop_schedule(loop: Loop) -> tuple[list[float], list[float]]:
+    """Each seg's start time and travel time, dwells included: the same clock
+    `split_runs` walks, so a hidden window lines up with the drawn position."""
+    starts: list[float] = []
+    durations: list[float] = []
+    elapsed = 0.0
+    for index, (seg, speed) in enumerate(zip(loop.segs, loop.seg_speeds)):
+        duration = (
+            loop.seg_times[index]
+            if loop.seg_times is not None and index < len(loop.seg_times)
+            else (seg_length(seg) / speed if speed > 0 else 0.0)
+        )
+        starts.append(elapsed)
+        durations.append(duration)
+        elapsed += duration
+        dwell = (
+            loop.seg_dwells[index]
+            if loop.seg_dwells is not None and index < len(loop.seg_dwells)
+            else 0.0
+        )
+        elapsed += dwell
+    return starts, durations
+
+
+def fill_hidden(loop: Loop, per_point: list[list[bool]]) -> None:
+    """Work out where the loop is under something and store the windows. Takes
+    one flag per point of each seg: a whole edge for the OSM fleets (an edge
+    ends where the way does, so that is a portal), a snapped flag per shape
+    point for GTFS."""
+    starts, durations = loop_schedule(loop)
+    loop.hidden = hidden_windows(loop.segs, starts, durations, per_point, loop.period)
+
+
+def seg_flags(
+    segs: list[list[tuple[float, float]]], flags: list[bool]
+) -> list[list[bool]]:
+    """Broadcast one flag per seg to one per point."""
+    return [[flag] * max(1, len(seg)) for seg, flag in zip(segs, flags)]
 
 
 def find_loops(graph: Graph, config: TrafficConfig, kind: str = "car") -> list[Loop]:
@@ -840,6 +944,11 @@ def loops_to_tiles(loops: list[Loop], zoom: int) -> dict[tuple[int, int], list[d
                     "v": round(loop.v, 3),
                     "period": round(loop.period, 3),
                     "runs": runs,
+                    **(
+                        {"hidden": [[round(a, 3), round(b, 3)] for a, b in loop.hidden]}
+                        if loop.hidden
+                        else {}
+                    ),
                     "vehicles": [
                         {"phase": round(v["phase"], 6), "color": v["color"]}
                         for v in loop.vehicles
@@ -893,6 +1002,7 @@ def loops_to_records(loops: list[Loop]) -> list[dict]:
             "vehicles": [dict(vehicle) for vehicle in loop.vehicles],
             "meta": loop.meta,
             "vehicle_length": loop.vehicle_length,
+            "hidden": [[round(a, 3), round(b, 3)] for a, b in loop.hidden],
         }
         for loop in loops
     ]
@@ -907,6 +1017,7 @@ def loops_from_records(records: list[dict]) -> list[Loop]:
             period=record["period"],
             seg_speeds=list(record["seg_speeds"]),
             segs=[[(coord[0], coord[1]) for coord in seg] for seg in record["segs"]],
+            hidden=[tuple(window) for window in record.get("hidden", [])],
             seg_times=record.get("seg_times"),
             seg_dwells=record.get("seg_dwells"),
             vehicles=[

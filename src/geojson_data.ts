@@ -452,6 +452,9 @@ export interface TrafficLoop {
   period: number; // seconds for one lap
   runs: TrafficRun[];
   vehicles: TrafficVehicle[];
+  // loop seconds where the route runs under something (a tunnel, a covered
+  // section, a building passage): the vehicle is not drawn there
+  hidden?: [number, number][];
   // a city-profile body length for this line, in meters; absent means the
   // fleet default in traffic.ts
   vehicleLength?: number;
@@ -1368,6 +1371,7 @@ interface RawTrafficLoop {
   runs: TrafficRun[];
   vehicles: { phase: number; color: string }[];
   vehicle_length?: number;
+  hidden?: [number, number][];
   meta?: TrafficLoop["meta"];
 }
 
@@ -1450,6 +1454,7 @@ function trafficIn(document: { traffic?: RawTrafficLoop[] }): TrafficLoop[] {
       color: parseInt(vehicle.color, 16),
     })),
     vehicleLength: loop.vehicle_length,
+    hidden: loop.hidden,
     meta: loop.meta,
   }));
 }

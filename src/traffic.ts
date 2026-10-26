@@ -12,6 +12,7 @@ import {
   type PreparedCrossing,
   type PreparedRun,
   type TrafficView,
+  hiddenAt,
 } from "./traffic_math";
 import {
   simpleVehicleGeometry,
@@ -71,6 +72,8 @@ interface PreparedVehicle {
   phase: number;
   period: number;
   color: number;
+  // loop seconds where the route runs under something; shared per loop
+  hidden: [number, number][];
   // body length in meters, from the loop's city override or the fleet default
   length: number;
   // shared by every vehicle on the loop, so the geometry is prepared once
@@ -295,6 +298,7 @@ export class TrafficRenderer {
         vehicles: TrafficLoop["vehicles"];
         vehicleLength?: number;
         meta?: TrafficLoop["meta"];
+        hidden: [number, number][];
       }
     >();
     for (const loop of loops) {
@@ -307,6 +311,7 @@ export class TrafficRenderer {
           vehicles: loop.vehicles,
           vehicleLength: loop.vehicleLength,
           meta: loop.meta,
+          hidden: loop.hidden ?? [],
         };
         byId.set(loop.id, group);
       }
@@ -325,6 +330,7 @@ export class TrafficRenderer {
           phase: vehicle.phase,
           period: group.period,
           color: vehicle.color,
+          hidden: group.hidden,
           length: group.vehicleLength ?? this.config.length,
           runs: group.runs,
           crossings,
@@ -369,6 +375,11 @@ export class TrafficRenderer {
       const slot = hit.instanceId;
       if (slot === undefined || slot >= this.visibleCount) continue;
       const vehicle = this.vehicles[this.slots[slot]];
+      const tau =
+        (this.now() + vehicle.phase * vehicle.period) % vehicle.period;
+      if (hiddenAt(vehicle.hidden, tau < 0 ? tau + vehicle.period : tau)) {
+        continue;
+      }
       return {
         meta: vehicle.meta,
         point: hit.point,
@@ -484,6 +495,7 @@ export class TrafficRenderer {
         const vehicle = this.vehicles[i];
         let tau = (now + vehicle.phase * vehicle.period) % vehicle.period;
         if (tau < 0) tau += vehicle.period;
+        if (hiddenAt(vehicle.hidden, tau)) return false;
         const run = findRun(vehicle.runs, tau);
         return run !== undefined && (!cull || runInView(run, cull));
       },
@@ -517,6 +529,11 @@ export class TrafficRenderer {
     const period = vehicle.period;
     let tau = (now + vehicle.phase * period) % period;
     if (tau < 0) tau += period;
+    // under a tunnel there is nothing to draw it against: it is simply gone
+    if (hiddenAt(vehicle.hidden, tau)) {
+      this.mesh.setMatrixAt(slot, this.hidden);
+      return;
+    }
     // the cosmetic speed bump through crossings shifts which point of the
     // loop is drawn, but returns to zero, so the schedule is untouched
     let drawn = tau + crossingShift(tau, vehicle.crossings, now);

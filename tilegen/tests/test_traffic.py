@@ -437,3 +437,80 @@ def test_fleet_cache_key_is_stable_and_input_sensitive():
     # so is a different graph
     moved = {"car": square_ways(9.19, 45.5, 0.001)}
     assert traffic.fleets_cache_key(moved, configs) != key
+
+
+def metric_square_ways(lon, lat, meters):
+    """A square with equal sides in meters, which a degree square is not."""
+    dlat = meters / 111_320.0
+    dlon = meters / (111_320.0 * math.cos(math.radians(lat)))
+    corners = [
+        (lon - dlon, lat - dlat),
+        (lon + dlon, lat - dlat),
+        (lon + dlon, lat + dlat),
+        (lon - dlon, lat + dlat),
+    ]
+    return [
+        Way([corners[i], corners[(i + 1) % 4]], highway="residential") for i in range(4)
+    ]
+
+
+def test_a_tunnel_way_hides_its_stretch_of_the_loop():
+    ways = metric_square_ways(9.18, 45.5, 120.0)
+    loop = traffic.find_loops(traffic.build_graph(ways), TrafficConfig())[0]
+    # the second side runs under something: its vehicles must vanish there
+    traffic.fill_hidden(loop, traffic.seg_flags(loop.segs, [False, True, False, False]))
+    assert loop.hidden, "the loop should carry a hidden window"
+    (start, end) = loop.hidden[0]
+    assert 0 <= start < end <= loop.period
+    # one side of the square is a quarter of the lap, and it is the second one
+    assert end - start == pytest.approx(loop.period / 4, rel=0.02)
+    assert start == pytest.approx(loop.period / 4, rel=0.02) or start == pytest.approx(
+        loop.period / 4, abs=loop.period * 0.05
+    )
+
+
+def test_a_surface_loop_hides_nothing():
+    ways = square_ways(9.18, 45.5, 0.001)
+    loop = traffic.find_loops(traffic.build_graph(ways), TrafficConfig())[0]
+    traffic.fill_hidden(loop, traffic.seg_flags(loop.segs, [False] * 4))
+    assert loop.hidden == []
+
+
+def test_hidden_windows_splits_a_tunnel_over_the_period_seam():
+    # a loop whose first and last points are both under something: the tail is
+    # the part before the seam, the head the part after it
+    segs = [[(0.0, 0.0), (0.0, 0.001)], [(0.0, 0.001), (0.0, 0.0)]]
+    windows = traffic.hidden_windows(
+        segs, [0.0, 10.0], [10.0, 10.0], [[True], [True]], 20.0
+    )
+    assert windows == [(0.0, 20.0)] or sum(b - a for a, b in windows) == 20.0
+
+
+def test_hidden_windows_closes_at_the_first_surface_point():
+    segs = [[(0.0, 0.0), (0.0, 0.001)], [(0.0, 0.001), (0.0, 0.002)]]
+    windows = traffic.hidden_windows(
+        segs, [0.0, 10.0], [10.0, 10.0], [[True], [False]], 20.0
+    )
+    # open at t=0, closed when the second seg starts
+    assert windows == [(0.0, 10.0)]
+
+
+def test_the_tile_entry_carries_the_windows():
+    ways = square_ways(9.18, 45.5, 0.001)
+    loop = traffic.find_loops(traffic.build_graph(ways), TrafficConfig())[0]
+    traffic.fill_hidden(loop, traffic.seg_flags(loop.segs, [False, False, True, False]))
+    loop.vehicles = [{"phase": 0.0, "color": "#ffffff"}]
+    tiles = traffic.loops_to_tiles([loop], 15)
+    entries = [entry for runs in tiles.values() for entry in runs]
+    assert entries
+    assert all("hidden" in entry for entry in entries)
+    assert all(len(entry["hidden"]) == 1 for entry in entries)
+
+
+def test_the_cache_round_trip_keeps_the_windows():
+    ways = square_ways(9.18, 45.5, 0.001)
+    loop = traffic.find_loops(traffic.build_graph(ways), TrafficConfig())[0]
+    traffic.fill_hidden(loop, traffic.seg_flags(loop.segs, [False, False, True, False]))
+    records = traffic.fleets_to_records({"car": [loop]})
+    back = traffic.fleets_from_records(records)["car"][0]
+    assert back.hidden == loop.hidden

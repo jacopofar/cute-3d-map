@@ -85,6 +85,7 @@ from features import (  # noqa: F401 - re-exported for the existing API/tests
     portal_angle,
     power_wire_height,
     road_width,
+    runs_underground,
     terrace_place,
     to_aeroway,
     to_bench,
@@ -143,6 +144,7 @@ from loaders import (  # noqa: F401 - re-exported for the existing API/tests
     rooftop_feature,
     rooftop_kind,
     sidewalk_polygons_by_tile,
+    snap_underground,
     terrace_positions_from_parquet,
 )
 from parking import (  # noqa: F401 - ParkingRow/ParkingWay are re-exported for tests

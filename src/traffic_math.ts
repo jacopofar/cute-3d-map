@@ -165,6 +165,20 @@ export function coordKey(lon: number, lat: number): string {
   return `${Math.round(lon * 1e6)},${Math.round(lat * 1e6)}`;
 }
 
+// Whether the vehicle is under cover at this loop-time. There is no ground
+// geometry to hide it behind (the basemap is flat), so a vehicle in a tunnel is
+// simply not drawn: it disappears at the portal and comes back at the far one.
+// The windows are half-open and never wrap (tilegen splits one over the seam).
+export function hiddenAt(
+  windows: readonly (readonly [number, number])[],
+  tau: number,
+): boolean {
+  for (const [start, end] of windows) {
+    if (tau >= start && tau < end) return true;
+  }
+  return false;
+}
+
 // The signed shift (seconds) added to a vehicle's loop-time as it passes its
 // crossings. On a red axis the vehicle slows over `brake` seconds, is back at
 // cruise at the crossing and eases back over `recover`; on green it eases up and

@@ -10,6 +10,7 @@ import json
 import logging
 import math
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
@@ -28,6 +29,7 @@ from features import (
     parse_lane_count,
     parse_length,
     road_width,
+    runs_underground,
     terrace_place,
     way_bearing,
 )
@@ -246,6 +248,95 @@ def load_track_lines(input_parquet: Path) -> list[LineString]:
             if isinstance(part, LineString):
                 lines.append(part)
     return lines
+
+
+# the rail networks a tram shape can follow when it is snapped back onto OSM
+RAIL_LINES = frozenset({"rail", "tram", "light_rail", "narrow_gauge"})
+
+
+@dataclass
+class RouteNetwork:
+    """A vehicle network for snapping: the ways, their underground flags, and
+    one spatial index. The index is the point: a shape is snapped per segment,
+    so rebuilding it per call would be quadratic."""
+
+    lines: list[LineString]
+    underground: list[bool]
+    tree: shapely.STRtree
+
+
+def route_network(lines: list[tuple[LineString, bool]]) -> RouteNetwork:
+    """Index a list of (line, underground) pairs for `snap_underground`."""
+    return RouteNetwork(
+        lines=[line for line, _ in lines],
+        underground=[flag for _, flag in lines],
+        tree=shapely.STRtree([line for line, _ in lines]),
+    )
+
+
+def load_route_lines(input_parquet: Path) -> dict[str, RouteNetwork]:
+    """Every way a vehicle can run along, with its underground flag, indexed.
+
+    Grouped by network ("rail" for trains and trams, "road" for cars and buses)
+    so a tram shape cannot snap to a road tunnel that happens to run beside it."""
+    rows = duckdb.execute(
+        """
+        select tags, ST_AsWKB(geometry)
+        from read_parquet($input_path)
+        where tags['railway'] is not null or tags['highway'] is not null
+        """,
+        {"input_path": str(input_parquet)},
+    ).fetchall()
+    pairs: dict[str, list[tuple[LineString, bool]]] = {"rail": [], "road": []}
+    for tags, wkb in rows:
+        railway = tags.get("railway")
+        highway = tags.get("highway")
+        if railway in RAIL_LINES:
+            network = "rail"
+        elif highway in DRIVABLE_HIGHWAYS:
+            network = "road"
+        else:
+            continue
+        geometry = shapely.from_wkb(wkb)
+        parts = geometry.geoms if isinstance(geometry, MultiLineString) else [geometry]
+        underground = runs_underground(tags)
+        for part in parts:
+            if isinstance(part, LineString):
+                pairs[network].append((part, underground))
+    return {name: route_network(lines) for name, lines in pairs.items()}
+
+
+# a shape that snaps further than this from any line of its own network is not
+# running on it (a feed stub, a depot access track), so it counts as surface
+SNAP_TOLERANCE_M = 60.0
+
+
+def snap_underground(
+    network: RouteNetwork,
+    points: list[tuple[float, float]],
+    tolerance_m: float = SNAP_TOLERANCE_M,
+) -> list[bool]:
+    """Whether each point of a route runs under something.
+
+    A loop seg snaps to its own way at zero distance, so this is exact for the
+    OSM fleets. A GTFS shape is the feed's own geometry and sits a median of
+    ~20 m off the OSM alignment, where a distance-to-tunnel test would miss most
+    of a bore; the nearest line of the same network does not care about the
+    offset, only that the shape follows it, and hands over that way's flag."""
+    if not network.lines or not points:
+        return [False] * len(points)
+    # degrees are the unit shapely measures in here; 1 degree of latitude is
+    # 111.32 km and the tolerance does not need the cos(latitude) correction
+    tolerance = tolerance_m / 111_320.0
+    flags: list[bool] = []
+    for point in points:
+        probe = Point(point)
+        index = int(network.tree.nearest(probe))
+        line = network.lines[index]
+        flags.append(
+            bool(network.underground[index]) and line.distance(probe) <= tolerance
+        )
+    return flags
 
 
 def load_cemetery_areas(input_parquet: Path) -> BaseGeometry | None:
