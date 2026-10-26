@@ -73,7 +73,17 @@ specs boot against the generated tiles, which are not in the repo.
   tile pass runs.
 - `src/geojson_data.ts` — fetches `tiles/{x}/{y}.json`, converts features to
   Three.js geometry via `src/elements3d/`, and merges one `BufferGeometry` per
-  kind per tile (vertex colors, so a tile is a handful of draw calls).
+  kind per tile (vertex colors, so a tile is a handful of draw calls). The
+  cmtype dispatch is one table (`BUILDERS`), so a new layer is a row plus its
+  material rather than a branch in a chain; the material record is total over
+  `MeshKind`, which is what stops a kind silently borrowing another's shader.
+- `src/mesh_kinds.ts` — `MESH_KINDS` / `MeshKind` (what a tile builder can
+  produce) and `SCENE_KINDS` / `SceneKind` (those plus the scene-only meshes:
+  parked cars, the fleet bodies, facade detail, night sprites, a city-profile
+  GLTF). Every table keyed by a kind uses these types, and `asSceneKind` reads
+  `userData.kind` instead of casting it. `geojson_data.test.ts` compares
+  `BUILDER_CMTYPES` with tilegen's `BY_CMTYPE` in both directions, so the two
+  halves of the tile contract cannot drift apart unnoticed.
 - `src/ui/html.ts` — `escapeHtml` and the OSM link the click popups are built
   from. `src/ui/checkboxes.ts` — the layer checkboxes' state, remembered in one
   cookie keyed by the label id, with `restoreCheckboxStates` /
@@ -379,7 +389,10 @@ specs boot against the generated tiles, which are not in the repo.
   terraces), `amenities` (construction, playgrounds, monuments, transit stops,
   fountains), `barriers`, `power`, `aeroways`. `__init__` re-exports the whole
   surface, so `from features import ...` does not care which module a builder
-  lives in. No parquet I/O; the loaders and pipeline import it.
+  lives in. No parquet I/O; the loaders and pipeline import it. Every builder
+  returns through `common.feature()`, which owns the GeoJSON envelope and the
+  rule that an absent tag is an absent key, and turns a point/line/area into the
+  point a point-only builder draws with `common.as_point()`.
 - `tilegen/tiles.py` — the tile contract: `TileFeature` (what a builder returns)
   and one `TypedDict` per `cmtype` for the properties inside it, plus
   `TileDocument`. A builder drops the keys whose value is `None`, so every
@@ -394,7 +407,10 @@ specs boot against the generated tiles, which are not in the repo.
   snapped to the nearest line of its own network (60 m) and inherits that way's
   flag rather than testing distance to the tunnels themselves.
 - `tilegen/pipeline.py` — tile assembly and serialization; `tile_to_geojson`,
-  `parquet_to_tiles` and the fleet/report stages.
+  `parquet_to_tiles` and the fleet/report stages. The per-feature read-only
+  inputs travel as one frozen `TileContext` and the authored per-tile blocks
+  (parking, sidewalks, rooftop gear, lamps) as one `TilePayload`, instead of
+  eleven- and seventeen-parameter lists.
 - `tilegen/impute.py` — fills a building's missing color/roof tags by sampling
   the distribution of the values that ARE present (seeded per building, so a
   rebuild reproduces the tiles). Pure: it takes counts and tag mappings, so it
