@@ -40,6 +40,9 @@ def lamp_spots(
     for way in ways:
         if way.roundabout or way.highway not in PARKING_HIGHWAYS:
             continue
+        # a lamp inside a tunnel would hang over whatever is above it
+        if way.underground:
+            continue
         if way_length(way.coords) < MIN_WAY_LENGTH:
             continue
         offset = ROAD_HALF_WIDTH.get(way.highway, DEFAULT_HALF_WIDTH) + LAMP_OFFSET

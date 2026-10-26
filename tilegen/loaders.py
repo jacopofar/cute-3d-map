@@ -220,6 +220,7 @@ def load_parking_ways(input_parquet: Path) -> list[ParkingWay]:
                         )
                         or (1.5 if value == "service" else 2.0),
                         width=road_width(tags),
+                        underground=runs_underground(tags),
                     )
                 )
     return ways

@@ -7,7 +7,7 @@ from geo import coord_to_tile
 LON, LAT = 9.0, 45.0
 
 
-def _way(highway="residential", length_m=220.0, roundabout=False):
+def _way(highway="residential", length_m=220.0, roundabout=False, underground=False):
     # a due-north way of roughly `length_m` metres
     lat_end = LAT + length_m / parking.METERS_PER_DEG_LAT
     return parking.ParkingWay(
@@ -15,6 +15,7 @@ def _way(highway="residential", length_m=220.0, roundabout=False):
         coords=[(LON, LAT), (LON, lat_end)],
         highway=highway,
         roundabout=roundabout,
+        underground=underground,
     )
 
 
@@ -59,3 +60,9 @@ def test_lamp_offset_is_outside_the_carriageway():
     half = parking.ROAD_HALF_WIDTH["residential"]
     assert all(distance > half for distance in east)
     assert all(distance < half + 2 for distance in east)
+
+
+def test_a_tunnel_gets_no_lamps():
+    # a lamp under the ground would hang over whatever is above the tunnel
+    assert _flatten(lamps.lamp_spots([_way(underground=True)])) == []
+    assert len(_flatten(lamps.lamp_spots([_way()]))) > 0

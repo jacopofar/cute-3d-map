@@ -117,6 +117,9 @@ class ParkingWay:
     sidewalk_width_right: float = 2.0
     # full OSM road width where it can be estimated; sidewalks sit outside this
     width: float | None = None
+    # the way runs under something: no kerb to park at, and a row of cars would
+    # draw on the park above the tunnel
+    underground: bool = False
 
 
 @dataclass(frozen=True)
@@ -573,6 +576,8 @@ def parking_rows(
 
     for way in ordered:
         if way.roundabout or way.highway not in PARKING_HIGHWAYS:
+            continue
+        if way.underground:
             continue
         if way_length(way.coords) < MIN_WAY_LENGTH:
             continue

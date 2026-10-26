@@ -172,6 +172,22 @@ def test_parking_rows_carry_style_pitch_and_both_sides():
     assert all(len(row.coords) >= 2 for row in rows)
 
 
+def test_a_tunnel_gets_no_parking_rows():
+    # a kerb row inside a bore would draw cars on the park above the tunnel
+    way = parking.ParkingWay(
+        id="way/11",
+        coords=[(9.0, 45.0), (9.0, 45.002)],
+        highway="tertiary",
+        underground=True,
+    )
+    assert parking.parking_rows([way]) == []
+    # and the same way above ground still gets its two rows
+    surface = parking.ParkingWay(
+        id="way/12", coords=[(9.0, 45.0), (9.0, 45.002)], highway="tertiary"
+    )
+    assert len(parking.parking_rows([surface])) == 2
+
+
 def test_parking_spots_is_stable_across_rebuilds():
     way = parking.ParkingWay(
         id="way/9",
