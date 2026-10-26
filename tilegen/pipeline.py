@@ -9,6 +9,8 @@ import json
 import logging
 import shutil
 from collections import defaultdict
+from collections.abc import Iterator
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
@@ -126,6 +128,62 @@ from traffic import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class TileContext:
+    """The read-only inputs every per-feature builder needs, so they travel as
+    one value instead of an eleven-parameter list.
+
+    Frozen because one context is shared by every tile of a run: a builder that
+    wrote through it would be editing another tile's inputs behind its back.
+    """
+
+    zoom: int
+    distributions: dict[str, Distribution] | None = None
+    terrace_positions: dict[str, tuple[float, float]] | None = None
+    road_data: dict[int, RoadData] | None = None
+    gate_bearings: dict[int, float] | None = None
+    solar_buildings: set[str] | None = None
+    city: CityProfile | None = None
+
+
+@dataclass
+class TilePayload:
+    """The per-tile blocks that are authored outside the feature loop.
+
+    Each block is keyed by tile, so a tile's parking rows, sidewalks, rooftop
+    gear and lamps are looked up by (x, y) instead of sliced by the caller and
+    threaded down as four more arguments.
+    """
+
+    parking: dict[tuple[int, int], list[dict]] = field(default_factory=dict)
+    sidewalk: dict[tuple[int, int], list[dict]] = field(default_factory=dict)
+    rooftop: dict[tuple[int, int], list[dict]] = field(default_factory=dict)
+    solar_buildings: set[str] = field(default_factory=set)
+    lamps: dict[tuple[int, int], list[list[float]]] = field(default_factory=dict)
+
+    def __iter__(
+        self,
+    ) -> Iterator[
+        dict[tuple[int, int], list[dict]]
+        | set[str]
+        | dict[tuple[int, int], list[list[float]]]
+    ]:
+        """The five blocks in the order callers unpacked the old five-tuple.
+
+        Keeping the order means the payload stays a drop-in where the tuple was
+        destructured, instead of forcing every such site onto attribute access.
+        """
+        return iter(
+            (
+                self.parking,
+                self.sidewalk,
+                self.rooftop,
+                self.solar_buildings,
+                self.lamps,
+            )
+        )
+
+
 def _green_union(data) -> shapely.Geometry:
     """Union of the tile's green areas, used to clip park paths."""
     shapes = [
@@ -142,18 +200,16 @@ def _render_feature(
     s: shapely.Geometry,
     tile_box: shapely.Geometry,
     green_union: shapely.Geometry,
-    distributions: dict[str, Distribution] | None,
-    terrace_positions: dict[str, tuple[float, float]] | None,
-    road_data: dict[int, RoadData] | None,
-    gate_bearings: dict[int, float] | None,
-    solar_buildings: set[str] | None,
-    city: CityProfile | None,
+    context: TileContext,
 ) -> list:
     """Dispatch one OSM feature to its render builder(s).
 
     Order is deliberate: a bridge before a building, a tunnel before water, and
     a building before the generic area handlers. The function returns a list
     because a crossing emits both its data-only point and its zebra geometry.
+
+    The context is unpacked right here, at the dispatch: this is the only place
+    that knows which slice of it each builder takes.
     """
     if is_bridge(tags):
         # building=bridge is a bridge, not a house
@@ -168,10 +224,10 @@ def _render_feature(
                 feature_id,
                 tags,
                 s,
-                distributions,
-                solar_buildings,
-                city.building_override(feature_id, tags, cast(BaseGeometry, s))
-                if city
+                context.distributions,
+                context.solar_buildings,
+                context.city.building_override(feature_id, tags, cast(BaseGeometry, s))
+                if context.city
                 else None,
             )
         ]
@@ -182,14 +238,14 @@ def _render_feature(
     if tags.get("highway") == "traffic_signals":
         return [
             to_traffic_signal(feature_id, tags, s),
-            to_road_marking(feature_id, tags, s, road_data),
+            to_road_marking(feature_id, tags, s, context.road_data),
         ]
     if tags.get("highway") in ("stop", "give_way"):
-        return [to_road_marking(feature_id, tags, s, road_data)]
+        return [to_road_marking(feature_id, tags, s, context.road_data)]
     if tags.get("highway") == "crossing":
         return [
             to_crossing(feature_id, tags, s),
-            to_crosswalk(feature_id, tags, s, road_data),
+            to_crosswalk(feature_id, tags, s, context.road_data),
         ]
     if is_lane_road(tags):
         return [to_lane(feature_id, tags, s, tile_box)]
@@ -211,7 +267,7 @@ def _render_feature(
                 feature_id,
                 tags,
                 s,
-                (terrace_positions or {}).get(str(feature_id)),
+                (context.terrace_positions or {}).get(str(feature_id)),
             )
         ]
     if transit_kind(tags) is not None:
@@ -235,7 +291,7 @@ def _render_feature(
     if tags.get("aeroway") in (AEROWAY_LINE_KINDS | AEROWAY_AREA_KINDS):
         return [to_aeroway(feature_id, tags, s)]
     if tags.get("barrier") in GATE_BARRIERS:
-        return [to_gate(feature_id, tags, s, gate_bearings)]
+        return [to_gate(feature_id, tags, s, context.gate_bearings)]
     if tags.get("barrier") in WALL_BARRIERS or tags.get("wall"):
         return [to_wall(feature_id, tags, s, tile_box)]
     if tags.get("barrier") in FENCE_BARRIERS:
@@ -247,12 +303,9 @@ def tile_to_geojson(
     data,
     tile_x: int,
     tile_y: int,
-    zoom: int,
-    distributions: dict[str, Distribution] | None = None,
-    terrace_positions: dict[str, tuple[float, float]] | None = None,
-    road_data: dict[int, RoadData] | None = None,
-    gate_bearings: dict[int, float] | None = None,
-    solar_buildings: set[str] | None = None,
+    zoom: int | None = None,
+    context: TileContext | None = None,
+    *,
     city: CityProfile | None = None,
 ) -> tuple[list, list]:
     """Build the render features and the raw-tag features for one tile.
@@ -260,8 +313,23 @@ def tile_to_geojson(
     The road and rail network is deliberately not emitted: vehicle routes are
     precomputed wholesale in ``traffic.py``. Park paths are clipped to the
     tile's green union, so that union is built once here.
+
+    The per-feature inputs come in as one `context`, which the pipeline builds
+    once for the whole run. A caller with a single tile to render has nothing
+    to build it from, so `zoom` (and maybe `city`) fill an empty one in; an
+    explicit `city` also overrides the context's, which is what lets a probe
+    swap the city profile without copying the context.
     """
-    min_lon, min_lat, max_lon, max_lat = tile_lonlat_bounds(tile_x, tile_y, zoom)
+    if context is None:
+        context = TileContext(zoom=TILE_ZOOM if zoom is None else zoom, city=city)
+    else:
+        if zoom is not None:
+            context = replace(context, zoom=zoom)
+        if city is not None:
+            context = replace(context, city=city)
+    min_lon, min_lat, max_lon, max_lat = tile_lonlat_bounds(
+        tile_x, tile_y, context.zoom
+    )
     tile_box = shapely.box(min_lon, min_lat, max_lon, max_lat)
     green_union = _green_union(data)
     render: list = []
@@ -270,19 +338,7 @@ def tile_to_geojson(
         s = shapely.from_wkb(geometry)
         raw.append(feature(feature_id, s, tags))
         render.extend(
-            _render_feature(
-                feature_id,
-                tags,
-                s,
-                tile_box,
-                green_union,
-                distributions,
-                terrace_positions,
-                road_data,
-                gate_bearings,
-                solar_buildings,
-                city,
-            )
+            _render_feature(feature_id, tags, s, tile_box, green_union, context)
         )
     return [feature for feature in render if feature is not None], raw
 
@@ -346,10 +402,10 @@ def tag_distribution(input_parquet: Path, tag_key: str) -> Distribution | None:
 def building_distributions(input_parquet: Path) -> dict[str, Distribution]:
     """One distribution per imputed field, over the buildings that set the tag."""
     distributions: dict[str, Distribution] = {}
-    for field, tag in IMPUTED_FIELDS:
+    for name, tag in IMPUTED_FIELDS:
         distribution = tag_distribution(input_parquet, tag)
         if distribution is not None:
-            distributions[field] = distribution
+            distributions[name] = distribution
     return distributions
 
 
@@ -602,13 +658,7 @@ def _traffic_layers(
 
 def _static_layers(
     input_parquet: Path, zoom: int, parking: bool, lamps: bool
-) -> tuple[
-    dict[tuple[int, int], list[dict]],
-    dict[tuple[int, int], list[dict]],
-    dict[tuple[int, int], list[dict]],
-    set[str],
-    dict[tuple[int, int], list[list[float]]],
-]:
+) -> TilePayload:
     """Build parking, sidewalks, lamps and rooftop gear independently of traffic."""
     parking_by_tile: dict[tuple[int, int], list[dict]] = {}
     sidewalk_by_tile: dict[tuple[int, int], list[dict]] = {}
@@ -669,12 +719,12 @@ def _static_layers(
         len(rooftop_by_tile),
         len(solar_buildings),
     )
-    return (
-        parking_by_tile,
-        sidewalk_by_tile,
-        rooftop_by_tile,
-        solar_buildings,
-        lamp_by_tile,
+    return TilePayload(
+        parking=parking_by_tile,
+        sidewalk=sidewalk_by_tile,
+        rooftop=rooftop_by_tile,
+        solar_buildings=solar_buildings,
+        lamps=lamp_by_tile,
     )
 
 
@@ -682,51 +732,40 @@ def _write_tile(
     x: int,
     y: int,
     *,
-    zoom: int,
+    context: TileContext,
     features: list[tuple],
+    payload: TilePayload,
+    traffic_loops: list[dict] | None,
     target_folder: Path,
     target_folder_raw: Path | None,
-    distributions: dict[str, Distribution],
-    terrace_positions: dict[str, tuple[float, float]],
-    road_data: dict[int, RoadData],
-    gate_bearings: dict[int, float],
-    solar_buildings: set[str],
-    sidewalk_here: list[dict] | None,
-    rooftop_here: list[dict] | None,
-    traffic_loops: list[dict] | None,
-    parking_here: list[dict] | None,
-    lamps_here: list[list[float]] | None,
-    city: CityProfile | None,
 ) -> None:
-    """Render and write one tile document (and its raw twin when requested)."""
+    """Render and write one tile document (and its raw twin when requested).
+
+    The authored blocks (sidewalks, rooftop gear, parking rows, lamps) are read
+    back from the payload by tile key, so the caller does not slice four
+    same-shaped dictionaries and pass them down by hand.
+    """
+    sidewalk_here = payload.sidewalk.get((x, y))
+    rooftop_here = payload.rooftop.get((x, y))
+    parking_here = payload.parking.get((x, y))
+    lamps_here = payload.lamps.get((x, y))
     target_path = target_folder / str(x)
     target_path.mkdir(parents=True, exist_ok=True)
     target_path_raw = None
     if target_folder_raw is not None:
         target_path_raw = target_folder_raw / str(x)
         target_path_raw.mkdir(parents=True, exist_ok=True)
-    render, raw_features = tile_to_geojson(
-        features,
-        x,
-        y,
-        zoom,
-        distributions,
-        terrace_positions,
-        road_data,
-        gate_bearings,
-        solar_buildings,
-        city,
-    )
+    render, raw_features = tile_to_geojson(features, x, y, context=context)
     if sidewalk_here:
         render.extend(sidewalk_here)
     if rooftop_here:
         render.extend(rooftop_here)
-    if city is not None and city.directory is not None:
+    if context.city is not None and context.city.directory is not None:
         for rendered in render:
             model = rendered.get("properties", {}).get("model")
             if not isinstance(model, dict) or "file" not in model:
                 continue
-            source = city.directory / model.pop("file")
+            source = context.city.directory / model.pop("file")
             asset_dir = target_path / f"{y}_assets"
             asset_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, asset_dir / source.name)
@@ -791,13 +830,7 @@ def parquet_to_tiles(
         if traffic
         else {}
     )
-    (
-        parking_by_tile,
-        sidewalk_by_tile,
-        rooftop_by_tile,
-        solar_buildings,
-        lamp_by_tile,
-    ) = _static_layers(input_parquet, zoom, parking, lamps)
+    payload = _static_layers(input_parquet, zoom, parking, lamps)
     # One scan groups every feature into the tiles it intersects, instead of a
     # full-parquet query per tile.
     features_by_tile = parquet_features_by_tile(input_parquet, zoom)
@@ -808,32 +841,36 @@ def parquet_to_tiles(
         f"road data for {len(road_data)} crossing/stop nodes, "
         f"{len(gate_bearings)} gates"
     )
+    # Built once, after every input it carries is loaded: these are exactly the
+    # values that do not change from one tile to the next.
+    context = TileContext(
+        zoom=zoom,
+        distributions=distributions,
+        terrace_positions=terrace_positions,
+        road_data=road_data,
+        gate_bearings=gate_bearings,
+        # the rooftop pass is where the solar buildings are found, but the
+        # building builder is who reads them, so the set seeds the context too
+        solar_buildings=payload.solar_buildings,
+        city=city,
+    )
     tiles = (
         set(features_by_tile)
         | set(traffic_by_tile)
-        | set(parking_by_tile)
-        | set(sidewalk_by_tile)
-        | set(rooftop_by_tile)
-        | set(lamp_by_tile)
+        | set(payload.parking)
+        | set(payload.sidewalk)
+        | set(payload.rooftop)
+        | set(payload.lamps)
     )
     for x, y in sorted(tiles):
         logger.info(f"Generating tile {x}/{y}")
         _write_tile(
             x,
             y,
-            zoom=zoom,
+            context=context,
             features=features_by_tile.get((x, y), []),
+            payload=payload,
+            traffic_loops=traffic_by_tile.get((x, y)),
             target_folder=target_folder,
             target_folder_raw=target_folder_raw,
-            distributions=distributions,
-            terrace_positions=terrace_positions,
-            road_data=road_data,
-            gate_bearings=gate_bearings,
-            solar_buildings=solar_buildings,
-            sidewalk_here=sidewalk_by_tile.get((x, y)),
-            rooftop_here=rooftop_by_tile.get((x, y)),
-            traffic_loops=traffic_by_tile.get((x, y)),
-            parking_here=parking_by_tile.get((x, y)),
-            lamps_here=lamp_by_tile.get((x, y)),
-            city=city,
         )
