@@ -9,7 +9,7 @@ import shapely
 
 from tiles import TileFeature
 
-from .common import _flatten, area_square_meters, parse_length
+from .common import _flatten, area_square_meters, parse_number
 
 RAIL_KINDS = frozenset({"rail", "tram"})
 
@@ -68,7 +68,7 @@ def to_rail(feature_id, tags, s, tile_box) -> TileFeature | None:
         return None
     if tags.get("bridge") not in (None, "no"):
         return None
-    layer = parse_length(tags.get("layer"))
+    layer = parse_number(tags.get("layer"))
     if layer not in (None, 0):
         return None
     clipped = _flatten(s.intersection(tile_box), "LineString")

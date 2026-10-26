@@ -9,7 +9,7 @@ import shapely
 
 from tiles import TileFeature
 
-from .common import parse_length
+from .common import parse_length, parse_number
 
 POWER_LINE_KINDS = frozenset({"line", "minor_line"})
 
@@ -27,7 +27,7 @@ def is_power_line(tags) -> bool:
 def power_wire_height(tags) -> float:
     """Approximate wire height from voltage, since OSM rarely tags line height.
     The tower default is 25 m; these keep the spans near the crossarms."""
-    voltage = parse_length(tags.get("voltage"))
+    voltage = parse_number(tags.get("voltage"))
     if voltage is None:
         return 20.0
     if voltage >= 380_000:

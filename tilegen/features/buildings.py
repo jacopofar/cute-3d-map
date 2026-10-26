@@ -12,7 +12,7 @@ from city import BuildingOverride
 from impute import impute
 from tiles import TileFeature
 
-from .common import parse_length, parse_level
+from .common import parse_length, parse_level, parse_number
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def building_top(tags, base: float) -> float | None:
         if max_level is not None:
             height = max_level * 3
         elif "building:levels" in tags:
-            levels = parse_length(tags["building:levels"])
+            levels = parse_number(tags["building:levels"])
             if levels is not None:
                 height = base + levels * 3
     if height is not None and height <= base:

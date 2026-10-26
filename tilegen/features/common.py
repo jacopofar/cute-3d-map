@@ -9,20 +9,67 @@ from math import atan2, cos, degrees, radians
 
 import shapely
 
+_NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
-def parse_length(value: str | None) -> float | None:
-    """Parse an OSM length value, which is a string and may carry a unit
-    suffix ("12", "12.5", "12 m"). Returns None when there is no usable number."""
+
+def _first_number(value: str | None) -> float | None:
+    """The first number in a tag value, or None. A comma is read as the decimal
+    separator: OSM tags are user-entered and both spellings show up."""
     if value is None:
         return None
-    parts = value.strip().split()
-    if not parts:
+    match = _NUMBER_RE.search(str(value))
+    if match is None:
         return None
-    token = parts[0].rstrip("m").strip()
-    try:
-        return float(token)
-    except ValueError:
+    return float(match.group().replace(",", "."))
+
+
+def parse_number(value: str | None) -> float | None:
+    """The first number in a tag value, with no unit interpretation: what a
+    `level`, a `layer` or a `voltage` needs. Returns None when there is no
+    usable number."""
+    return _first_number(value)
+
+
+# OSM lengths are meters by default, so the suffix is optional and often
+# absent; when it is there it changes the value, and "40 ft" is not 12 m.
+_LENGTH_UNITS = {
+    "": 1.0,
+    "m": 1.0,
+    "meter": 1.0,
+    "meters": 1.0,
+    "metre": 1.0,
+    "metres": 1.0,
+    "ft": 0.3048,
+    "foot": 0.3048,
+    "feet": 0.3048,
+    "'": 0.3048,
+    "in": 0.0254,
+    "inch": 0.0254,
+    "inches": 0.0254,
+    '"': 0.0254,
+    "cm": 0.01,
+    "mm": 0.001,
+    "km": 1000.0,
+}
+
+_LENGTH_RE = re.compile(r"(-?\d+(?:[.,]\d+)?)\s*([a-z'\"]*)")
+
+
+def parse_length(value: str | None) -> float | None:
+    """Parse an OSM length tag to meters.
+
+    A bare number is meters (the OSM default); a recognised suffix is honoured
+    ("12 m", "12m", "40 ft", "150 cm", "5'"). A suffix we do not know falls back
+    to meters, which is what the tag means when the mapper writes a note there.
+    Returns None when there is no usable number.
+    """
+    if value is None:
         return None
+    match = _LENGTH_RE.search(str(value).strip().lower())
+    if match is None:
+        return None
+    number = float(match.group(1).replace(",", "."))
+    return number * _LENGTH_UNITS.get(match.group(2), 1.0)
 
 
 # the first signed number in a level value: OSM levels can be a ";" list or a
