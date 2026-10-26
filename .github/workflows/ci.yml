@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The Playwright suite is not here on purpose: the specs boot the app against
+# the generated Milan tiles, which are not in the repo (public/tiles is
+# ignored). Run `npm run test:e2e` locally before merging, as AGENTS.md says.
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Format, types and unit tests
+        run: npm run test:check
+      - name: Unit coverage floor
+        run: npm run test:unit
+
+  tilegen:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tilegen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - name: Lint
+        run: uv run ruff check .
+      - name: Format
+        run: uv run ruff format --check .
+      - name: Type check
+        run: uv run ty check --project .
+      - name: Tests
+        run: uv run pytest

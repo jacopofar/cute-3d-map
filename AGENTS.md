@@ -26,11 +26,13 @@ decorative volumetric cloud layer.
 ## Build, test, verify
 
 - `npm run dev` — Vite dev server (needs `VITE_MAPTILER_KEY` in `.env`).
-- `npm run test:check` — the default per-change loop (~6 s): the app type check
-  (`test:types`), the Playwright specs' type check (`test:types:e2e`, see
-  `tsconfig.e2e.json`) and the unit suite without coverage.
+- `npm run test:check` — the default per-change loop (~7 s): the Prettier check
+  (`test:format`), the app type check (`test:types`), the Playwright specs' type
+  check (`test:types:e2e`, see `tsconfig.e2e.json`) and the unit suite without
+  coverage.
 - `npm run build` — type check plus production build.
-- `npm run test:unit` — vitest for the pure modules, with coverage (~4 s).
+- `npm run test:unit` — vitest for the modules with a unit test, with coverage
+  (~4 s) and thresholds that fail a drop of more than a point.
 - `npm run test:e2e:changed` — Playwright specs selected from the diff against
   `main`; the default per-change e2e (~30-90 s). `--list` previews the selection.
 - `npm run test:e2e:smoke` — boot and permalink specs only.
@@ -42,12 +44,17 @@ decorative volumetric cloud layer.
   records the display's idle frame interval as well: a phase whose `p50` matches
   it is vsync-limited (`capped`), so its absolute fps says nothing about the
   renderer and two runs on different monitors are not comparable.
-- `npm run prettify` — Prettier over `src/**/*.ts`. It also reformats unrelated
-  lines, so prefer formatting only the files you touched.
+- `npm run prettify` — Prettier over the same file set `test:format` checks. It
+  also reformats unrelated lines, so prefer formatting only the files you
+  touched.
 
 Per change, run `npm run test:check` and `npm run test:e2e:changed`. Run the full
 `npm run test:e2e` before merging, and after a tilegen change (it can affect every
-layer). `uv run pytest` in `tilegen/` reports coverage (`--cov`, floor 80%).
+layer). `uv run pytest` in `tilegen/` reports coverage, floor 80%.
+
+CI (`.github/workflows/ci.yml`) runs `test:check`, the coverage floor, ruff,
+`ruff format --check`, `ty check` and pytest. It does not run Playwright: the
+specs boot against the generated tiles, which are not in the repo.
 
 ## Architecture
 
