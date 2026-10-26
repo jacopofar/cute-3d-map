@@ -39,11 +39,17 @@ function coloured(
   return geometry;
 }
 
+// The position is a parameter rather than something the caller applies
+// afterwards: a rider's post is built by a different call than its seat, and
+// forgetting the translate silently stands it at the patch's center instead of
+// under the seat (which is exactly what happened before this signature).
 function cylinder(
+  x: number,
+  y: number,
+  baseZ: number,
   radiusTop: number,
   radiusBottom: number,
   height: number,
-  baseZ: number,
   segments: number,
   color: THREE.Color,
 ): THREE.BufferGeometry {
@@ -54,7 +60,7 @@ function cylinder(
     segments,
   );
   geometry.rotateX(Math.PI / 2);
-  geometry.translate(0, 0, baseZ + height / 2);
+  geometry.translate(x, y, baseZ + height / 2);
   return coloured(geometry, color);
 }
 
@@ -103,7 +109,7 @@ function slide(parts: THREE.BufferGeometry[], x: number, y: number): void {
 }
 
 function spring(parts: THREE.BufferGeometry[], x: number, y: number): void {
-  parts.push(cylinder(0.08, 0.1, 0.5, 0, 6, METAL));
+  parts.push(cylinder(x, y, 0, 0.08, 0.1, 0.5, 6, METAL));
   parts.push(box(x, y, 0.5, 0.55, 0.3, 0.12, SPRING));
   parts.push(box(x, y - 0.18, 0.62, 0.5, 0.06, 0.3, SPRING));
 }
