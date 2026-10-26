@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 import { hashSeed } from "./random";
 import { tombstoneSpots } from "./tombstone_rows";
 
@@ -82,7 +82,7 @@ export function cemetery(
     );
     if (rings.length === 0 || rings[0].length < 3) continue;
     const rng = (seed + hashPoint(rings[0][0])) >>> 0;
-    const builder = new BoxBuilder();
+    const builder = new MeshBuilder();
 
     const spots =
       budget > 0

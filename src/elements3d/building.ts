@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../projection";
+import { projectRings, shapeFromRings } from "./flat_polygon";
 import { parseColor } from "./color";
 import { DEFAULT_GLASS_COLOR, isGlass } from "./glass";
 import {
@@ -12,30 +12,6 @@ import {
   isChurch,
 } from "./church";
 import { DEFAULT_ROOF_COLOR, roofGeometry } from "./roof";
-
-function coordsToShape(
-  coords: Geojson.Position[][],
-  originMeters: [number, number],
-  scaleFactor: number,
-) {
-  const polyPoints: [number, number][] = coords[0].map((c) =>
-    toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-  );
-
-  const featureBaseShape = new THREE.Shape(
-    polyPoints.map((pp) => new THREE.Vector2(pp[0], pp[1])),
-  );
-  // now the holes, if any
-  for (let hi = 1; hi < coords.length; hi++) {
-    const holePoints = coords[hi].map((c) =>
-      toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-    );
-    featureBaseShape.holes.push(
-      new THREE.Path(holePoints.map((pp) => new THREE.Vector2(pp[0], pp[1]))),
-    );
-  }
-  return featureBaseShape;
-}
 
 function geoJSONtoHeight(f: BuildingFeature): number {
   // tilegen emits a number, but be defensive: height can be absent, or a
@@ -206,10 +182,8 @@ export function building(
 
   if (f.geometry.type === "MultiPolygon") {
     return f.geometry.coordinates.map((polygon) => {
-      const featureBaseShape = coordsToShape(
-        polygon,
-        originMeters,
-        scaleFactor,
+      const featureBaseShape = shapeFromRings(
+        projectRings(polygon, originMeters, scaleFactor),
       );
       const geometry = new THREE.ExtrudeGeometry(
         featureBaseShape,
@@ -220,10 +194,8 @@ export function building(
     });
   }
   if (f.geometry.type === "Polygon") {
-    const featureBaseShape = coordsToShape(
-      f.geometry.coordinates,
-      originMeters,
-      scaleFactor,
+    const featureBaseShape = shapeFromRings(
+      projectRings(f.geometry.coordinates, originMeters, scaleFactor),
     );
     const geometry = new THREE.ExtrudeGeometry(
       featureBaseShape,

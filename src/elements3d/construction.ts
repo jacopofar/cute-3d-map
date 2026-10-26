@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 import { pointInRing } from "./tombstone_rows";
 import { hashSeed } from "./random";
 
@@ -145,7 +145,7 @@ function crane(
   height: number,
   jib: number,
 ): THREE.BufferGeometry | null {
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
   b.box(0, 0, 0, 2.2, 2.2, 0.8, 0, CONCRETE);
   b.box(0, 0, 0.8, 0.9, 0.9, height, 0, CRANE);
   // jib and counter-jib along local y
@@ -187,7 +187,7 @@ function siteProps(
   y: number,
   seed: number,
 ): void {
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
   // two containers and a low material stack
   b.box(x, y, 0, 2.4, 1.2, 1.2, 0, CONTAINER_COLORS[seed % 4]);
   b.box(

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type Geojson from "geojson";
 
-import { toModelCoords } from "../projection";
+import { flatPolygon } from "./flat_polygon";
 import { applyVertexColor } from "./vertex_color";
 
 /*
@@ -47,33 +47,6 @@ export function greenColor(kind: string): THREE.Color {
   return new THREE.Color(GREEN_COLORS[kind] ?? DEFAULT_GREEN_COLOR);
 }
 
-// a flat, triangulated polygon (holes included) lying in the z = GREEN_Z plane
-function areaGeometry(
-  rings: Geojson.Position[][],
-  originMeters: [number, number],
-  scaleFactor: number,
-  z: number,
-): THREE.BufferGeometry | null {
-  const toVec = (c: Geojson.Position) =>
-    new THREE.Vector2(
-      ...toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-    );
-  const outline = new THREE.Shape(rings[0].map(toVec));
-  for (let h = 1; h < rings.length; h++) {
-    outline.holes.push(new THREE.Path(rings[h].map(toVec)));
-  }
-  const shape = new THREE.ShapeGeometry(outline);
-  // the shader shades the surface, so the flat normal/uv are dropped: every
-  // green geometry keeps the same position+color+aStyle set, or the per-tile
-  // merge would return null and the whole kind would be dropped
-  const geometry = shape.index ? shape.toNonIndexed() : shape;
-  geometry.deleteAttribute("normal");
-  geometry.deleteAttribute("uv");
-  const position = geometry.getAttribute("position");
-  for (let i = 0; i < position.count; i++) position.setZ(i, z);
-  return position.count >= 3 ? geometry : null;
-}
-
 // the shader style as a per-vertex attribute, so one mesh can hold both styles
 function applyStyle(geometry: THREE.BufferGeometry, style: number): void {
   const count = geometry.getAttribute("position").count;
@@ -98,7 +71,7 @@ export function green(
   const geometries: THREE.BufferGeometry[] = [];
 
   const addArea = (rings: Geojson.Position[][]) => {
-    const geometry = areaGeometry(rings, originMeters, scaleFactor, z);
+    const geometry = flatPolygon(rings, originMeters, scaleFactor, { z });
     if (geometry) {
       applyVertexColor(geometry, color);
       applyStyle(geometry, style);

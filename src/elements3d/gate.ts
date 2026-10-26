@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * A gate node on a wall: two posts and a closed leaf, oriented along the
@@ -35,7 +35,7 @@ export function gate(
   const ux = Math.sin(bearing);
   const uy = Math.cos(bearing);
   const angle = Math.atan2(uy, ux);
-  const builder = new BoxBuilder();
+  const builder = new MeshBuilder();
   builder.box(
     x - (ux * width) / 2,
     y - (uy * width) / 2,

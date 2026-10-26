@@ -1,9 +1,10 @@
 import * as THREE from "three";
-import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { flatPolygon } from "./flat_polygon";
+import { applyVertexColor } from "./vertex_color";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Mapped rooftop equipment: water towers, chimneys, antennas and solar panels.
@@ -35,40 +36,18 @@ function solarSurface(
   const base = Math.max(0, Number(f.properties?.base) || 0);
   const parts: THREE.BufferGeometry[] = [];
   for (const polygon of polygons) {
-    const points = polygon[0].map(([lon, lat]) =>
-      toModelCoords([lon, lat], originMeters, scaleFactor),
-    );
-    if (points.length < 3) continue;
-    const shape = new THREE.Shape(
-      points.map(([x, y]) => new THREE.Vector2(x, y)),
-    );
-    for (let h = 1; h < polygon.length; h++) {
-      const hole = polygon[h].map(([lon, lat]) =>
-        toModelCoords([lon, lat], originMeters, scaleFactor),
-      );
-      shape.holes.push(
-        new THREE.Path(hole.map(([x, y]) => new THREE.Vector2(x, y))),
-      );
-    }
-    const panel = new THREE.ShapeGeometry(shape);
-    const flat = panel.index ? panel.toNonIndexed() : panel;
-    panel.dispose();
-    flat.translate(0, 0, base + 0.12);
-    const count = flat.getAttribute("position").count;
-    const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      colors[i * 3] = PANEL.r;
-      colors[i * 3 + 1] = PANEL.g;
-      colors[i * 3 + 2] = PANEL.b;
-    }
-    flat.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    parts.push(flat);
+    // a panel merges with the rest of the rooftop props, so it keeps the
+    // normal and uv a MeshBuilder geometry carries
+    const panel = flatPolygon(polygon, originMeters, scaleFactor, {
+      z: base + 0.12,
+      keepNormal: true,
+      keepUv: true,
+    });
+    if (!panel) continue;
+    applyVertexColor(panel, PANEL);
+    parts.push(panel);
   }
-  if (parts.length === 0) return [];
-  if (parts.length === 1) return parts;
-  const merged = BufferGeometryUtils.mergeGeometries(parts);
-  for (const part of parts) part.dispose();
-  return merged ? [merged] : [];
+  return parts;
 }
 
 export function rooftop(
@@ -94,7 +73,7 @@ export function rooftop(
     originMeters,
     scaleFactor,
   );
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
 
   if (kind === "water_tower") {
     for (const [dx, dy] of [

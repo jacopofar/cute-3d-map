@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Overhead power lines and pylons. tilegen clips an OSM `power=line` to each
@@ -31,7 +31,7 @@ function towerHeight(f: Geojson.Feature): number {
 }
 
 function addLeg(
-  b: BoxBuilder,
+  b: MeshBuilder,
   bx: number,
   by: number,
   tx: number,
@@ -57,7 +57,7 @@ export function powerTower(
     scaleFactor,
   );
   const height = towerHeight(f);
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
   const half = Math.max(0.8, height * 0.055);
   for (const [dx, dy] of [
     [-1, -1],

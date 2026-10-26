@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 import { hashSeed } from "./random";
 
 /*
@@ -77,7 +77,7 @@ export interface TransitStopGeometry {
   sign: THREE.BufferGeometry[];
 }
 
-function busShelter(b: BoxBuilder): void {
+function busShelter(b: MeshBuilder): void {
   // four posts, a flat roof, a glass back and a bench inside
   for (const x of [-0.78, 0.78]) {
     for (const y of [-1.15, 1.15]) {
@@ -91,7 +91,7 @@ function busShelter(b: BoxBuilder): void {
   b.box(0.55, 0.75, 0.42, 0.08, 0.4, 0.42, 0, METAL);
 }
 
-function busStop(b: BoxBuilder, shelter: boolean): void {
+function busStop(b: MeshBuilder, shelter: boolean): void {
   b.box(0, 0, 0, 0.08, 0.08, 2.7, 0, METAL);
   // the yellow palina, with a dark band at the top
   b.box(0, -0.05, 1.9, 0.62, 0.06, 0.9, 0, YELLOW);
@@ -99,7 +99,7 @@ function busStop(b: BoxBuilder, shelter: boolean): void {
   if (shelter) busShelter(b);
 }
 
-function metroEntrance(b: BoxBuilder): void {
+function metroEntrance(b: MeshBuilder): void {
   // the stair opening and its low side walls; the totem stands beside it
   b.box(0, 0, 0, 1.8, 2.6, 0.16, 0, STAIR);
   b.box(-0.95, 0, 0.16, 0.12, 2.6, 0.5, 0, METAL);
@@ -149,7 +149,7 @@ export function transitStop(
   );
   const angle = (hashSeed(`${f.id}`) % 4) * (Math.PI / 2);
 
-  const builder = new BoxBuilder();
+  const builder = new MeshBuilder();
   if (kind === "metro") metroEntrance(builder);
   else busStop(builder, props?.shelter === true);
   const body = builder.geometry();

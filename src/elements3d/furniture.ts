@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 import { hashSeed } from "./random";
 
 /*
@@ -72,7 +72,7 @@ function propAngle(f: Geojson.Feature): number {
 }
 
 function build(kind: FurnitureKind): THREE.BufferGeometry | null {
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
   switch (kind) {
     case "bollard":
       b.box(0, 0, 0, 0.16, 0.16, 0.9, 0, IRON);

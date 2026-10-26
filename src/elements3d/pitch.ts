@@ -7,7 +7,8 @@ import {
   toModelCoords,
 } from "../projection";
 import { applyVertexColor } from "./vertex_color";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
+import { flatShapePolygon } from "./flat_polygon";
 import {
   pitchFrame,
   pitchPaint,
@@ -232,7 +233,7 @@ function goals(
   const post = 0.12 * scale;
   const width = goalWidth * scale;
   const height = goalHeight * scale;
-  const boxes = new BoxBuilder();
+  const boxes = new MeshBuilder();
   for (const end of [-1, 1]) {
     const u = (end * frame.length) / 2;
     for (const side of [-1, 1]) {
@@ -252,7 +253,7 @@ function goals(
 function hoops(frame: PitchFrame, parts: THREE.BufferGeometry[]): void {
   const scale = frame.scale;
   const angleAcross = Math.atan2(frame.across[1], frame.across[0]);
-  const boxes = new BoxBuilder();
+  const boxes = new MeshBuilder();
   for (const end of [-1, 1]) {
     const baseline = (end * frame.length) / 2;
     // the pole behind the baseline, the board 1.2 m in, the rim just inside it
@@ -302,7 +303,7 @@ function net(
   const scale = frame.scale;
   const angleAcross = Math.atan2(frame.across[1], frame.across[0]);
   const halfWidth = frame.width / 2;
-  const boxes = new BoxBuilder();
+  const boxes = new MeshBuilder();
   for (const side of [-1, 1]) {
     const [x, y] = pitchPoint(frame, 0, side * halfWidth);
     boxes.box(
@@ -337,17 +338,16 @@ function ringSurface(
   rings: PitchRings,
   color: THREE.Color,
 ): THREE.BufferGeometry | null {
-  const toVec = (point: [number, number]) => new THREE.Vector2(...point);
-  const shape = new THREE.Shape(rings.outer.map(toVec));
-  for (const hole of rings.holes)
-    shape.holes.push(new THREE.Path(hole.map(toVec)));
-  const flat = new THREE.ShapeGeometry(shape);
-  const geometry = flat.index ? flat.toNonIndexed() : flat;
-  if (geometry !== flat) flat.dispose();
-  const position = geometry.getAttribute("position");
-  for (let i = 0; i < position.count; i++) position.setZ(i, SURFACE_Z);
+  // the surface merges with the goals and nets, which a MeshBuilder builds, so
+  // it keeps the normal and uv those carry
+  const geometry = flatShapePolygon([rings.outer, ...rings.holes], {
+    z: SURFACE_Z,
+    keepNormal: true,
+    keepUv: true,
+  });
+  if (!geometry) return null;
   applyVertexColor(geometry, color);
-  return position.count >= 3 ? geometry : null;
+  return geometry;
 }
 
 // Sports whose ground is big enough to be floodlit with corner masts. The paint

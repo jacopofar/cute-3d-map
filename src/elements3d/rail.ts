@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Rails and tram tracks: a ballast ribbon, two steel rails and sleepers for
@@ -100,7 +100,7 @@ export function rail(
         : [];
   const parts: THREE.BufferGeometry[] = [];
   const buffers: Buffers = { position: [], normal: [], uv: [], color: [] };
-  const boxes = new BoxBuilder();
+  const boxes = new MeshBuilder();
   const kind = f.properties?.kind === "tram" ? "tram" : "rail";
   const isRail = kind === "rail";
 

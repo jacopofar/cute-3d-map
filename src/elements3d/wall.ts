@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Low walls from `barrier=wall`/`retaining_wall`/`city_wall`/`hoarding` and
@@ -49,7 +49,7 @@ export function wall(
   const color = new THREE.Color(
     COLORS[String(props.wall ?? "")] ?? DEFAULT_COLOR,
   );
-  const builder = new BoxBuilder();
+  const builder = new MeshBuilder();
   for (const line of lines) {
     const points: Point[] = line.map(([lon, lat]) =>
       toModelCoords([lon, lat], originMeters, scaleFactor),

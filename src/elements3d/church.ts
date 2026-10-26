@@ -1,5 +1,6 @@
 import * as THREE from "three";
 
+import { MeshBuilder, type Triple } from "./mesh_builder";
 import { toModelCoords } from "../projection";
 import type { BuildingInfo } from "../geojson_data";
 import { hashSeed, makeRng } from "./random";
@@ -96,48 +97,12 @@ export const churchWallColor = (anchor: string): string =>
 export const churchRoofColor = (anchor: string): string =>
   seededColor(anchor, CHURCH_ROOF_COLORS, "roof");
 
-type Triple = [number, number, number];
 type Point = [number, number];
-
-interface Buffers {
-  position: number[];
-  normal: number[];
-  uv: number[];
-  color: number[];
-}
-
-// append a quad, ordered so its two triangles face along `facing`. Three.js
-// culls back faces, and the corner order of a box face is easy to get wrong, so
-// take the winding from the cross product the way the facade quads do.
-function pushQuad(
-  buffers: Buffers,
-  corners: Triple[],
-  facing: Triple,
-  rgb: THREE.Color,
-): void {
-  const [a, b, c] = corners;
-  const e1: Triple = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-  const e2: Triple = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const cross: Triple = [
-    e1[1] * e2[2] - e1[2] * e2[1],
-    e1[2] * e2[0] - e1[0] * e2[2],
-    e1[0] * e2[1] - e1[1] * e2[0],
-  ];
-  const aligned =
-    cross[0] * facing[0] + cross[1] * facing[1] + cross[2] * facing[2] >= 0;
-  const order = aligned ? [0, 1, 2, 0, 2, 3] : [0, 3, 2, 0, 2, 1];
-  for (const i of order) {
-    buffers.position.push(corners[i][0], corners[i][1], corners[i][2]);
-    buffers.normal.push(facing[0], facing[1], facing[2]);
-    buffers.uv.push(0, 0);
-    buffers.color.push(rgb.r, rgb.g, rgb.b);
-  }
-}
 
 // a box with its in-plane axes given by `u` (along the ridge, so the cross arms
 // follow it) and `v`, half extents per axis, centred on `centre`
 function pushBox(
-  buffers: Buffers,
+  builder: MeshBuilder,
   centre: Triple,
   u: Point,
   v: Point,
@@ -152,9 +117,11 @@ function pushBox(
     centre[2] + sz * hz,
   ];
   const face = (corners: Triple[], local: Triple) =>
-    pushQuad(
-      buffers,
-      corners,
+    builder.quad(
+      corners[0],
+      corners[1],
+      corners[2],
+      corners[3],
       [
         u[0] * local[0] + v[0] * local[1],
         u[1] * local[0] + v[1] * local[1],
@@ -186,15 +153,15 @@ function crossGeometry(
   baseZ: number,
   size: number,
   rgb: THREE.Color,
-): THREE.BufferGeometry {
+): THREE.BufferGeometry | null {
   const u: Point = [axis[0], axis[1]];
   const v: Point = [-axis[1], axis[0]];
   const height = CROSS_HEIGHT * size;
   const arm = CROSS_ARM * size;
   const half = (BAR * size) / 2;
-  const buffers: Buffers = { position: [], normal: [], uv: [], color: [] };
+  const builder = new MeshBuilder();
   pushBox(
-    buffers,
+    builder,
     [at[0], at[1], baseZ + height / 2],
     u,
     v,
@@ -204,7 +171,7 @@ function crossGeometry(
     rgb,
   );
   pushBox(
-    buffers,
+    builder,
     [at[0], at[1], baseZ + height * CROSSBAR_AT],
     u,
     v,
@@ -213,21 +180,7 @@ function crossGeometry(
     half,
     rgb,
   );
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(buffers.position, 3),
-  );
-  geometry.setAttribute(
-    "normal",
-    new THREE.Float32BufferAttribute(buffers.normal, 3),
-  );
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uv, 2));
-  geometry.setAttribute(
-    "color",
-    new THREE.Float32BufferAttribute(buffers.color, 3),
-  );
-  return geometry;
+  return builder.geometry();
 }
 
 // signed area in model meters: only the comparison matters, not the sign
@@ -296,13 +249,12 @@ export function church(
   // the arms follow the ridge: seen from the side of the church the cross reads
   // as a cross, not as a bare upright
   const axis = plan ? plan.frame.axis : ridgeAxis(best);
-  return [
-    crossGeometry(
-      at,
-      axis,
-      baseZ,
-      crossScale(bestArea),
-      new THREE.Color(CHURCH_CROSS_COLOR),
-    ),
-  ];
+  const cross = crossGeometry(
+    at,
+    axis,
+    baseZ,
+    crossScale(bestArea),
+    new THREE.Color(CHURCH_CROSS_COLOR),
+  );
+  return cross ? [cross] : [];
 }

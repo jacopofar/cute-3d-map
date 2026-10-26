@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
+import { flatPolygon } from "./flat_polygon";
 import { applyVertexColor } from "./vertex_color";
 
 /*
@@ -88,30 +89,6 @@ function applyFoam(geometry: THREE.BufferGeometry, foam: number): void {
     "aFoam",
     new THREE.BufferAttribute(new Float32Array(count).fill(foam), 1),
   );
-}
-
-// a flat, triangulated polygon (holes included) lying in the z = 0 plane
-function areaGeometry(
-  rings: Geojson.Position[][],
-  originMeters: [number, number],
-  scaleFactor: number,
-): THREE.BufferGeometry | null {
-  const toVec = (c: Geojson.Position) =>
-    new THREE.Vector2(
-      ...toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-    );
-  const outline = new THREE.Shape(rings[0].map(toVec));
-  for (let h = 1; h < rings.length; h++) {
-    outline.holes.push(new THREE.Path(rings[h].map(toVec)));
-  }
-  const shape = new THREE.ShapeGeometry(outline);
-  // water is shaded by the shader, so the flat normal/uv the shape carries are
-  // dropped: every water geometry keeps the same position+color+aFade+aFoam
-  // attributes so the per-tile merge never sees a mismatched set
-  const geometry = shape.index ? shape.toNonIndexed() : shape;
-  geometry.deleteAttribute("normal");
-  geometry.deleteAttribute("uv");
-  return geometry.getAttribute("position").count >= 3 ? geometry : null;
 }
 
 // a polyline turned into a flat band: each point is pushed half a width to
@@ -204,7 +181,7 @@ export function water(
   const geometries: THREE.BufferGeometry[] = [];
 
   const addArea = (rings: Geojson.Position[][]) => {
-    const geometry = areaGeometry(rings, originMeters, scaleFactor);
+    const geometry = flatPolygon(rings, originMeters, scaleFactor);
     if (geometry) {
       applyVertexColor(geometry, color);
       applyFade(geometry, fade);

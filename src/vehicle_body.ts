@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+import { MeshBuilder } from "./elements3d/mesh_builder";
+
 import { applyVertexColor } from "./elements3d/vertex_color";
 
 /*
@@ -44,48 +46,11 @@ interface Rect {
 type Vec3 = [number, number, number];
 
 // flat-shaded geometry accumulated as loose triangles; a car is small enough
-// that an index buffer would only add indirection
+// that an index buffer would only add indirection. The block logic below is a
+// vehicle's (a tapered chassis is not a box), so it stays here and pushes
+// through the shared builder.
 class BodyBuilder {
-  private readonly positions: number[] = [];
-  private readonly normals: number[] = [];
-  private readonly colors: number[] = [];
-
-  // a quad with the winding fixed from the expected outward normal. The faces
-  // are hand-placed and a flipped one is invisible under backface culling, so
-  // let the maths decide instead of trusting the corner order.
-  private quad(
-    a: Vec3,
-    b: Vec3,
-    c: Vec3,
-    d: Vec3,
-    color: THREE.Color,
-    outward: Vec3,
-  ): void {
-    let normal = faceNormal(a, b, c);
-    if (
-      normal[0] * outward[0] + normal[1] * outward[1] + normal[2] * outward[2] <
-      0
-    ) {
-      [b, d] = [d, b];
-      normal = faceNormal(a, b, c);
-    }
-    this.triangle(a, b, c, normal, color);
-    this.triangle(a, c, d, normal, color);
-  }
-
-  private triangle(
-    a: Vec3,
-    b: Vec3,
-    c: Vec3,
-    normal: Vec3,
-    color: THREE.Color,
-  ): void {
-    for (const v of [a, b, c]) {
-      this.positions.push(v[0], v[1], v[2]);
-      this.normals.push(normal[0], normal[1], normal[2]);
-      this.colors.push(color.r, color.g, color.b);
-    }
-  }
+  private readonly mesh = new MeshBuilder({ uv: false });
 
   // a rectangular block between two rectangles; equal rects give a plain box.
   // Caps are opt-in: the underside of the body and the cabin are never seen.
@@ -110,50 +75,33 @@ class BodyBuilder {
       [top.cx - top.hx, top.cy + top.hy, z1],
     ] as Vec3[];
 
-    this.quad(b[0], b[1], t[1], t[0], color, [0, -1, 0]);
-    this.quad(b[1], b[2], t[2], t[1], color, [1, 0, 0]);
-    this.quad(b[2], b[3], t[3], t[2], color, [0, 1, 0]);
-    this.quad(b[3], b[0], t[0], t[3], color, [-1, 0, 0]);
+    this.mesh.quadFromOutward(b[0], b[1], t[1], t[0], [0, -1, 0], color);
+    this.mesh.quadFromOutward(b[1], b[2], t[2], t[1], [1, 0, 0], color);
+    this.mesh.quadFromOutward(b[2], b[3], t[3], t[2], [0, 1, 0], color);
+    this.mesh.quadFromOutward(b[3], b[0], t[0], t[3], [-1, 0, 0], color);
     if (options.top) {
-      this.quad(t[0], t[1], t[2], t[3], options.topColor ?? color, [0, 0, 1]);
+      this.mesh.quadFromOutward(
+        t[0],
+        t[1],
+        t[2],
+        t[3],
+        [0, 0, 1],
+        options.topColor ?? color,
+      );
     }
     if (options.bottom) {
-      this.quad(b[3], b[2], b[1], b[0], color, [0, 0, -1]);
+      this.mesh.quadFromOutward(b[3], b[2], b[1], b[0], [0, 0, -1], color);
     }
   }
 
   build(): THREE.BufferGeometry {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(this.positions, 3),
-    );
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(this.normals, 3),
-    );
-    geometry.setAttribute(
-      "color",
-      new THREE.Float32BufferAttribute(this.colors, 3),
-    );
+    const geometry = this.mesh.geometry();
+    if (!geometry) throw Error("vehicle body built with no faces");
+    // the fleet places one instance per vehicle and culls by these
     geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
     return geometry;
   }
-}
-
-function faceNormal(a: Vec3, b: Vec3, c: Vec3): Vec3 {
-  const ux = b[0] - a[0];
-  const uy = b[1] - a[1];
-  const uz = b[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  const nx = uy * vz - uz * vy;
-  const ny = uz * vx - ux * vz;
-  const nz = ux * vy - uy * vx;
-  const len = Math.hypot(nx, ny, nz) || 1;
-  return [nx / len, ny / len, nz / len];
 }
 
 // 52 triangles: chassis 10 (four sides and the top), cabin 10 (four glass

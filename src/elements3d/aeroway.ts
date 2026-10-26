@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
+import { flatPolygon } from "./flat_polygon";
 import { applyVertexColor } from "./vertex_color";
 
 /*
@@ -59,36 +60,15 @@ function aerowayColor(kind: string): THREE.Color {
   return new THREE.Color(AEROWAY_COLORS[kind] ?? DEFAULT_AEROWAY_COLOR);
 }
 
-// every flat geometry gets the same attribute set (position, normal, color) so
-// the per-tile merge never sees a mismatched set; the surface is horizontal, so
-// the normal is straight up for all of them
+// Every aeroway geometry has to carry the same attribute set (position, normal,
+// color), or the per-tile merge returns null and the whole kind vanishes for
+// that tile. The surfaces are horizontal, so the normal is straight up: this
+// covers the ribbons too, which are built from raw positions.
 function flatNormal(geometry: THREE.BufferGeometry): void {
   const count = geometry.getAttribute("position").count;
   const normals = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) normals[i * 3 + 2] = 1;
   geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-}
-
-// a flat, triangulated polygon (holes included) lying slightly above ground
-function areaGeometry(
-  rings: Geojson.Position[][],
-  originMeters: [number, number],
-  scaleFactor: number,
-  z: number,
-): THREE.BufferGeometry | null {
-  const toVec = (c: Geojson.Position) =>
-    new THREE.Vector2(
-      ...toModelCoords([c[0], c[1]], originMeters, scaleFactor),
-    );
-  const outline = new THREE.Shape(rings[0].map(toVec));
-  for (let h = 1; h < rings.length; h++) {
-    outline.holes.push(new THREE.Path(rings[h].map(toVec)));
-  }
-  const shape = new THREE.ShapeGeometry(outline);
-  const geometry = shape.index ? shape.toNonIndexed() : shape;
-  geometry.deleteAttribute("uv");
-  geometry.translate(0, 0, z);
-  return geometry.getAttribute("position").count >= 3 ? geometry : null;
 }
 
 // a polyline turned into a flat band, mirroring water's ribbon: each point is
@@ -170,10 +150,10 @@ export function aeroway(
 
   const g = f.geometry;
   if (g.type === "Polygon")
-    finish(areaGeometry(g.coordinates, originMeters, scaleFactor, z));
+    finish(flatPolygon(g.coordinates, originMeters, scaleFactor, { z }));
   else if (g.type === "MultiPolygon")
     g.coordinates.forEach((polygon) =>
-      finish(areaGeometry(polygon, originMeters, scaleFactor, z)),
+      finish(flatPolygon(polygon, originMeters, scaleFactor, { z })),
     );
   else if (g.type === "LineString")
     finish(

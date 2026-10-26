@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { BoxBuilder } from "./box_builder";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Foot and cycle paths inside parks and green areas. tilegen clips each OSM way
@@ -87,7 +87,7 @@ export function parkPath(
       Number(f.properties?.width) || (kindOf(f) === "bike" ? 2.5 : 1.8),
     ),
   );
-  const b = new BoxBuilder();
+  const b = new MeshBuilder();
   for (const line of linesOf(f)) {
     for (let i = 1; i < line.length; i++) {
       const [ax, ay] = toModelCoords(
