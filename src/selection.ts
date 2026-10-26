@@ -39,6 +39,7 @@ import type {
   WaterInfo,
 } from "./geojson_data";
 import { epsg4326toEpsg3857, scaleFactorAt, toModelCoords } from "./projection";
+import { asSceneKind, type SceneKind } from "./mesh_kinds";
 import type { TileRecord } from "./tile_record";
 import { escapeHtml, osmLink } from "./ui/html";
 
@@ -121,7 +122,7 @@ const PITCH_LABELS: Record<string, string> = {
   softball: "Softball field",
 };
 
-const PICKABLE_KINDS: Record<string, "always" | "when-visible"> = {
+const PICKABLE_KINDS: Partial<Record<SceneKind, "always" | "when-visible">> = {
   building: "always",
   glass: "always",
   tree: "always",
@@ -225,7 +226,8 @@ export class Selection {
     const pickable: THREE.Object3D[] = [];
     for (const record of this.host.tiles.values()) {
       for (const mesh of record.objects.meshes) {
-        const rule = PICKABLE_KINDS[mesh.userData.kind as string];
+        const kind = asSceneKind(mesh.userData.kind);
+        const rule = kind ? PICKABLE_KINDS[kind] : undefined;
         if (rule === "always" || (rule === "when-visible" && mesh.visible)) {
           pickable.push(mesh);
         }
@@ -238,7 +240,7 @@ export class Selection {
   // so the map can show a pointer. Unlike `pickStatic` this opens nothing and
   // leaves any open popup alone.
   hover(hit: THREE.Intersection | undefined): string | null {
-    const kind = hit ? ((hit.object.userData.kind as string) ?? null) : null;
+    const kind = hit ? (asSceneKind(hit.object.userData.kind) ?? null) : null;
     if (!hit || !kind || !(kind in PICKABLE_KINDS)) {
       this.clearHover();
       return null;
@@ -321,7 +323,7 @@ export class Selection {
     const point = hit.point;
     const originMeters = epsg4326toEpsg3857(this.center());
     const scaleFactor = scaleFactorAt(this.center()[1]);
-    const hitKind = hit.object.userData.kind as string | undefined;
+    const hitKind = asSceneKind(hit.object.userData.kind);
     if (hitKind === "custom_model") {
       const buildingId = hit.object.userData.buildingId as string | undefined;
       const info = (this.host.tiles.get(tileKey)?.objects.buildings ?? []).find(
@@ -408,7 +410,7 @@ export class Selection {
   // the point-feature pickers behind the click popups, keyed by every mesh kind
   // that resolves to one (a fountain has two meshes, a metro stop two). The
   // methods are bound here because the table is looked up rather than called.
-  private pointPickers(): Record<string, Picker> {
+  private pointPickers(): Partial<Record<SceneKind, Picker>> {
     return {
       water: picker(this, this.waterAt, this.selectWater),
       furniture: picker(this, this.furnitureAt, this.selectFurniture),

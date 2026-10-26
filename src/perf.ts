@@ -10,6 +10,7 @@ import type { ParkedCarLayer } from "./parked_cars";
 import type { TrafficRenderer } from "./traffic";
 import type { TileRecord } from "./tile_record";
 import { checkboxStates } from "./ui/checkboxes";
+import { asSceneKind } from "./mesh_kinds";
 
 // Build-time opt-in: without an endpoint the reporting path is a no-op and no
 // request leaves the page. Both names are accepted so an existing .env with
@@ -140,7 +141,7 @@ export function sceneStats(
       ) {
         continue;
       }
-      const kind = (object.userData.kind as string) ?? "other";
+      const kind = asSceneKind(object.userData.kind) ?? "other";
       const bucket = (byKind[kind] ??= {
         meshes: 0,
         vertices: 0,

@@ -3,6 +3,7 @@ import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type Geojson from "geojson";
 import { epsg4326toEpsg3857, scaleFactorAt, toModelCoords } from "./projection";
+import type { MeshKind } from "./mesh_kinds";
 import { building } from "./elements3d/building";
 import { cemetery, cemeteryMaterial } from "./elements3d/cemetery";
 import {
@@ -78,337 +79,262 @@ import {
   tunnelMaterial,
 } from "./elements3d/bridge";
 
-// One material per merged kind. The entries are factories so the one that needs a
-// canvas (the metro "M") stays lazy: the geometry builders are unit-tested in
-// node, where there is no DOM.
-const MATERIALS: Record<string, () => THREE.Material> = {
+// One material per merged kind. The entries are factories so the one that needs
+// a canvas (the metro "M") stays lazy: the geometry builders are unit-tested in
+// node, where there is no DOM. The type is total on purpose: a kind with no
+// entry is a compile error, not a fallback to whatever material was handy.
+const MATERIALS: Record<MeshKind, () => THREE.Material> = {
+  aeroway: () => aerowayMaterial,
+  bench: () => benchMaterial,
+  bridge: () => bridgeMaterial,
   building: () => buildingMaterial,
-  tree: () => treeSurfaceMaterial,
-  glass: () => glassMaterial,
-  church: () => churchMaterial,
-  water: () => waterMaterial,
-  green: () => greenMaterial,
   cemetery: () => cemeteryMaterial,
-  furniture: () => furnitureMaterial,
-  fountain: () => fountainMaterial,
-  fountain_water: () => fountainWaterMaterial,
-  transit_stop: () => transitStopMaterial,
-  metro_sign: () => metroSignMaterial(),
-  terrace: () => terraceMaterial,
-  playground: () => playgroundMaterial,
-  monument: () => monumentMaterial,
+  church: () => churchMaterial,
   construction: () => constructionMaterial,
   crosswalk: () => crosswalkMaterial,
-  road_marking: () => roadMarkingMaterial,
+  fence: () => fenceMaterial,
+  fountain: () => fountainMaterial,
+  fountain_water: () => fountainWaterMaterial,
+  furniture: () => furnitureMaterial,
+  gate: () => gateMaterial,
+  glass: () => glassMaterial,
+  green: () => greenMaterial,
   lane: () => laneMaterial,
+  metro_sign: () => metroSignMaterial(),
+  monument: () => monumentMaterial,
+  park_path: () => parkPathMaterial,
   pitch: () => pitchMaterial,
   pitch_paint: () => pitchPaintMaterial,
   platform: () => platformMaterial,
-  rail: () => railMaterial,
-  sidewalk: () => sidewalkMaterial,
-  wall: () => wallMaterial,
-  gate: () => gateMaterial,
-  rooftop: () => rooftopMaterial,
-  park_path: () => parkPathMaterial,
+  playground: () => playgroundMaterial,
   power_tower: () => powerTowerMaterial,
   power_wire: () => powerWireMaterial,
-  aeroway: () => aerowayMaterial,
-  fence: () => fenceMaterial,
-  bridge: () => bridgeMaterial,
+  rail: () => railMaterial,
+  road_marking: () => roadMarkingMaterial,
+  // a roof is a wall that happens to be on top: same toon shading, and it must
+  // not get the tree material, whose vertex shader sways with the wind
+  roof: () => buildingMaterial,
+  rooftop: () => rooftopMaterial,
+  sidewalk: () => sidewalkMaterial,
+  terrace: () => terraceMaterial,
+  transit_stop: () => transitStopMaterial,
+  tree: () => treeSurfaceMaterial,
   tunnel: () => tunnelMaterial,
-  bench: () => benchMaterial,
+  wall: () => wallMaterial,
+  water: () => waterMaterial,
 };
 
 // kinds drawn as line segments rather than triangles
-const LINE_KINDS = new Set(["power_wire", "lane", "pitch_paint"]);
+const LINE_KINDS: ReadonlySet<MeshKind> = new Set([
+  "power_wire",
+  "lane",
+  "pitch_paint",
+]);
 
-function materialFor(kind: string): THREE.Material {
-  return MATERIALS[kind]?.() ?? treeSurfaceMaterial;
+// kinds that cast a shadow; the big silhouettes carry the look, and every extra
+// kind is another shadow draw. Glass walls cast like any other wall: a tower
+// without its silhouette would float over the street.
+const SHADOW_KINDS: ReadonlySet<MeshKind> = new Set([
+  "building",
+  "glass",
+  "roof",
+  "tree",
+]);
+
+export interface BuiltKind {
+  kind: MeshKind;
+  geometries: THREE.BufferGeometry[];
 }
+
+interface BuildContext {
+  originMeters: [number, number];
+  scaleFactor: number;
+  imputedColors: boolean;
+}
+
+type FeatureBuilder = (
+  f: Geojson.Feature,
+  context: BuildContext,
+) => BuiltKind[];
+
+// the common case: one tile tag, one mesh kind, one builder call
+function oneKind(
+  kind: MeshKind,
+  build: (f: Geojson.Feature, context: BuildContext) => THREE.BufferGeometry[],
+): FeatureBuilder {
+  return (f, context) => [{ kind, geometries: build(f, context) }];
+}
+
+// A building is several kinds at once: the walls (or the glass material), the
+// roof, and the church cross, each switchable on its own.
+const buildBuilding: FeatureBuilder = (f, context) => {
+  // a city-profile model replaces the generated volume; objectsAt loads the
+  // asset and keeps the BuildingInfo for picking
+  if (f.properties?.model) return [];
+  const parts = building(
+    context.originMeters,
+    context.scaleFactor,
+    f,
+    context.imputedColors,
+  );
+  const groups: BuiltKind[] = [
+    {
+      kind: isGlass(f.properties) ? "glass" : "building",
+      geometries: parts.map((part) => part.walls),
+    },
+  ];
+  const roofs = parts
+    .map((part) => part.roof)
+    .filter((roof): roof is THREE.BufferGeometry => roof !== null);
+  if (roofs.length > 0) groups.push({ kind: "roof", geometries: roofs });
+  if (isChurch(f.properties)) {
+    const crosses = church(
+      context.originMeters,
+      context.scaleFactor,
+      buildingInfo(f),
+    );
+    if (crosses.length > 0) {
+      groups.push({ kind: "church", geometries: crosses });
+    }
+  }
+  return groups;
+};
+
+// A pitch is a green with a `sport`: the same polygon, plus the court and its
+// paint as their own kinds so the checkbox can leave the lawn alone.
+const buildGreen: FeatureBuilder = (f, context) => {
+  const groups: BuiltKind[] = [
+    {
+      kind: "green",
+      geometries: green(context.originMeters, context.scaleFactor, f),
+    },
+  ];
+  const court = pitch(context.originMeters, context.scaleFactor, f);
+  if (court.surface.length > 0) {
+    groups.push({ kind: "pitch", geometries: court.surface });
+  }
+  if (court.paint.length > 0) {
+    groups.push({ kind: "pitch_paint", geometries: court.paint });
+  }
+  return groups;
+};
+
+const buildFountain: FeatureBuilder = (f, context) => {
+  const { stone, water: surface } = fountain(
+    context.originMeters,
+    context.scaleFactor,
+    f,
+  );
+  const groups: BuiltKind[] = [{ kind: "fountain", geometries: stone }];
+  if (surface.length > 0) {
+    groups.push({ kind: "fountain_water", geometries: surface });
+  }
+  return groups;
+};
+
+const buildTransitStop: FeatureBuilder = (f, context) => {
+  const { body, sign } = transitStop(
+    context.originMeters,
+    context.scaleFactor,
+    f,
+  );
+  const groups: BuiltKind[] = [{ kind: "transit_stop", geometries: body }];
+  if (sign.length > 0) groups.push({ kind: "metro_sign", geometries: sign });
+  return groups;
+};
+
+// One row per tile tag. Adding a layer is a row here plus its material above;
+// the old chain of fifty `cmtype ===` comparisons is what let `tree_row` and
+// `power_line` hide their kind change.
+const BUILDERS: Record<string, FeatureBuilder> = {
+  aeroway: oneKind("aeroway", (f, c) =>
+    aeroway(c.originMeters, c.scaleFactor, f),
+  ),
+  bench: oneKind("bench", (f, c) => bench(c.originMeters, c.scaleFactor, f)),
+  bridge: oneKind("bridge", (f, c) => bridge(c.originMeters, c.scaleFactor, f)),
+  building: buildBuilding,
+  cemetery: oneKind("cemetery", (f, c) =>
+    cemetery(c.originMeters, c.scaleFactor, f),
+  ),
+  construction: oneKind("construction", (f, c) =>
+    construction(c.originMeters, c.scaleFactor, f),
+  ),
+  crosswalk: oneKind("crosswalk", (f, c) =>
+    crosswalk(c.originMeters, c.scaleFactor, f),
+  ),
+  fence: oneKind("fence", (f, c) => fence(c.originMeters, c.scaleFactor, f)),
+  fountain: buildFountain,
+  furniture: oneKind("furniture", (f, c) =>
+    furniture(c.originMeters, c.scaleFactor, f),
+  ),
+  gate: oneKind("gate", (f, c) => gate(c.originMeters, c.scaleFactor, f)),
+  green: buildGreen,
+  lane: oneKind("lane", (f, c) => lane(c.originMeters, c.scaleFactor, f)),
+  monument: oneKind("monument", (f, c) =>
+    monument(c.originMeters, c.scaleFactor, f),
+  ),
+  park_path: oneKind("park_path", (f, c) =>
+    parkPath(c.originMeters, c.scaleFactor, f),
+  ),
+  platform: oneKind("platform", (f, c) =>
+    platform(c.originMeters, c.scaleFactor, f),
+  ),
+  playground: oneKind("playground", (f, c) =>
+    playground(c.originMeters, c.scaleFactor, f),
+  ),
+  power_line: oneKind("power_wire", (f, c) =>
+    powerWire(c.originMeters, c.scaleFactor, f),
+  ),
+  power_tower: oneKind("power_tower", (f, c) =>
+    powerTower(c.originMeters, c.scaleFactor, f),
+  ),
+  rail: oneKind("rail", (f, c) => rail(c.originMeters, c.scaleFactor, f)),
+  road_marking: oneKind("road_marking", (f, c) =>
+    roadMarking(c.originMeters, c.scaleFactor, f),
+  ),
+  rooftop: oneKind("rooftop", (f, c) =>
+    rooftop(c.originMeters, c.scaleFactor, f),
+  ),
+  sidewalk: oneKind("sidewalk", (f, c) =>
+    sidewalk(c.originMeters, c.scaleFactor, f),
+  ),
+  terrace: oneKind("terrace", (f, c) =>
+    terrace(c.originMeters, c.scaleFactor, f),
+  ),
+  transit_stop: buildTransitStop,
+  tree: oneKind("tree", (f, c) => tree(c.originMeters, c.scaleFactor, f)),
+  tree_row: oneKind("tree", (f, c) =>
+    tree_row(c.originMeters, c.scaleFactor, f),
+  ),
+  tunnel: oneKind("tunnel", (f, c) => tunnel(c.originMeters, c.scaleFactor, f)),
+  wall: oneKind("wall", (f, c) => wall(c.originMeters, c.scaleFactor, f)),
+  water: oneKind("water", (f, c) => water(c.originMeters, c.scaleFactor, f)),
+};
+
+/** The tile tags this module can turn into geometry; the tuple pins the list
+ * against tilegen's contract in `geojson_data.test.ts`. */
+export const BUILDER_CMTYPES = Object.keys(BUILDERS);
 
 export function geoJSONtoGeometries(
   f: Geojson.Feature,
   originMeters: [number, number],
   scaleFactor: number,
   imputedColors = true,
-): {
-  kind:
-    | "building"
-    | "glass"
-    | "roof"
-    | "church"
-    | "tree"
-    | "water"
-    | "green"
-    | "cemetery"
-    | "furniture"
-    | "fountain"
-    | "fountain_water"
-    | "transit_stop"
-    | "metro_sign"
-    | "terrace"
-    | "playground"
-    | "monument"
-    | "construction"
-    | "crosswalk"
-    | "road_marking"
-    | "platform"
-    | "rail"
-    | "sidewalk"
-    | "wall"
-    | "gate"
-    | "rooftop"
-    | "park_path"
-    | "power_tower"
-    | "power_wire"
-    | "lane"
-    | "pitch"
-    | "pitch_paint"
-    | "aeroway"
-    | "fence"
-    | "bridge"
-    | "tunnel"
-    | "bench";
-  geometries: THREE.BufferGeometry[];
-}[] {
-  if (!f.properties) {
+): BuiltKind[] {
+  const cmtype = f.properties?.cmtype;
+  if (typeof cmtype !== "string") return [];
+  const build = BUILDERS[cmtype];
+  if (!build) {
+    // the key is the whole story: dumping the feature logs thousands of
+    // coordinates for one unknown tag
+    console.error(`unknown cmtype: ${cmtype}`);
     return [];
   }
-  if (!f.properties.cmtype) {
-    return [];
-  }
-  if (f.properties.cmtype === "building") {
-    // a city-profile model replaces the generated volume; keep the BuildingInfo
-    // for picking and let objectsAt load the asset
-    if (f.properties.model) return [];
-    // the roof comes back as its own kind, so it can be switched off on its own
-    const parts = building(originMeters, scaleFactor, f, imputedColors);
-    // a curtain wall goes to its own kind so it can carry the glass material;
-    // its roof stays a roof (glass towers have roofs too), and the church cross
-    // below is unaffected
-    const groups: {
-      kind: "building" | "glass" | "roof" | "church";
-      geometries: THREE.BufferGeometry[];
-    }[] = [
-      {
-        kind: isGlass(f.properties) ? "glass" : "building",
-        geometries: parts.map((part) => part.walls),
-      },
-    ];
-    const roofs = parts
-      .map((part) => part.roof)
-      .filter((roof): roof is THREE.BufferGeometry => roof !== null);
-    if (roofs.length > 0) groups.push({ kind: "roof", geometries: roofs });
-    // a church's cross is its own kind too: the walls keep their (stony) look
-    // and the checkbox hides just the ornament
-    if (isChurch(f.properties)) {
-      const crosses = church(originMeters, scaleFactor, buildingInfo(f));
-      if (crosses.length > 0) {
-        groups.push({ kind: "church", geometries: crosses });
-      }
-    }
-    return groups;
-  }
-  if (f.properties.cmtype === "tree") {
-    return [{ kind: "tree", geometries: tree(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "tree_row") {
-    return [
-      { kind: "tree", geometries: tree_row(originMeters, scaleFactor, f) },
-    ];
-  }
-  if (f.properties.cmtype === "water") {
-    return [{ kind: "water", geometries: water(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "bench") {
-    return [{ kind: "bench", geometries: bench(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "green") {
-    // a pitch is a green with a `sport`: same polygon, plus the court and its
-    // paint as their own kinds so the checkbox can leave the lawn alone
-    const groups: {
-      kind: "green" | "pitch" | "pitch_paint";
-      geometries: THREE.BufferGeometry[];
-    }[] = [{ kind: "green", geometries: green(originMeters, scaleFactor, f) }];
-    const court = pitch(originMeters, scaleFactor, f);
-    if (court.surface.length > 0) {
-      groups.push({ kind: "pitch", geometries: court.surface });
-    }
-    if (court.paint.length > 0) {
-      groups.push({ kind: "pitch_paint", geometries: court.paint });
-    }
-    return groups;
-  }
-  if (f.properties.cmtype === "cemetery") {
-    return [
-      {
-        kind: "cemetery",
-        geometries: cemetery(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "furniture") {
-    return [
-      {
-        kind: "furniture",
-        geometries: furniture(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "fountain") {
-    const { stone, water } = fountain(originMeters, scaleFactor, f);
-    const groups: {
-      kind: "fountain" | "fountain_water";
-      geometries: THREE.BufferGeometry[];
-    }[] = [{ kind: "fountain", geometries: stone }];
-    if (water.length > 0) {
-      groups.push({ kind: "fountain_water", geometries: water });
-    }
-    return groups;
-  }
-  if (f.properties.cmtype === "terrace") {
-    return [
-      {
-        kind: "terrace",
-        geometries: terrace(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "playground") {
-    return [
-      {
-        kind: "playground",
-        geometries: playground(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "monument") {
-    return [
-      {
-        kind: "monument",
-        geometries: monument(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "construction") {
-    return [
-      {
-        kind: "construction",
-        geometries: construction(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "crosswalk") {
-    return [
-      {
-        kind: "crosswalk",
-        geometries: crosswalk(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "road_marking") {
-    return [
-      {
-        kind: "road_marking",
-        geometries: roadMarking(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "platform") {
-    return [
-      {
-        kind: "platform",
-        geometries: platform(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "rail") {
-    return [{ kind: "rail", geometries: rail(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "sidewalk") {
-    return [
-      {
-        kind: "sidewalk",
-        geometries: sidewalk(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "wall") {
-    return [{ kind: "wall", geometries: wall(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "gate") {
-    return [{ kind: "gate", geometries: gate(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "rooftop") {
-    return [
-      {
-        kind: "rooftop",
-        geometries: rooftop(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "park_path") {
-    return [
-      {
-        kind: "park_path",
-        geometries: parkPath(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "lane") {
-    return [
-      {
-        kind: "lane",
-        geometries: lane(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "power_tower") {
-    return [
-      {
-        kind: "power_tower",
-        geometries: powerTower(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "power_line") {
-    return [
-      {
-        kind: "power_wire",
-        geometries: powerWire(originMeters, scaleFactor, f),
-      },
-    ];
-  }
-  if (f.properties.cmtype === "transit_stop") {
-    const { body, sign } = transitStop(originMeters, scaleFactor, f);
-    const groups: {
-      kind: "transit_stop" | "metro_sign";
-      geometries: THREE.BufferGeometry[];
-    }[] = [{ kind: "transit_stop", geometries: body }];
-    if (sign.length > 0) groups.push({ kind: "metro_sign", geometries: sign });
-    return groups;
-  }
-  if (f.properties.cmtype === "aeroway") {
-    return [
-      { kind: "aeroway", geometries: aeroway(originMeters, scaleFactor, f) },
-    ];
-  }
-  if (f.properties.cmtype === "fence") {
-    return [{ kind: "fence", geometries: fence(originMeters, scaleFactor, f) }];
-  }
-  if (f.properties.cmtype === "bridge") {
-    return [
-      { kind: "bridge", geometries: bridge(originMeters, scaleFactor, f) },
-    ];
-  }
-  if (f.properties.cmtype === "tunnel") {
-    return [
-      { kind: "tunnel", geometries: tunnel(originMeters, scaleFactor, f) },
-    ];
-  }
+  return build(f, { originMeters, scaleFactor, imputedColors });
+}
 
-  console.error("Cannot handle feature:", f);
-  return [];
+function materialFor(kind: MeshKind): THREE.Material {
+  return MATERIALS[kind]();
 }
 
 // one shared material per kind; per-feature colors are baked into vertex
@@ -829,7 +755,7 @@ export async function objectsAt(
   const lamps = lampsIn(myGeoJSON as unknown as { lamps?: [number, number][] });
   const floodlights: [number, number][] = [];
 
-  const byKind: Record<string, THREE.BufferGeometry[]> = {};
+  const byKind: Partial<Record<MeshKind, THREE.BufferGeometry[]>> = {};
   const buildings: BuildingInfo[] = [];
   const barriers: BarrierInfo[] = [];
   const features: FeatureInfo[] = [];
@@ -944,7 +870,10 @@ export async function objectsAt(
     );
     if (model) meshes.push(model);
   }
-  for (const [kind, geometries] of Object.entries(byKind)) {
+  for (const [kind, geometries] of Object.entries(byKind) as [
+    MeshKind,
+    THREE.BufferGeometry[],
+  ][]) {
     if (geometries.length === 0) continue;
     // a builder can legitimately produce nothing for a degenerate feature (a
     // sliver cemetery polygon leaves no room for a row of graves), and
@@ -965,16 +894,7 @@ export async function objectsAt(
       if (kind === "glass") mesh.frustumCulled = false;
       // flat ground layers and the fence shader do not cast sensible shadows
       // (the fence's gaps are a shader discard the depth pass cannot see)
-      // keep the shadow casters to the big silhouettes: buildings, roofs and
-      // trees carry the look, while every extra kind is another shadow draw
-      // glass walls cast like any other wall: a tower without its shadow
-      // silhouette would float over the street
-      const casts =
-        kind === "building" ||
-        kind === "glass" ||
-        kind === "roof" ||
-        kind === "tree";
-      mesh.castShadow = casts;
+      mesh.castShadow = SHADOW_KINDS.has(kind);
       // only the ground catcher receives: shadows on roofs and walls read as
       // artefacts at this stylised scale, while the ground shadows give the
       // scene its depth

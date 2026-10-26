@@ -24,6 +24,7 @@ import {
   type SceneStats,
 } from "./perf.ts";
 import { TileLoader, disposeFacadeDetail } from "./tile_loader.ts";
+import { asSceneKind, type MeshKind, type SceneKind } from "./mesh_kinds.ts";
 import {
   BASEMAP_DAY,
   BASEMAP_NIGHT,
@@ -106,7 +107,7 @@ const PITCH_MIN_ZOOM = 16;
 // One per-tile layer whose checkbox is a plain visibility switch.
 interface LayerSwitch {
   id: string;
-  kinds: string[];
+  kinds: MeshKind[];
   /** the checkbox label's id that drives it */
   toggle: string;
   /** store the flag; wired straight into the checkbox */
@@ -1332,7 +1333,7 @@ class CoolMap implements MapDebug {
 
   // kind -> layer, so a visibility pass is one map lookup per mesh rather than
   // a scan of every switch
-  private kindToLayer?: Map<string, LayerSwitch>;
+  private kindToLayer?: Map<SceneKind, LayerSwitch>;
 
   private layerForKind(): Map<string, LayerSwitch> {
     if (!this.kindToLayer) {
@@ -1350,7 +1351,9 @@ class CoolMap implements MapDebug {
     if (!layer) return;
     const on = layer.visible();
     this.loader.forEachMesh((mesh) => {
-      if (layer.kinds.includes(mesh.userData.kind as string)) {
+      const kind = asSceneKind(mesh.userData.kind);
+      // a city-profile model is not owned by any visibility switch
+      if (kind && kind !== "custom_model" && layer.kinds.includes(kind)) {
         mesh.visible = on;
       }
     });
@@ -1364,7 +1367,8 @@ class CoolMap implements MapDebug {
     const on = new Map<LayerSwitch, boolean>();
     for (const layer of this.layerSwitches) on.set(layer, layer.visible());
     this.loader.forEachMesh((mesh) => {
-      const layer = index.get(mesh.userData.kind as string);
+      const kind = asSceneKind(mesh.userData.kind);
+      const layer = kind ? index.get(kind) : undefined;
       if (layer) mesh.visible = on.get(layer) ?? false;
     });
     for (const layer of this.layerSwitches) layer.after?.();
