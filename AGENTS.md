@@ -117,6 +117,16 @@ specs boot against the generated tiles, which are not in the repo.
   (exposure, the window/glass/water uniforms, the fog, the MapLibre sky, the
   `#grade` overlay, the basemap style swap and the shadow debounce). The solar
   model stays in `daynight.ts`; this only pushes it onto a scene.
+- `src/elements3d/mesh_builder.ts` / `flat_polygon.ts` / `props.ts` — the shared
+  geometry plumbing, and the place to start a new layer: `MeshBuilder`
+  accumulates flat-shaded quads/boxes with the winding corrected from the
+  expected normal, `flatPolygon` turns GeoJSON rings into a flat surface and
+  owns *which attributes a kind carries* (every geometry of a kind is merged
+  into one mesh per tile, and a mismatched attribute set makes
+  `mergeGeometries` return null, dropping the whole kind for that tile), and
+  `props.ts` is the box/cylinder/sphere/merge/quarter-turn set the point props
+  are made of. The per-module copies of these are gone; a new layer should not
+  grow another one.
 - `src/elements3d/facade_layout.ts` / `facade.ts` — procedural window, balcony
   and door detail. The layout is pure maths (seeded, unit-tested); `facade.ts`
   turns it into one merged geometry per tile (quads wound to match their normal,
