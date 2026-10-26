@@ -755,6 +755,40 @@ async function loadBuildingModel(
   }
 }
 
+/**
+ * A tile with nothing in it. Two callers need one: a 404 (tilegen does not
+ * write a tile with no renderable features) and a dev server's HTML fallback
+ * for a missing path. Both mean "nothing here", and both used to spell the
+ * whole object out, which is how the field list drifted between them.
+ */
+function emptyTileObjects(): TileObjects {
+  return {
+    meshes: [],
+    buildings: [],
+    barriers: [],
+    features: [],
+    water: [],
+    furniture: [],
+    fountains: [],
+    transit: [],
+    terraces: [],
+    playgrounds: [],
+    monuments: [],
+    construction: [],
+    crosswalks: [],
+    platforms: [],
+    rooftops: [],
+    traffic: [],
+    crossings: [],
+    signals: [],
+    runways: [],
+    aprons: [],
+    parking: [],
+    lamps: [],
+    floodlights: [],
+  };
+}
+
 export async function objectsAt(
   viewOrigin: [number, number],
   x: number,
@@ -771,31 +805,7 @@ export async function objectsAt(
   if (response.status === 404) {
     // tiles with no renderable features are not written at all, so a 404
     // means "nothing here" (treat as empty, don't retry forever)
-    return {
-      meshes: [],
-      buildings: [],
-      barriers: [],
-      features: [],
-      water: [],
-      furniture: [],
-      fountains: [],
-      transit: [],
-      terraces: [],
-      playgrounds: [],
-      monuments: [],
-      construction: [],
-      crosswalks: [],
-      platforms: [],
-      rooftops: [],
-      traffic: [],
-      crossings: [],
-      signals: [],
-      runways: [],
-      aprons: [],
-      parking: [],
-      lamps: [],
-      floodlights: [],
-    };
+    return emptyTileObjects();
   }
   // A dev server with a SPA fallback (Vite does this) answers a missing
   // /tiles/... path with index.html and a 200, so a permalink pointing outside
@@ -803,31 +813,7 @@ export async function objectsAt(
   // every move. Not JSON means "nothing here" as far as the map is concerned.
   if (!(response.headers.get("content-type") ?? "").includes("json")) {
     console.warn(`tile ${x}/${y} is not JSON, treating it as empty`);
-    return {
-      meshes: [],
-      buildings: [],
-      barriers: [],
-      features: [],
-      water: [],
-      furniture: [],
-      fountains: [],
-      transit: [],
-      terraces: [],
-      playgrounds: [],
-      monuments: [],
-      construction: [],
-      crosswalks: [],
-      platforms: [],
-      rooftops: [],
-      traffic: [],
-      crossings: [],
-      signals: [],
-      runways: [],
-      aprons: [],
-      parking: [],
-      lamps: [],
-      floodlights: [],
-    };
+    return emptyTileObjects();
   }
   if (!response.ok) {
     throw new Error(`failed to fetch tile ${x}/${y}: ${response.status}`);

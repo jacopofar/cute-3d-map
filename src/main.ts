@@ -8,8 +8,6 @@ import {
 import * as THREE from "three";
 import "./maplibre_setup";
 
-import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
-
 import type { CustomLayerInterface, LngLat, LngLatLike } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -533,7 +531,7 @@ class CoolMap implements MapDebug {
       },
       // the renderer owns its own GL context; this argument is unused
       render(_gl, args) {
-        coolMap.recordFrame(performance.now());
+        coolMap.perf.recordFrame(performance.now());
         const modelTransform = coolMap.modelTransform;
         const rotationX = new THREE.Matrix4().makeRotationAxis(
           new THREE.Vector3(1, 0, 0),
@@ -1166,7 +1164,7 @@ class CoolMap implements MapDebug {
     }
     for (const [key, record] of this.tiles) {
       if (keep.has(key) || !record.detail) continue;
-      this.disposeDetail(record.detail);
+      disposeFacadeDetail(this.customLayer.scene, record.detail);
       record.detail = undefined;
     }
     this.applyDetailVisibility();
@@ -1372,14 +1370,10 @@ class CoolMap implements MapDebug {
     for (const layer of this.layerSwitches) layer.after?.();
   }
 
-  private disposeDetail(detail: TileRecord["detail"]): void {
-    disposeFacadeDetail(this.customLayer.scene, detail);
-  }
-
   // drop the facade detail of every tile but keep the tiles themselves
   private clearBuildingDetail() {
     for (const record of this.tiles.values()) {
-      this.disposeDetail(record.detail);
+      disposeFacadeDetail(this.customLayer.scene, record.detail);
       record.detail = undefined;
     }
   }
@@ -1533,10 +1527,6 @@ class CoolMap implements MapDebug {
     this.nightLights?.setVisible(this.light.night, this.map.getZoom());
   }
 
-  private recordFrame(now: number) {
-    this.perf.recordFrame(now);
-  }
-
   private reportPerf(extra: Record<string, unknown> = {}) {
     this.perf.report(extra);
   }
@@ -1555,44 +1545,6 @@ class CoolMap implements MapDebug {
       triangles: this.lastSceneDraw.triangles,
     });
   }
-
-  async getGLTF(): Promise<ArrayBuffer> {
-    return new Promise<ArrayBuffer>((res, rej) => {
-      const exporter = new GLTFExporter();
-      exporter.parse(
-        this.customLayer.scene,
-        function (gltf) {
-          if (gltf instanceof ArrayBuffer) {
-            res(gltf);
-          } else {
-            rej(["This is not an ArrayBuffer!", gltf]);
-          }
-        },
-        function (error) {
-          rej(error);
-        },
-        { binary: true },
-      );
-    });
-  }
-
-  // console.log("transform", modelTransform)
-
-  // function getCube100(x: number, y: number): THREE.Mesh {
-  //      const geometry = new THREE.BoxGeometry( 100, 100, 100 );
-  //     // const material = new THREE.MeshToonMaterial( {color: 0x00ff00} );
-  //     const material = new THREE.MeshStandardMaterial({
-  //         color: 0x10ff10,
-  //         transparent: true,
-  //         opacity: 0.9
-  //         // wireframe: true
-  //     });
-  //     const cube = new THREE.Mesh(geometry, material );
-  //     cube.translateZ(50);
-  //     cube.translateX(x);
-  //     cube.translateY(y);
-  //     return cube;
-  // }
 }
 
 restoreCheckboxStates();
@@ -1603,12 +1555,3 @@ const c = new CoolMap([9.186, 45.497]);
 if (import.meta.env.DEV) {
   (window as unknown as { __coolMap: CoolMap }).__coolMap = c;
 }
-// example of how to download GLTF file
-// setTimeout(async () => {
-//   const data = await c.getGLTF();
-//   const blob = new Blob([data], { type: "model/gltf-binary" });
-//   const link = document.createElement("a");
-//   link.href = window.URL.createObjectURL(blob);
-//   link.download = "gltf.glb";
-//   link.click();
-// }, 5000);

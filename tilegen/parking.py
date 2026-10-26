@@ -25,8 +25,6 @@ from itertools import pairwise
 import shapely
 from shapely.ops import substring
 
-from geo import TILE_ZOOM, coord_to_tile
-
 # The parked cars use the moving cars' body; keep these in sync with
 # CAR_TRAFFIC in src/traffic.ts.
 CAR_LENGTH = 8 / 3
@@ -257,38 +255,6 @@ def parking_offset(style: str, highway: str) -> float:
         + (CAR_LENGTH / 2) * math.sin(math.pi / 4)
         + (CAR_WIDTH / 2) * math.cos(math.pi / 4)
         + 0.25
-    )
-
-
-def parking_heading(road_heading: float, side: int, style: str) -> float:
-    if style == PARALLEL:
-        return road_heading + (math.pi if side > 0 else 0.0)
-    if style == PERPENDICULAR:
-        return road_heading + side * math.pi / 2
-    return road_heading + side * (math.pi / 2 - math.pi / 4)
-
-
-def _car_at(
-    lon: float,
-    lat: float,
-    road_heading: float,
-    side: int,
-    style: str,
-    highway: str,
-) -> tuple[float, float, float]:
-    """The car's position and heading for one bay. `side` is +1 for the left of
-    the way and -1 for the right; the car sits just beyond the carriageway and
-    faces the direction a car parked there would."""
-    offset = parking_offset(style, highway)
-    heading = parking_heading(road_heading, side, style)
-    # outward normal for this side, in meters
-    normal_east = -math.sin(road_heading) * side
-    normal_north = math.cos(road_heading) * side
-    cos_lat = math.cos(math.radians(lat))
-    return (
-        lon + normal_east * offset / (METERS_PER_DEG_LON * cos_lat),
-        lat + normal_north * offset / METERS_PER_DEG_LAT,
-        heading,
     )
 
 
@@ -551,6 +517,23 @@ def outside_tracks(
     return kept
 
 
+def _clashes(
+    grid: dict[tuple[int, int], list[tuple[float, float]]], x: float, y: float
+) -> bool:
+    """Whether a bay at (x, y) sits closer than MIN_SPOT_SPACING to one already
+    kept. The grid is bucketed at that spacing, so only the nine neighbouring
+    cells can hold a clash."""
+    cell = MIN_SPOT_SPACING
+    cx = math.floor(x / cell)
+    cy = math.floor(y / cell)
+    return any(
+        math.hypot(x - ox, y - oy) < MIN_SPOT_SPACING
+        for ix in (cx - 1, cx, cx + 1)
+        for iy in (cy - 1, cy, cy + 1)
+        for ox, oy in grid[(ix, iy)]
+    )
+
+
 def parking_rows(
     ways: list[ParkingWay], tracks: Sequence[shapely.LineString] | None = None
 ) -> list[ParkingRow]:
@@ -598,19 +581,8 @@ def parking_rows(
                 for lon, lat in samples:
                     x = lon * METERS_PER_DEG_LON * cos_ref
                     y = lat * METERS_PER_DEG_LAT
-                    cx = math.floor(x / cell)
-                    cy = math.floor(y / cell)
-                    for ix in (cx - 1, cx, cx + 1):
-                        for iy in (cy - 1, cy, cy + 1):
-                            if any(
-                                math.hypot(x - ox, y - oy) < MIN_SPOT_SPACING
-                                for ox, oy in grid[(ix, iy)]
-                            ):
-                                clashes += 1
-                                break
-                        else:
-                            continue
-                        break
+                    if _clashes(grid, x, y):
+                        clashes += 1
                 if samples and clashes / len(samples) > 0.5:
                     continue
                 for lon, lat in samples:
@@ -627,82 +599,3 @@ def parking_rows(
                     )
                 )
     return outside_tracks(rows, tracks or [])
-
-
-def _dedupe(
-    spots: list[tuple[float, float, float]],
-) -> list[tuple[float, float, float]]:
-    """Drop cars that sit on top of an already-kept car.
-
-    Overlapping OSM ways (a service way along a secondary road, the two
-    carriageways of a dual carriageway) produce bays at nearly the same place,
-    often with different styles; two intersecting car boxes read as overlapping
-    cars and z-fight. The input order is by road class, so the bigger road's car
-    is the one kept. A spatial hash at the spacing size makes this linear.
-    """
-    if not spots:
-        return []
-    cell = MIN_SPOT_SPACING
-    grid: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
-    kept: list[tuple[float, float, float]] = []
-    # one reference latitude for every point, so distances are consistent; using
-    # each point's own cos would overstate the separation between neighbours
-    reference_lat = sum(lat for _, lat, _ in spots) / len(spots)
-    cos_ref = math.cos(math.radians(reference_lat))
-    for lon, lat, heading in spots:
-        x = lon * METERS_PER_DEG_LON * cos_ref
-        y = lat * METERS_PER_DEG_LAT
-        cx = math.floor(x / cell)
-        cy = math.floor(y / cell)
-        clash = False
-        for ix in (cx - 1, cx, cx + 1):
-            for iy in (cy - 1, cy, cy + 1):
-                for ox, oy in grid[(ix, iy)]:
-                    if math.hypot(x - ox, y - oy) < MIN_SPOT_SPACING:
-                        clash = True
-                        break
-                if clash:
-                    break
-            if clash:
-                break
-        if clash:
-            continue
-        grid[(cx, cy)].append((x, y))
-        kept.append((lon, lat, heading))
-    return kept
-
-
-def parking_spots(
-    ways: list[ParkingWay], zoom: int = TILE_ZOOM
-) -> dict[tuple[int, int], list[list[float]]]:
-    """All parked cars, grouped by the tile they fall in. Each spot is
-    [lon, lat, heading]; a car belongs to exactly one tile, so tiles need no
-    clipping. Overlapping ways are deduped first, with the bigger road winning."""
-    raw: list[tuple[float, float, float]] = []
-    # deterministic order, and the bigger road keeps its parking on an overlap
-    ordered = sorted(
-        ways,
-        key=lambda way: (HIGHWAY_RANK.get(way.highway, len(HIGHWAY_RANK)), way.id),
-    )
-    for way in ordered:
-        if way.roundabout or way.highway not in PARKING_HIGHWAYS:
-            continue
-        if way_length(way.coords) < MIN_WAY_LENGTH:
-            continue
-        seed = _hash(way.id)
-        style = parking_style(seed, way.highway)
-        pitch = bay_pitch(style)
-        for side in (1, -1):
-            for index, (lon, lat, heading) in enumerate(walk_way(way.coords, pitch)):
-                # 95% of the bays hold a car; 5% are empty, seeded per bay
-                if _mix(seed ^ (side & 0xFFFFFFFF), index) % 100 >= OCCUPANCY:
-                    continue
-                raw.append(_car_at(lon, lat, heading, side, style, way.highway))
-
-    by_tile: dict[tuple[int, int], list[list[float]]] = defaultdict(list)
-    for car_lon, car_lat, car_heading in _dedupe(raw):
-        tile = coord_to_tile(car_lon, car_lat, zoom)
-        by_tile[tile].append(
-            [round(car_lon, 7), round(car_lat, 7), round(car_heading, 4)]
-        )
-    return dict(by_tile)

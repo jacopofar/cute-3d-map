@@ -43,26 +43,7 @@ def test_bay_pitch_orders_the_styles_by_their_along_road_footprint():
     )
 
 
-def test_a_parallel_car_sits_beyond_the_kerb_and_faces_the_traffic_side():
-    # an eastbound road: the left side is north, the right side south
-    _, left_lat, left_heading = parking._car_at(
-        9.0, 45.0, 0.0, 1, parking.PARALLEL, "residential"
-    )
-    _, right_lat, right_heading = parking._car_at(
-        9.0, 45.0, 0.0, -1, parking.PARALLEL, "residential"
-    )
-    assert left_lat > 45.0
-    assert right_lat < 45.0
-    assert left_heading == pytest.approx(math.pi)
-    assert right_heading == pytest.approx(0.0)
-    # a perpendicular bay points across the road
-    _, _, heading = parking._car_at(
-        9.0, 45.0, 0.0, 1, parking.PERPENDICULAR, "residential"
-    )
-    assert heading == pytest.approx(math.pi / 2)
-
-
-def test_parking_spots_skips_roundabouts_and_short_ways():
+def test_parking_rows_skip_roundabouts_and_short_ways():
     short = parking.ParkingWay(
         id="way/1",
         coords=[(9.0, 45.0), (9.0, 45.0001)],
@@ -74,25 +55,7 @@ def test_parking_spots_skips_roundabouts_and_short_ways():
         highway="residential",
         roundabout=True,
     )
-    assert parking.parking_spots([short, roundabout]) == {}
-
-
-def test_parking_spots_fills_both_sides_and_keeps_95_percent():
-    coords = [(9.0, 45.0), (9.0, 45.002)]
-    way = parking.ParkingWay(id="way/1", coords=coords, highway="residential")
-    by_tile = parking.parking_spots([way])
-    spots = [spot for tile in by_tile.values() for spot in tile]
-
-    style = parking.parking_style(parking._hash(way.id), way.highway)
-    bays_per_side = len(parking.walk_way(coords, parking.bay_pitch(style)))
-    assert len(spots) <= 2 * bays_per_side
-    # 95% occupancy: a few empty bays, but the sides are packed
-    assert len(spots) >= 0.88 * 2 * bays_per_side
-    # both sides of the north-south way (west and east of it)
-    assert min(spot[0] for spot in spots) < 9.0 < max(spot[0] for spot in spots)
-    # and every spot is in a tile
-    assert by_tile
-    assert all(len(spot) == 3 for spot in spots)
+    assert parking.parking_rows([short, roundabout]) == []
 
 
 def test_offset_polyline_moves_to_the_requested_side():
@@ -188,61 +151,41 @@ def test_a_tunnel_gets_no_parking_rows():
     assert len(parking.parking_rows([surface])) == 2
 
 
-def test_parking_spots_is_stable_across_rebuilds():
+def test_parking_rows_are_stable_across_rebuilds():
     way = parking.ParkingWay(
         id="way/9",
         coords=[(9.0, 45.0), (9.0, 45.002)],
         highway="tertiary",
     )
-    assert parking.parking_spots([way]) == parking.parking_spots([way])
+    assert parking.parking_rows([way]) == parking.parking_rows([way])
 
 
-def _flatten(by_tile):
-    return [spot for tile in by_tile.values() for spot in tile]
-
-
-def _min_distance(spots):
-    best = math.inf
-    for i in range(len(spots)):
-        for j in range(i + 1, len(spots)):
-            dx = (
-                (spots[i][0] - spots[j][0])
-                * parking.METERS_PER_DEG_LON
-                * math.cos(math.radians(spots[i][1]))
-            )
-            dy = (spots[i][1] - spots[j][1]) * parking.METERS_PER_DEG_LAT
-            best = min(best, math.hypot(dx, dy))
-    return best
-
-
-def test_overlapping_ways_are_deduped_and_the_bigger_road_wins():
+def test_overlapping_rows_are_deduped_and_the_bigger_road_wins():
     coords = [(9.0, 45.0), (9.0, 45.002)]
-    # the service way runs ~0.4 m beside the secondary: their bays collide
-    beside = [(9.000005, 45.0), (9.000005, 45.002)]
-    secondary = parking.ParkingWay(id="way/2", coords=coords, highway="secondary")
-    service = parking.ParkingWay(id="way/1", coords=beside, highway="service")
-    only_secondary = _flatten(parking.parking_spots([secondary]))
-    both = _flatten(parking.parking_spots([secondary, service]))
-    # the secondary is processed first, so every one of its bays survives ...
-    assert set(map(tuple, only_secondary)) <= set(map(tuple, both))
-    # ... some of the service way's colliding bays are dropped, but not all
-    only_service = _flatten(parking.parking_spots([service]))
-    assert len(both) < len(only_secondary) + len(only_service)
-    assert len(both) > len(only_secondary)
-    # nothing that survives sits on top of another car
-    assert _min_distance(both) >= parking.MIN_SPOT_SPACING - 1e-6
+    # the same kerb line mapped twice, 4 cm apart: same class, so same offset and
+    # the second way's rows land on the first's
+    beside = [(9.0000005, 45.0), (9.0000005, 45.002)]
+    first = parking.ParkingWay(id="way/1", coords=coords, highway="service")
+    second = parking.ParkingWay(id="way/2", coords=beside, highway="service")
+    assert {row.id.split(":")[0] for row in parking.parking_rows([first])} == {"way/1"}
+    both = parking.parking_rows([first, second])
+    # the lower id is placed first, so the duplicate's rows are the ones dropped
+    assert {row.id.split(":")[0] for row in both} == {"way/1"}
+    assert len(both) == 2
 
 
-def test_dedupe_threshold_is_below_the_closest_bay_pitch():
+def test_the_clash_spacing_is_below_the_closest_bay_pitch():
     # adjacent perpendicular bays must survive; only cross-way overlaps go
     assert parking.MIN_SPOT_SPACING < parking.bay_pitch(parking.PERPENDICULAR)
 
 
-def test_dedupe_drops_two_cars_closer_than_the_spacing():
-    a = (9.0, 45.0, 0.0)
-    # 1.5 m north of the first
-    b = (9.0, 45.0 + 1.5 / parking.METERS_PER_DEG_LAT, 0.0)
-    assert len(parking._dedupe([a, b])) == 1
+def test_clashes_finds_a_bay_inside_the_spacing():
+    from collections import defaultdict
+
+    grid = defaultdict(list)
+    grid[(0, 0)].append((0.0, 0.0))
+    assert parking._clashes(grid, 1.5, 0.0)
+    assert not parking._clashes(grid, parking.MIN_SPOT_SPACING + 0.1, 0.0)
 
 
 def test_parking_on_a_way_drops_only_the_side_with_a_track():
