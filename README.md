@@ -84,8 +84,8 @@ The project has two halves:
    as a `#map=zoom/lat/lon` permalink (MapLibre's own hash handling, with the
    `map` prefix so the fragment looks like OSM's): a position can be copied or
    linked, and a pasted link opens there. On every map move it loads/unloads
-   tiles within a 3-tile margin of the center (`loadUnloadCoord` in
-   `src/main.ts`), converts each feature to a Three.js object via
+   tiles within a 3-tile margin of the center (`src/tile_loader.ts`),
+   converts each feature to a Three.js object via
    `src/geojson_data.ts` and `src/elements3d/` (building, tree, tree_row,
    water, church, cemetery, furniture, fountain, transit, terrace,
    playground, monument, construction, crosswalk, road_marking, platform,
@@ -102,7 +102,7 @@ The project has two halves:
    generator), in the tile's `roof_color`, built into the building mesh itself,
    so roofs are always there rather than zoom-gated. Footprints that are concave,
    have a courtyard, or have more than 8 corners stay flat: the ridge fan that
-   builds the pitched shapes breaks up on those. There
+   builds the pitched shapes breaks up on those.
    Each building popup has a **G** button that downloads that building's walls
    and roof as a `.glb` (Three.js `GLTFExporter`).
 
@@ -579,20 +579,25 @@ echo "VITE_MAPTILER_KEY=your_key" > .env
 # disable reporting entirely
 echo "PERF_ENDPOINT=https://example.com/t/perf" >> .env
 
-npm run dev          # dev server
-npm run build        # tsc + production build
-npm run preview      # serve the production build
-npm run prettify     # prettier on src/*.ts
+npm run dev             # dev server
+npm run build           # tsc + production build
+npm run preview         # serve the production build
+npm run prettify        # prettier over src/**/*.ts (rewrites in place)
 
-npx playwright install   # once, for the e2e browser
-npm run test:unit        # vitest unit tests for the pure traffic math
-npm run test:e2e         # Playwright smoke tests
-npm run bench            # frame-time benchmark (see below)
+npx playwright install  # once, for the e2e browser
+npm run test:check      # type check + unit tests (the per-change loop)
+npm run test:unit       # vitest with coverage
+npm run test:e2e:changed  # the specs a diff against main touches
+npm run test:e2e:smoke  # boot and permalink only
+npm run test:e2e        # the full Playwright suite (the merge gate)
+npm run bench           # frame-time benchmark (see below)
+npm run bench:gpu       # the same in headed Chrome on the real GPU
 ```
 
 The app expects tiles under `public/tiles/` (fetch path is `tiles/{x}/{y}.json`
-relative to the app origin). A sample set covering Milan at zoom 15 is included;
-regenerate them as described below for other cities.
+relative to the app origin). No tiles ship with the repo (`public/tiles` is
+ignored, since a city is hundreds of megabytes): generate them with the command
+above, or the map opens on an empty basemap.
 
 ## Performance
 
@@ -614,9 +619,9 @@ are cheap; in headless SwiftShader they are not.
 
 The tree pass is what moved the frame time least on a software renderer (~5-9%
 idle/pan p50, `perf-results` A/B below) and the most on memory: the loaded
-geometry drops from ~366 MB to ~165 MB of vertex+index buffers. See `notes.md`
-for what is still open (a `getBounds()`-driven tile window, spreading tile builds
-across frames).
+geometry drops from ~366 MB to ~165 MB of vertex+index buffers. See the local
+backlog notes for what is still open (a `getBounds()`-driven tile window,
+spreading tile builds across frames).
 
 The facade windows/balconies/doors are the opposite trade: they add geometry
 (about 4.4M vertices for the 9 tiles near the center at zoom 17, versus 2.1M for
@@ -750,8 +755,9 @@ above.
 `--gtfs ../gtfs.zip` from `tilegen/` when rebuilding.
 
 To keep the PBF small up front, an `osmium extract` with the same polygon also
-works. The tile schema at the top of this README is the current list of emitted
-`cmtype` layers.
+works. The list of `cmtype` layers at the top of this README is a summary;
+`tilegen/tiles.py` is the contract, and `tests/test_tiles.py` checks every
+builder against it.
 
 `tilegen/` is checked by Ruff and [`ty`](https://docs.astral.sh/ty/) via
 pre-commit (config at the repo root). After `uv sync --group dev` in `tilegen/`,
@@ -778,14 +784,15 @@ with `uvx pre-commit run --all-files`. The tilegen unit tests run with
   tiles beyond the ±3 margin are dropped and reloaded against the new origin.
 - WebXR/VR support is stubbed out (currently broken upstream, see the comment in
   `src/main.ts`).
-- Frontend has Playwright smoke tests (the app boots and the tile pipeline
-  responds) plus vitest unit tests for the pure traffic math
-  (`src/traffic_math.test.ts`); there are no visual/geometry assertions.
-  `tilegen/` has a pytest suite (reported with coverage).
+- Three test suites: vitest for the pure math and geometry layouts
+  (`src/**/*.test.ts`), about thirty Playwright specs that boot the app against
+  stubbed tiles and assert by mesh kind, and a pytest suite for `tilegen/`
+  (reported with coverage, floor 80%). The Playwright specs do assert geometry,
+  through `__coolMap`'s read-only probes (`src/debug.ts`).
 
 ## Ideas / TODO
 
-See `notes.md` for the working list. Highlights:
+The working list lives in local, uncommitted notes. Highlights:
 
 - dwells at tram stops and junctions (a time keyframe table instead of a single
   constant speed per loop)
