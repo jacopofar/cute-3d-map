@@ -1,10 +1,15 @@
 import * as THREE from "three";
-import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { applyVertexColor } from "./vertex_color";
-import { hashSeed } from "./random";
+import {
+  coloured,
+  mergeParts,
+  placeAt,
+  propBox,
+  propCylinder,
+  quarterTurn,
+} from "./props";
 
 /*
  * Playgrounds: a sand/rubber patch with a swing, a slide, a spring rider and,
@@ -31,76 +36,25 @@ export const playgroundMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
 });
 
-function coloured(
-  geometry: THREE.BufferGeometry,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  applyVertexColor(geometry, color);
-  return geometry;
-}
-
-// The position is a parameter rather than something the caller applies
-// afterwards: a rider's post is built by a different call than its seat, and
-// forgetting the translate silently stands it at the patch's center instead of
-// under the seat (which is exactly what happened before this signature).
-function cylinder(
-  x: number,
-  y: number,
-  baseZ: number,
-  radiusTop: number,
-  radiusBottom: number,
-  height: number,
-  segments: number,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const geometry = new THREE.CylinderGeometry(
-    radiusTop,
-    radiusBottom,
-    height,
-    segments,
-  );
-  geometry.rotateX(Math.PI / 2);
-  geometry.translate(x, y, baseZ + height / 2);
-  return coloured(geometry, color);
-}
-
-function box(
-  x: number,
-  y: number,
-  z: number,
-  width: number,
-  depth: number,
-  height: number,
-  color: THREE.Color,
-  rotateX = 0,
-  rotateZ = 0,
-): THREE.BufferGeometry {
-  const geometry = new THREE.BoxGeometry(width, depth, height);
-  if (rotateX) geometry.rotateX(rotateX);
-  if (rotateZ) geometry.rotateZ(rotateZ);
-  geometry.translate(x, y, z + height / 2);
-  return coloured(geometry, color);
-}
-
 function swing(parts: THREE.BufferGeometry[], x: number, y: number): void {
-  parts.push(box(x - 1.1, y - 0.5, 0, 0.08, 0.08, 2.2, METAL));
-  parts.push(box(x + 1.1, y - 0.5, 0, 0.08, 0.08, 2.2, METAL));
-  parts.push(box(x - 1.1, y + 0.5, 0, 0.08, 0.08, 2.2, METAL));
-  parts.push(box(x + 1.1, y + 0.5, 0, 0.08, 0.08, 2.2, METAL));
-  parts.push(box(x, y, 2.2, 2.3, 0.08, 0.08, METAL));
+  parts.push(propBox(x - 1.1, y - 0.5, 0, 0.08, 0.08, 2.2, METAL));
+  parts.push(propBox(x + 1.1, y - 0.5, 0, 0.08, 0.08, 2.2, METAL));
+  parts.push(propBox(x - 1.1, y + 0.5, 0, 0.08, 0.08, 2.2, METAL));
+  parts.push(propBox(x + 1.1, y + 0.5, 0, 0.08, 0.08, 2.2, METAL));
+  parts.push(propBox(x, y, 2.2, 2.3, 0.08, 0.08, METAL));
   for (const seatX of [-0.5, 0.5]) {
-    parts.push(box(x + seatX, y, 1.5, 0.02, 0.02, 0.7, METAL));
-    parts.push(box(x + seatX, y, 0.62, 0.5, 0.22, 0.06, SEAT));
+    parts.push(propBox(x + seatX, y, 1.5, 0.02, 0.02, 0.7, METAL));
+    parts.push(propBox(x + seatX, y, 0.62, 0.5, 0.22, 0.06, SEAT));
   }
 }
 
 function slide(parts: THREE.BufferGeometry[], x: number, y: number): void {
-  parts.push(box(x - 0.35, y - 0.8, 0, 0.06, 0.06, 1.6, METAL));
-  parts.push(box(x + 0.35, y - 0.8, 0, 0.06, 0.06, 1.6, METAL));
+  parts.push(propBox(x - 0.35, y - 0.8, 0, 0.06, 0.06, 1.6, METAL));
+  parts.push(propBox(x + 0.35, y - 0.8, 0, 0.06, 0.06, 1.6, METAL));
   for (let i = 1; i <= 4; i++) {
-    parts.push(box(x, y - 0.8, i * 0.3, 0.75, 0.05, 0.05, METAL));
+    parts.push(propBox(x, y - 0.8, i * 0.3, 0.75, 0.05, 0.05, METAL));
   }
-  parts.push(box(x, y - 0.45, 1.6, 0.9, 0.9, 0.08, SLIDE));
+  parts.push(propBox(x, y - 0.45, 1.6, 0.9, 0.9, 0.08, SLIDE));
   // a sloped ramp down toward +y
   const ramp = new THREE.BoxGeometry(0.8, 2.2, 0.06);
   ramp.rotateX(-0.55);
@@ -109,16 +63,16 @@ function slide(parts: THREE.BufferGeometry[], x: number, y: number): void {
 }
 
 function spring(parts: THREE.BufferGeometry[], x: number, y: number): void {
-  parts.push(cylinder(x, y, 0, 0.08, 0.1, 0.5, 6, METAL));
-  parts.push(box(x, y, 0.5, 0.55, 0.3, 0.12, SPRING));
-  parts.push(box(x, y - 0.18, 0.62, 0.5, 0.06, 0.3, SPRING));
+  parts.push(propCylinder(x, y, 0, 0.08, 0.1, 0.5, 6, METAL));
+  parts.push(propBox(x, y, 0.5, 0.55, 0.3, 0.12, SPRING));
+  parts.push(propBox(x, y - 0.18, 0.62, 0.5, 0.06, 0.3, SPRING));
 }
 
 function seesaw(parts: THREE.BufferGeometry[], x: number, y: number): void {
-  parts.push(box(x, y, 0, 0.35, 0.35, 0.5, METAL));
-  parts.push(box(x, y, 0.5, 2.4, 0.28, 0.08, SEAT));
-  parts.push(box(x - 1.0, y, 0.58, 0.06, 0.06, 0.4, METAL));
-  parts.push(box(x + 1.0, y, 0.58, 0.06, 0.06, 0.4, METAL));
+  parts.push(propBox(x, y, 0, 0.35, 0.35, 0.5, METAL));
+  parts.push(propBox(x, y, 0.5, 2.4, 0.28, 0.08, SEAT));
+  parts.push(propBox(x - 1.0, y, 0.58, 0.06, 0.06, 0.4, METAL));
+  parts.push(propBox(x + 1.0, y, 0.58, 0.06, 0.06, 0.4, METAL));
 }
 
 function climbingFrame(
@@ -128,13 +82,13 @@ function climbingFrame(
 ): void {
   for (const dx of [-0.8, 0.8]) {
     for (const dy of [-0.8, 0.8]) {
-      parts.push(box(x + dx, y + dy, 0, 0.08, 0.08, 1.8, CLIMB));
+      parts.push(propBox(x + dx, y + dy, 0, 0.08, 0.08, 1.8, CLIMB));
     }
   }
-  parts.push(box(x, y - 0.8, 1.8, 1.7, 0.08, 0.08, CLIMB));
-  parts.push(box(x, y + 0.8, 1.8, 1.7, 0.08, 0.08, CLIMB));
-  parts.push(box(x - 0.8, y, 1.8, 1.7, 0.08, 0.08, CLIMB));
-  parts.push(box(x + 0.8, y, 1.8, 1.7, 0.08, 0.08, CLIMB));
+  parts.push(propBox(x, y - 0.8, 1.8, 1.7, 0.08, 0.08, CLIMB));
+  parts.push(propBox(x, y + 0.8, 1.8, 1.7, 0.08, 0.08, CLIMB));
+  parts.push(propBox(x - 0.8, y, 1.8, 1.7, 0.08, 0.08, CLIMB));
+  parts.push(propBox(x + 0.8, y, 1.8, 1.7, 0.08, 0.08, CLIMB));
 }
 
 /** The geometry for one playground point, or empty for an unusable feature. */
@@ -173,15 +127,12 @@ export function playground(
     seesaw(parts, 0, -patch * 0.5);
   }
 
-  const merged = BufferGeometryUtils.mergeGeometries(parts);
-  for (const part of parts) part.dispose();
+  const merged = mergeParts(parts);
   if (!merged) return [];
   const [x, y] = toModelCoords(
     [geometry.coordinates[0], geometry.coordinates[1]],
     originMeters,
     scaleFactor,
   );
-  merged.rotateZ((hashSeed(`${f.id}`) % 4) * (Math.PI / 2));
-  merged.translate(x, y, 0);
-  return [merged];
+  return [placeAt(merged, x, y, quarterTurn(f.id))];
 }

@@ -3,7 +3,7 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
 import { MeshBuilder } from "./mesh_builder";
-import { hashSeed } from "./random";
+import { placeAt, quarterTurn } from "./props";
 
 /*
  * Transit stops in the Milan look:
@@ -147,21 +147,16 @@ export function transitStop(
     originMeters,
     scaleFactor,
   );
-  const angle = (hashSeed(`${f.id}`) % 4) * (Math.PI / 2);
+  const angle = quarterTurn(f.id);
 
   const builder = new MeshBuilder();
   if (kind === "metro") metroEntrance(builder);
   else busStop(builder, props?.shelter === true);
   const body = builder.geometry();
-  body?.rotateZ(angle);
-  body?.translate(x, y, 0);
-
   const sign = kind === "metro" ? metroSign() : null;
-  sign?.rotateZ(angle);
-  sign?.translate(x, y, 0);
 
   return {
-    body: body ? [body] : [],
-    sign: sign ? [sign] : [],
+    body: body ? [placeAt(body, x, y, angle)] : [],
+    sign: sign ? [placeAt(sign, x, y, angle)] : [],
   };
 }

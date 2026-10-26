@@ -3,7 +3,7 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
 import { MeshBuilder } from "./mesh_builder";
-import { hashSeed } from "./random";
+import { placeAt, quarterTurn } from "./props";
 
 /*
  * Street furniture: bollards, bins, bike racks, post boxes, drinking fountains,
@@ -68,7 +68,7 @@ function propAngle(f: Geojson.Feature): number {
     // local +x along the line: north (0) needs +90 degrees, east (90) none
     return Math.PI / 2 - (bearing * Math.PI) / 180;
   }
-  return (hashSeed(`${f.id}`) % 4) * (Math.PI / 2);
+  return quarterTurn(f.id);
 }
 
 function build(kind: FurnitureKind): THREE.BufferGeometry | null {
@@ -136,7 +136,5 @@ export function furniture(
   const built = build(kind);
   if (!built) return [];
   // rotate the whole prop around the feature point, not each box around its own
-  built.rotateZ(propAngle(f));
-  built.translate(x, y, 0);
-  return [built];
+  return [placeAt(built, x, y, propAngle(f))];
 }

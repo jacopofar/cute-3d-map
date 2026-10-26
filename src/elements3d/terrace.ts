@@ -1,9 +1,15 @@
 import * as THREE from "three";
-import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { applyVertexColor } from "./vertex_color";
+import {
+  coloured,
+  mergeParts,
+  placeAt,
+  propBox,
+  propCylinder,
+  quarterTurn,
+} from "./props";
 import { hashSeed } from "./random";
 
 /*
@@ -28,78 +34,35 @@ export const terraceMaterial = new THREE.MeshLambertMaterial({
   vertexColors: true,
 });
 
-function coloured(
-  geometry: THREE.BufferGeometry,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  applyVertexColor(geometry, color);
-  return geometry;
-}
-
-function cylinder(
-  radiusTop: number,
-  radiusBottom: number,
-  height: number,
-  baseZ: number,
-  segments: number,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const geometry = new THREE.CylinderGeometry(
-    radiusTop,
-    radiusBottom,
-    height,
-    segments,
-  );
-  geometry.rotateX(Math.PI / 2);
-  geometry.translate(0, 0, baseZ + height / 2);
-  return coloured(geometry, color);
-}
-
-function box(
-  cx: number,
-  cy: number,
-  baseZ: number,
-  width: number,
-  depth: number,
-  height: number,
-  angle: number,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const geometry = new THREE.BoxGeometry(width, depth, height);
-  geometry.rotateZ(angle);
-  geometry.translate(cx, cy, baseZ + height / 2);
-  return coloured(geometry, color);
-}
-
 // one umbrella with a table and three chairs, centered on (cx, 0)
 function seating(parts: THREE.BufferGeometry[], umbrella: THREE.Color): void {
-  parts.push(cylinder(0.05, 0.05, 2.1, 0, 6, METAL));
+  parts.push(propCylinder(0, 0, 0, 0.05, 0.05, 2.1, 6, METAL));
   const canopy = new THREE.ConeGeometry(1.5, 0.45, 8);
   canopy.rotateX(Math.PI / 2);
   canopy.translate(0, 0, 2.28);
   parts.push(coloured(canopy, umbrella));
 
-  parts.push(cylinder(0.45, 0.4, 0.05, 0.75, 10, TABLE_WOOD));
-  parts.push(cylinder(0.04, 0.04, 0.75, 0, 5, METAL));
-  parts.push(cylinder(0.22, 0.24, 0.04, 0, 6, METAL));
+  parts.push(propCylinder(0, 0, 0.75, 0.45, 0.4, 0.05, 10, TABLE_WOOD));
+  parts.push(propCylinder(0, 0, 0, 0.04, 0.04, 0.75, 5, METAL));
+  parts.push(propCylinder(0, 0, 0, 0.22, 0.24, 0.04, 6, METAL));
 
   for (let i = 0; i < 3; i++) {
     const angle = (i / 3) * Math.PI * 2;
     const dx = Math.cos(angle) * 0.78;
     const dy = Math.sin(angle) * 0.78;
     const facing = angle + Math.PI / 2;
-    parts.push(box(dx, dy, 0.43, 0.42, 0.42, 0.06, facing, CHAIR));
+    parts.push(propBox(dx, dy, 0.43, 0.42, 0.42, 0.06, CHAIR, facing));
     // the back sits just outside the seat, facing the table
     parts.push(
-      box(
+      propBox(
         dx + Math.cos(angle) * 0.18,
         dy + Math.sin(angle) * 0.18,
         0.49,
         0.42,
         0.06,
         0.45,
-        facing,
         CHAIR,
+        facing,
       ),
     );
   }
@@ -129,15 +92,12 @@ export function terrace(
     }
   }
 
-  const merged = BufferGeometryUtils.mergeGeometries(parts);
-  for (const part of parts) part.dispose();
+  const merged = mergeParts(parts);
   if (!merged) return [];
   const [x, y] = toModelCoords(
     [geometry.coordinates[0], geometry.coordinates[1]],
     originMeters,
     scaleFactor,
   );
-  merged.rotateZ((seed % 4) * (Math.PI / 2));
-  merged.translate(x, y, 0);
-  return [merged];
+  return [placeAt(merged, x, y, quarterTurn(f.id))];
 }

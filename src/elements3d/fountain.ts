@@ -1,9 +1,8 @@
 import * as THREE from "three";
-import * as BufferGeometryUtils from "three/addons/utils/BufferGeometryUtils.js";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
-import { applyVertexColor } from "./vertex_color";
+import { coloured, mergeParts, propCylinder } from "./props";
 import { hashSeed } from "./random";
 
 /*
@@ -84,41 +83,6 @@ export interface FountainGeometry {
   water: THREE.BufferGeometry[];
 }
 
-function coloured(
-  geometry: THREE.BufferGeometry,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  applyVertexColor(geometry, color);
-  return geometry;
-}
-
-// a cylinder standing on z, centered at its own height
-function column(
-  radiusTop: number,
-  radiusBottom: number,
-  height: number,
-  baseZ: number,
-  segments: number,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const geometry = new THREE.CylinderGeometry(
-    radiusTop,
-    radiusBottom,
-    height,
-    segments,
-  );
-  geometry.rotateX(Math.PI / 2);
-  geometry.translate(0, 0, baseZ + height / 2);
-  return coloured(geometry, color);
-}
-
-function merged(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
-  if (parts.length === 0) return null;
-  const geometry = BufferGeometryUtils.mergeGeometries(parts);
-  for (const part of parts) part.dispose();
-  return geometry;
-}
-
 /** The stone and water geometries for one fountain point. */
 export function fountain(
   originMeters: [number, number],
@@ -139,7 +103,9 @@ export function fountain(
   const stoneParts: THREE.BufferGeometry[] = [];
   const waterParts: THREE.BufferGeometry[] = [];
 
-  stoneParts.push(column(radius, radius * 1.04, 0.35, 0, 12, STONE_DARK));
+  stoneParts.push(
+    propCylinder(0, 0, 0, radius, radius * 1.04, 0.35, 12, STONE_DARK),
+  );
   // a raised coping ring, so the basin edge reads at street level
   const rim = new THREE.TorusGeometry(radius * 0.98, 0.09, 4, 16);
   rim.translate(0, 0, 0.37);
@@ -150,18 +116,18 @@ export function fountain(
   waterParts.push(coloured(surface, WATER));
 
   if (radius > 1.1) {
-    stoneParts.push(column(0.18, 0.24, 0.9, 0.36, 8, STONE));
-    stoneParts.push(column(0.5, 0.4, 0.14, 1.26, 10, STONE_DARK));
+    stoneParts.push(propCylinder(0, 0, 0.36, 0.18, 0.24, 0.9, 8, STONE));
+    stoneParts.push(propCylinder(0, 0, 1.26, 0.5, 0.4, 0.14, 10, STONE_DARK));
     const bowl = new THREE.CircleGeometry(0.42, 10);
     bowl.translate(0, 0, 1.34);
     waterParts.push(coloured(bowl, WATER));
-    waterParts.push(column(0.035, 0.06, 0.5, 1.34, 6, JET));
+    waterParts.push(propCylinder(0, 0, 1.34, 0.035, 0.06, 0.5, 6, JET));
   } else {
-    waterParts.push(column(0.03, 0.05, 0.35, 0.36, 6, JET));
+    waterParts.push(propCylinder(0, 0, 0.36, 0.03, 0.05, 0.35, 6, JET));
   }
 
-  const stone = merged(stoneParts);
-  const water = merged(waterParts);
+  const stone = mergeParts(stoneParts);
+  const water = mergeParts(waterParts);
   const [x, y] = toModelCoords(
     [geometry.coordinates[0], geometry.coordinates[1]],
     originMeters,
