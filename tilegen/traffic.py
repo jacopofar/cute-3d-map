@@ -109,6 +109,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+# Bump when a change to how loops are found, split or serialized would make a
+# cached fleet wrong to reuse. The cache key hashes the inputs, so without this
+# a code change served the loops the previous code wrote.
+LOOP_FORMAT_VERSION = 1
+
 
 def road_oneway(tags) -> str | None:
     """Normalized oneway direction of a highway way, or None if two-way."""
@@ -1043,10 +1048,12 @@ def fleets_cache_key(
     ways_by_kind: dict[str, list[Way]],
     configs: dict[str, TrafficConfig],
 ) -> str:
-    """Content hash of everything that feeds the loop builders: the ways and the
-    per-kind config. A changed parquet (different ways) or a retuned config
-    changes the key, so the cache never serves loops for other inputs."""
+    """Content hash of everything that feeds the loop builders: the ways, the
+    per-kind config and the loop format version. A changed parquet, a retuned
+    config or a changed loop builder changes the key, so the cache never serves
+    loops another input or another version of the code produced."""
     digest = hashlib.sha1()
+    digest.update(f"loops-v{LOOP_FORMAT_VERSION}".encode())
     for kind in sorted(ways_by_kind):
         digest.update(kind.encode())
         for way in ways_by_kind[kind]:

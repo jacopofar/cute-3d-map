@@ -439,6 +439,16 @@ def test_fleet_cache_key_is_stable_and_input_sensitive():
     assert traffic.fleets_cache_key(moved, configs) != key
 
 
+def test_fleet_cache_key_changes_with_the_loop_format_version(monkeypatch):
+    # a cache entry written by an older loop builder is not reusable just
+    # because the parquet and the config are unchanged
+    ways = {"car": square_ways(9.18, 45.5, 0.001)}
+    configs = {"car": TrafficConfig(method="random", seed=1, loop_count=3)}
+    key = traffic.fleets_cache_key(ways, configs)
+    monkeypatch.setattr(traffic, "LOOP_FORMAT_VERSION", traffic.LOOP_FORMAT_VERSION + 1)
+    assert traffic.fleets_cache_key(ways, configs) != key
+
+
 def metric_square_ways(lon, lat, meters):
     """A square with equal sides in meters, which a degree square is not."""
     dlat = meters / 111_320.0
