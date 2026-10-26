@@ -2,7 +2,7 @@
 
 An OSM-derived 3D diorama for the browser rendered with Three.js and MapLibre.
 
-This project was designed specifically for the city of Milan,Italy, but can be
+This project was designed specifically for the city of Milan, Italy, but can be
 easily adapted to any other place.
 It features extruded buildings with real roofs, trees, animated water, street
 furniture, precomputed traffic, and a day/night cycle driven by the real sun.
