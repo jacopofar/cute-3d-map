@@ -89,6 +89,7 @@ class CemeteryProperties(TypedDict, total=False):
 
 class ConstructionProperties(TypedDict, total=False):
     cmtype: Required[Literal["construction"]]
+    construction: str
     crane: bool
     site_area: float
     name: str
@@ -109,6 +110,7 @@ class RoadMarkingProperties(TypedDict, total=False):
     width: float
     lanes: int
     oneway: bool
+    turn_lanes: list[str]
     turn_lanes_backward: list[str]
 
 
@@ -165,18 +167,22 @@ class RailProperties(TypedDict, total=False):
 class PlatformProperties(TypedDict, total=False):
     cmtype: Required[Literal["platform"]]
     kind: str
+    name: str
     ref: str
 
 
 class BenchProperties(TypedDict, total=False):
     cmtype: Required[Literal["bench"]]
     direction: float
+    # both spellings: OSM's `colour` is the usual key, `color` shows up too
     colour: str
+    color: str
 
 
 class FurnitureProperties(TypedDict, total=False):
     cmtype: Required[Literal["furniture"]]
     furniture: str
+    angle: float
 
 
 class TerraceProperties(TypedDict, total=False):
@@ -214,6 +220,7 @@ class FountainProperties(TypedDict, total=False):
 class WallProperties(TypedDict, total=False):
     cmtype: Required[Literal["wall"]]
     wall: str
+    height: float
     name: str
 
 
