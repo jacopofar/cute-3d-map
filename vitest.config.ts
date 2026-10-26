@@ -66,10 +66,10 @@ export default defineConfig({
       // numbers are a little under the current total so unrelated churn does
       // not fail the loop.
       thresholds: {
-        statements: 84,
-        branches: 65,
+        statements: 85,
+        branches: 67,
         functions: 83,
-        lines: 86,
+        lines: 87,
       },
       reporter: ["text"],
     },
