@@ -41,6 +41,20 @@ export function projectRings(
   );
 }
 
+/**
+ * The de-indexed copy of a geometry, with the indexed source disposed: every
+ * geometry a kind carries is merged into loose triangles, and an indexed one
+ * would make `mergeGeometries` fail on the mismatched set.
+ */
+export function unindexed(
+  geometry: THREE.BufferGeometry,
+): THREE.BufferGeometry {
+  if (!geometry.index) return geometry;
+  const flat = geometry.toNonIndexed();
+  geometry.dispose();
+  return flat;
+}
+
 /** The outline and holes as a `THREE.Shape`, for extruding or lofting. */
 export function shapeFromRings(rings: Rings): THREE.Shape {
   const toVec = ([x, y]: [number, number]) => new THREE.Vector2(x, y);

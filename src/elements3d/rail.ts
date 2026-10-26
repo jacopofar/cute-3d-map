@@ -30,15 +30,10 @@ export const railMaterial = new THREE.MeshLambertMaterial({
 
 type Point = [number, number];
 
-interface Buffers {
-  position: number[];
-  normal: number[];
-  uv: number[];
-  color: number[];
-}
-
+// one segment of a flat strip: the builder corrects the winding, which depends
+// on which way the line runs
 function ribbon(
-  buffers: Buffers,
+  builder: MeshBuilder,
   a: Point,
   b: Point,
   width: number,
@@ -51,38 +46,14 @@ function ribbon(
   if (length === 0) return;
   const rx = (-dy / length) * (width / 2);
   const ry = (dx / length) * (width / 2);
-  const p = (x: number, y: number, u: number, v: number) => {
-    buffers.position.push(x, y, z);
-    buffers.normal.push(0, 0, 1);
-    buffers.uv.push(u, v);
-    buffers.color.push(color.r, color.g, color.b);
-  };
-  // the right-hand offset makes the naive order clockwise, so check the
-  // signed area and reverse it when needed
-  const ax = a[0] - rx;
-  const ay = a[1] - ry;
-  const bx = b[0] - rx;
-  const by = b[1] - ry;
-  const cx = b[0] + rx;
-  const cy = b[1] + ry;
-  const qx = a[0] + rx;
-  const qy = a[1] + ry;
-  const cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-  if (cross < 0) {
-    p(ax, ay, 0, 0);
-    p(cx, cy, 1, 1);
-    p(bx, by, 1, 0);
-    p(ax, ay, 0, 0);
-    p(qx, qy, 0, 1);
-    p(cx, cy, 1, 1);
-  } else {
-    p(ax, ay, 0, 0);
-    p(bx, by, 1, 0);
-    p(cx, cy, 1, 1);
-    p(ax, ay, 0, 0);
-    p(cx, cy, 1, 1);
-    p(qx, qy, 0, 1);
-  }
+  builder.quad(
+    [a[0] - rx, a[1] - ry, z],
+    [b[0] - rx, b[1] - ry, z],
+    [b[0] + rx, b[1] + ry, z],
+    [a[0] + rx, a[1] + ry, z],
+    [0, 0, 1],
+    color,
+  );
 }
 
 /** One rail/multi-rail line as a merged geometry. */
@@ -99,7 +70,7 @@ export function rail(
         ? geom.coordinates
         : [];
   const parts: THREE.BufferGeometry[] = [];
-  const buffers: Buffers = { position: [], normal: [], uv: [], color: [] };
+  const ribbons = new MeshBuilder();
   const boxes = new MeshBuilder();
   const kind = f.properties?.kind === "tram" ? "tram" : "rail";
   const isRail = kind === "rail";
@@ -128,17 +99,17 @@ export function rail(
       ];
 
       if (isRail) {
-        ribbon(buffers, a, b, 3.4, BALLAST, 0.02);
+        ribbon(ribbons, a, b, 3.4, BALLAST, 0.02);
         const sleeperEnd = length;
         for (let t = 0.45; t < sleeperEnd; t += 1.05) {
           const start = at(t - 0.11);
           const end = at(t + 0.11);
-          ribbon(buffers, start, end, 2.6, SLEEPER, 0.065);
+          ribbon(ribbons, start, end, 2.6, SLEEPER, 0.065);
         }
       }
       const railZ = isRail ? 0.18 : 0.03;
       ribbon(
-        buffers,
+        ribbons,
         at(0, GAUGE / 2),
         at(length, GAUGE / 2),
         0.08,
@@ -146,7 +117,7 @@ export function rail(
         railZ,
       );
       ribbon(
-        buffers,
+        ribbons,
         at(0, -GAUGE / 2),
         at(length, -GAUGE / 2),
         0.08,
@@ -155,7 +126,7 @@ export function rail(
       );
 
       // catenary wire at the top, one per track
-      ribbon(buffers, at(0), at(length), 0.045, WIRE, 5.9);
+      ribbon(ribbons, at(0), at(length), 0.045, WIRE, 5.9);
 
       while (nextPole <= travelled + length) {
         const t = nextPole - travelled;
@@ -168,23 +139,8 @@ export function rail(
     }
   }
 
-  if (buffers.position.length > 0) {
-    const ribbons = new THREE.BufferGeometry();
-    ribbons.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(buffers.position, 3),
-    );
-    ribbons.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(buffers.normal, 3),
-    );
-    ribbons.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uv, 2));
-    ribbons.setAttribute(
-      "color",
-      new THREE.Float32BufferAttribute(buffers.color, 3),
-    );
-    parts.push(ribbons);
-  }
+  const ribbonGeometry = ribbons.geometry();
+  if (ribbonGeometry) parts.push(ribbonGeometry);
   const boxGeometry = boxes.geometry();
   if (boxGeometry) parts.push(boxGeometry);
   if (parts.length === 0) return [];

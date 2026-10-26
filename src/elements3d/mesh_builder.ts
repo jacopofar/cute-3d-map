@@ -23,6 +23,23 @@ export interface MeshBuilderOptions {
   uv?: boolean;
 }
 
+/**
+ * Whether the triangle (a, b, c) faces away from `normal`. Two of its corners
+ * have to be swapped to make it visible from that side.
+ */
+function facesAway(a: Triple, b: Triple, c: Triple, normal: Triple): boolean {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const uz = b[2] - a[2];
+  const vx = c[0] - a[0];
+  const vy = c[1] - a[1];
+  const vz = c[2] - a[2];
+  const nx = uy * vz - uz * vy;
+  const ny = uz * vx - ux * vz;
+  const nz = ux * vy - uy * vx;
+  return nx * normal[0] + ny * normal[1] + nz * normal[2] < 0;
+}
+
 /** The unit normal of the triangle (a, b, c). */
 function faceNormal(a: Triple, b: Triple, c: Triple): Triple {
   const ux = b[0] - a[0];
@@ -60,14 +77,20 @@ export class MeshBuilder {
     this.colors.push(color.r, color.g, color.b);
   }
 
-  /** One triangle, flat shaded with the given outward normal. */
+  /**
+   * One triangle, flat shaded with the given outward normal, wound to face it.
+   * The corner order is corrected for the same reason `quad` corrects it: a
+   * hand-placed face that winds the wrong way is invisible under backface
+   * culling, and that reads as a missing feature rather than a shading bug.
+   */
   triangle(
     a: Triple,
     b: Triple,
     c: Triple,
     normal: Triple,
     color: THREE.Color,
-  ) {
+  ): void {
+    if (facesAway(b, c, a, normal)) [b, c] = [c, b];
     this.vertex(a, normal, [0, 0], color);
     this.vertex(b, normal, [1, 0], color);
     this.vertex(c, normal, [1, 1], color);
@@ -86,19 +109,7 @@ export class MeshBuilder {
     normal: Triple,
     color: THREE.Color,
   ): void {
-    const e1: Triple = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-    const e2: Triple = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-    const cross: Triple = [
-      e1[1] * e2[2] - e1[2] * e2[1],
-      e1[2] * e2[0] - e1[0] * e2[2],
-      e1[0] * e2[1] - e1[1] * e2[0],
-    ];
-    if (
-      cross[0] * normal[0] + cross[1] * normal[1] + cross[2] * normal[2] <
-      0
-    ) {
-      [b, d] = [d, b];
-    }
+    if (facesAway(b, c, a, normal)) [b, d] = [d, b];
     this.vertex(a, normal, [0, 0], color);
     this.vertex(b, normal, [1, 0], color);
     this.vertex(c, normal, [1, 1], color);

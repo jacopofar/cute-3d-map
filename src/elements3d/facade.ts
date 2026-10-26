@@ -162,6 +162,11 @@ type Point = [number, number];
 // the six vertex buffers of a geometry being built: position, normal, uv,
 // color, the per-window night light flag and the "this quad is a window, draw a
 // frame and sill" flag. The last two stay zero for doors and balconies.
+//
+// This is the one quad writer that does not go through MeshBuilder, and the two
+// extra per-vertex scalars are why: the window shader reads them to light a pane
+// at night and to draw its frame. Everything else in the folder needs only the
+// position/normal/uv/color set.
 type Buffers = [number[], number[], number[], number[], number[], number[]];
 
 // the unit-square uv of the four corners in the order pushQuad lays them out:

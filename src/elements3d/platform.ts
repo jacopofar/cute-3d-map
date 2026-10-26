@@ -2,6 +2,9 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
+import { unindexed } from "./flat_polygon";
+import { MeshBuilder } from "./mesh_builder";
+import { coloured } from "./props";
 
 /*
  * Rail platforms: a low concrete slab with a white edge line. OSM mostly maps
@@ -32,34 +35,9 @@ export interface PlatformInfo {
   rings: Point[][];
 }
 
-function vertexColor(
-  geometry: THREE.BufferGeometry,
-  color: THREE.Color,
-): THREE.BufferGeometry {
-  const flat = geometry.index ? geometry.toNonIndexed() : geometry;
-  const position = flat.getAttribute("position");
-  const colors = new Float32Array(position.count * 3);
-  for (let i = 0; i < position.count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
-  }
-  flat.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geometry.dispose();
-  return flat;
-}
-
 function edgeGeometry(rings: Point[][]): THREE.BufferGeometry | null {
-  const position: number[] = [];
-  const normal: number[] = [];
-  const uv: number[] = [];
-  const color: number[] = [];
-  const push = (x: number, y: number) => {
-    position.push(x, y, PLATFORM_HEIGHT + 0.006);
-    normal.push(0, 0, 1);
-    uv.push(0, 0);
-    color.push(EDGE.r, EDGE.g, EDGE.b);
-  };
+  const edge = new MeshBuilder();
+  const z = PLATFORM_HEIGHT + 0.006;
   for (const ring of rings) {
     for (let i = 0; i + 1 < ring.length; i++) {
       const [ax, ay] = ring[i];
@@ -68,42 +46,21 @@ function edgeGeometry(rings: Point[][]): THREE.BufferGeometry | null {
       const dy = by - ay;
       const length = Math.hypot(dx, dy);
       if (length === 0) continue;
-      // a thin strip centred on the platform edge
+      // a thin strip centred on the platform edge; the builder takes care of
+      // which way round the four corners have to go
       const nx = (-dy / length) * EDGE_WIDTH * 0.5;
       const ny = (dx / length) * EDGE_WIDTH * 0.5;
-      const ax2 = ax + nx;
-      const ay2 = ay + ny;
-      const bx2 = bx + nx;
-      const by2 = by + ny;
-      const ax3 = ax - nx;
-      const ay3 = ay - ny;
-      const bx3 = bx - nx;
-      const by3 = by - ny;
-      const cross = (bx3 - ax3) * (by2 - ay3) - (by3 - ay3) * (bx2 - ax3);
-      if (cross < 0) {
-        push(ax3, ay3);
-        push(bx2, by2);
-        push(bx3, by3);
-        push(ax3, ay3);
-        push(ax2, ay2);
-        push(bx2, by2);
-      } else {
-        push(ax3, ay3);
-        push(bx3, by3);
-        push(bx2, by2);
-        push(ax3, ay3);
-        push(bx2, by2);
-        push(ax2, ay2);
-      }
+      edge.quad(
+        [ax + nx, ay + ny, z],
+        [bx + nx, by + ny, z],
+        [bx - nx, by - ny, z],
+        [ax - nx, ay - ny, z],
+        [0, 0, 1],
+        EDGE,
+      );
     }
   }
-  if (position.length === 0) return null;
-  const out = new THREE.BufferGeometry();
-  out.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
-  out.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
-  out.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-  out.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
-  return out;
+  return edge.geometry();
 }
 
 /** The geometry for one clipped platform. */
@@ -140,7 +97,7 @@ export function platform(
       bevelEnabled: false,
       curveSegments: 1,
     });
-    const top = vertexColor(extruded, CONCRETE);
+    const top = coloured(unindexed(extruded), CONCRETE);
     const edge = edgeGeometry(rings);
     if (edge) out.push(top, edge);
     else out.push(top);

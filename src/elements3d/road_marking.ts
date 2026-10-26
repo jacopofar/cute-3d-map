@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Stop lines and lane arrows at stop, give-way and signal nodes. tilegen
@@ -32,15 +33,10 @@ export const roadMarkingMaterial = new THREE.MeshLambertMaterial({
 
 type Point = [number, number];
 
-interface Buffers {
-  position: number[];
-  normal: number[];
-  uv: number[];
-  color: number[];
-}
-
+// the paint is flat, so the two helpers only differ in how many corners they
+// take; the winding and the attribute set come from the shared builder
 function quad(
-  buffers: Buffers,
+  builder: MeshBuilder,
   a: Point,
   b: Point,
   c: Point,
@@ -48,45 +44,35 @@ function quad(
   color: THREE.Color,
   z: number,
 ): void {
-  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  const [b2, d2] = cross < 0 ? [d, b] : [b, d];
-  const vertex = (p: Point, u: number, v: number) => {
-    buffers.position.push(p[0], p[1], z);
-    buffers.normal.push(0, 0, 1);
-    buffers.uv.push(u, v);
-    buffers.color.push(color.r, color.g, color.b);
-  };
-  vertex(a, 0, 0);
-  vertex(b2, 1, 0);
-  vertex(c, 1, 1);
-  vertex(a, 0, 0);
-  vertex(c, 1, 1);
-  vertex(d2, 0, 1);
+  builder.quad(
+    [a[0], a[1], z],
+    [b[0], b[1], z],
+    [c[0], c[1], z],
+    [d[0], d[1], z],
+    [0, 0, 1],
+    color,
+  );
 }
 
 function triangle(
-  buffers: Buffers,
+  builder: MeshBuilder,
   a: Point,
   b: Point,
   c: Point,
   color: THREE.Color,
   z: number,
 ): void {
-  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  const [p1, p2] = cross < 0 ? [c, b] : [b, c];
-  const vertex = (p: Point) => {
-    buffers.position.push(p[0], p[1], z);
-    buffers.normal.push(0, 0, 1);
-    buffers.uv.push(0, 0);
-    buffers.color.push(color.r, color.g, color.b);
-  };
-  vertex(a);
-  vertex(p1);
-  vertex(p2);
+  builder.triangle(
+    [a[0], a[1], z],
+    [b[0], b[1], z],
+    [c[0], c[1], z],
+    [0, 0, 1],
+    color,
+  );
 }
 
 function stopLine(
-  buffers: Buffers,
+  builder: MeshBuilder,
   center: Point,
   forward: Point,
   right: Point,
@@ -112,11 +98,11 @@ function stopLine(
     center[0] + right[0] * start + forward[0] * (thickness / 2),
     center[1] + right[1] * start + forward[1] * (thickness / 2),
   ];
-  quad(buffers, a, b, c, d, color, z);
+  quad(builder, a, b, c, d, color, z);
 }
 
 function arrow(
-  buffers: Buffers,
+  builder: MeshBuilder,
   center: Point,
   bearing: number,
   scale: number,
@@ -133,7 +119,7 @@ function arrow(
     center[1] + fy * forward * scale + ry * right * scale,
   ];
   quad(
-    buffers,
+    builder,
     at(-1.2, -0.13),
     at(0.25, -0.13),
     at(0.25, 0.13),
@@ -141,7 +127,7 @@ function arrow(
     color,
     z,
   );
-  triangle(buffers, at(0.25, -0.45), at(0.25, 0.45), at(1.25, 0), color, z);
+  triangle(builder, at(0.25, -0.45), at(0.25, 0.45), at(1.25, 0), color, z);
 }
 
 function turnAngle(turn: string): number {
@@ -199,12 +185,7 @@ export function roadMarking(
   const kind = props.kind;
   const giveWay = kind === "give_way";
 
-  const buffers: Buffers = {
-    position: [],
-    normal: [],
-    uv: [],
-    color: [],
-  };
+  const builder = new MeshBuilder();
 
   for (let d = 0; d < directions.length; d++) {
     const bearing = directions[d];
@@ -227,7 +208,7 @@ export function roadMarking(
       while (start < lineEnd) {
         const end = Math.min(start + segment, lineEnd);
         stopLine(
-          buffers,
+          builder,
           stopCenter,
           [fx, fy],
           [rx, ry],
@@ -238,7 +219,7 @@ export function roadMarking(
           OUTLINE_LIFT,
         );
         stopLine(
-          buffers,
+          builder,
           stopCenter,
           [fx, fy],
           [rx, ry],
@@ -252,7 +233,7 @@ export function roadMarking(
       }
     } else {
       stopLine(
-        buffers,
+        builder,
         stopCenter,
         [fx, fy],
         [rx, ry],
@@ -263,7 +244,7 @@ export function roadMarking(
         OUTLINE_LIFT,
       );
       stopLine(
-        buffers,
+        builder,
         stopCenter,
         [fx, fy],
         [rx, ry],
@@ -284,7 +265,7 @@ export function roadMarking(
       const offset =
         (oneWay ? 0 : width / 4) + (k - approachLanes / 2) * laneWidth;
       stopLine(
-        buffers,
+        builder,
         separatorCenter,
         [fx, fy],
         [rx, ry],
@@ -295,7 +276,7 @@ export function roadMarking(
         OUTLINE_LIFT,
       );
       stopLine(
-        buffers,
+        builder,
         separatorCenter,
         [fx, fy],
         [rx, ry],
@@ -324,22 +305,11 @@ export function roadMarking(
       ];
       const turn = turnFor(turns, lane, "through");
       const angle = bearing + turnAngle(turn);
-      arrow(buffers, center, angle, 1.15, OUTLINE_COLOR, OUTLINE_LIFT);
-      arrow(buffers, center, angle, 1, WHITE, LIFT);
+      arrow(builder, center, angle, 1.15, OUTLINE_COLOR, OUTLINE_LIFT);
+      arrow(builder, center, angle, 1, WHITE, LIFT);
     }
   }
 
-  if (buffers.position.length === 0) return [];
-  const out = new THREE.BufferGeometry();
-  out.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(buffers.position, 3),
-  );
-  out.setAttribute(
-    "normal",
-    new THREE.Float32BufferAttribute(buffers.normal, 3),
-  );
-  out.setAttribute("uv", new THREE.Float32BufferAttribute(buffers.uv, 2));
-  out.setAttribute("color", new THREE.Float32BufferAttribute(buffers.color, 3));
-  return [out];
+  const painted = builder.geometry();
+  return painted ? [painted] : [];
 }

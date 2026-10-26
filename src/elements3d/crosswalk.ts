@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
+import { MeshBuilder } from "./mesh_builder";
 
 /*
  * Zebra crossings: flat white bars on the carriageway, long along the traffic
@@ -76,24 +77,7 @@ export function crosswalk(
   const vx = Math.cos(radians);
   const vy = -Math.sin(radians);
 
-  const position: number[] = [];
-  const normal: number[] = [];
-  const uv: number[] = [];
-  const color: number[] = [];
-
-  const push = (
-    px: number,
-    py: number,
-    u: number,
-    w: number,
-    c: THREE.Color,
-    z = LIFT,
-  ) => {
-    position.push(px, py, z);
-    normal.push(0, 0, 1);
-    uv.push(u, w);
-    color.push(c.r, c.g, c.b);
-  };
+  const bars = new MeshBuilder();
 
   for (let i = 0; i < count; i++) {
     const offset = (i - (count - 1) / 2) * pitch;
@@ -106,34 +90,17 @@ export function crosswalk(
       color: THREE.Color,
       z: number,
     ) => {
-      // a = -u,-v, b = +u,-v, c = +u,+v, d = -u,+v (counter-clockwise from +z)
-      const ax = cx - ux * depth - vx * stripe;
-      const ay = cy - uy * depth - vy * stripe;
-      const bx = cx + ux * depth - vx * stripe;
-      const by = cy + uy * depth - vy * stripe;
-      const cx2 = cx + ux * depth + vx * stripe;
-      const cy2 = cy + uy * depth + vy * stripe;
-      const dx = cx - ux * depth + vx * stripe;
-      const dy = cy - uy * depth + vy * stripe;
-      // The (u, v) frame is left-handed in world XY, so the corner order above
-      // can wind clockwise depending on the road bearing. Reverse it when
-      // needed; otherwise the whole zebra is backface-culled.
-      const cross = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax);
-      if (cross < 0) {
-        push(ax, ay, 0, 0, color, z);
-        push(cx2, cy2, 1, 1, color, z);
-        push(bx, by, 1, 0, color, z);
-        push(ax, ay, 0, 0, color, z);
-        push(dx, dy, 0, 1, color, z);
-        push(cx2, cy2, 1, 1, color, z);
-      } else {
-        push(ax, ay, 0, 0, color, z);
-        push(bx, by, 1, 0, color, z);
-        push(cx2, cy2, 1, 1, color, z);
-        push(ax, ay, 0, 0, color, z);
-        push(cx2, cy2, 1, 1, color, z);
-        push(dx, dy, 0, 1, color, z);
-      }
+      // a = -u,-v, b = +u,-v, c = +u,+v, d = -u,+v; the builder corrects the
+      // winding, which depends on the road bearing because the (u, v) frame is
+      // left-handed in world XY
+      bars.quad(
+        [cx - ux * depth - vx * stripe, cy - uy * depth - vy * stripe, z],
+        [cx + ux * depth - vx * stripe, cy + uy * depth - vy * stripe, z],
+        [cx + ux * depth + vx * stripe, cy + uy * depth + vy * stripe, z],
+        [cx - ux * depth + vx * stripe, cy - uy * depth + vy * stripe, z],
+        [0, 0, 1],
+        color,
+      );
     };
     // A slightly larger dark edge keeps the white paint readable on the pale
     // basemap roads, without tinting the bars themselves.
@@ -146,12 +113,8 @@ export function crosswalk(
     addBar(halfDepth, halfStripe, c, LIFT);
   }
 
-  const out = new THREE.BufferGeometry();
-  out.setAttribute("position", new THREE.Float32BufferAttribute(position, 3));
-  out.setAttribute("normal", new THREE.Float32BufferAttribute(normal, 3));
-  out.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-  out.setAttribute("color", new THREE.Float32BufferAttribute(color, 3));
-  return [out];
+  const painted = bars.geometry();
+  return painted ? [painted] : [];
 }
 
 /** The crossing points in a tile, for click-picking. */
