@@ -718,37 +718,6 @@ class CoolMap implements MapDebug {
       }, 150);
     });
 
-    const trafficToggle = document.querySelector<HTMLInputElement>(
-      "#traffic-toggle input",
-    );
-    if (trafficToggle) {
-      this.trafficEnabled = trafficToggle.checked;
-      trafficToggle.addEventListener("change", () =>
-        this.setTrafficEnabled(trafficToggle.checked),
-      );
-    }
-
-    const inspectToggle = document.querySelector<HTMLInputElement>(
-      "#inspect-toggle input",
-    );
-    if (inspectToggle) {
-      this.inspectEnabled = inspectToggle.checked;
-      inspectToggle.addEventListener("change", () => {
-        this.inspectEnabled = inspectToggle.checked;
-        if (!this.inspectEnabled) this.selection.clear();
-      });
-    }
-
-    const cloudsToggle = document.querySelector<HTMLInputElement>(
-      "#clouds-toggle input",
-    );
-    if (cloudsToggle) {
-      this.cloudsEnabled = cloudsToggle.checked;
-      cloudsToggle.addEventListener("change", () =>
-        this.setCloudsEnabled(cloudsToggle.checked),
-      );
-    }
-
     // day/night: the checkbox jumps between 13:00 (day) and 01:00 (night), the
     // slider picks any hour in between and can reach both
     const nightToggle = document.querySelector<HTMLInputElement>(
