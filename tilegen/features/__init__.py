@@ -149,6 +149,12 @@ from .common import (
     area_square_meters as area_square_meters,
 )
 from .common import (
+    as_point as as_point,
+)
+from .common import (
+    feature as feature,
+)
+from .common import (
     line_bearing as line_bearing,
 )
 from .common import (

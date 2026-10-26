@@ -6,12 +6,12 @@ boundary between DuckDB and ``features.py``; keeping them out of ``main.py``
 leaves the CLI and tile pipeline readable.
 """
 
-import json
 import logging
 import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import duckdb
 import shapely
@@ -24,8 +24,10 @@ from features import (
     ROAD_WIDTHS,
     TERRACE_AMENITIES,
     RoadData,
+    as_point,
     building_base,
     building_top,
+    feature,
     parse_lane_count,
     parse_length,
     road_width,
@@ -109,13 +111,8 @@ def terrace_positions_from_parquet(
     positions: dict[str, tuple[float, float]] = {}
     for feature_id, tags, wkb in terraces:
         geometry = shapely.from_wkb(wkb)
-        if geometry.geom_type == "Point":
-            point = geometry
-        elif geometry.geom_type == "LineString":
-            point = geometry.interpolate(0.5, normalized=True)
-        elif geometry.geom_type in ("Polygon", "MultiPolygon"):
-            point = geometry.centroid
-        else:
+        point = as_point(geometry)
+        if point is None:
             continue
         nearest = tree.query_nearest(point)
         if len(nearest) == 0:
@@ -499,9 +496,11 @@ def rooftop_feature(
         )
         size = parse_length(tags.get("width")) or default_size
     geometry_out = (
-        json.loads(shapely.to_geojson(geometry))
+        # a solar polygon keeps its footprint so the panels cover the roof;
+        # everything else collapses to the point it sits on
+        geometry
         if kind == "solar" and geometry.geom_type in ("Polygon", "MultiPolygon")
-        else {"type": "Point", "coordinates": [point.x, point.y]}
+        else point
     )
     properties = {
         "cmtype": "rooftop",
@@ -512,12 +511,9 @@ def rooftop_feature(
     }
     if tags.get("name"):
         properties["name"] = tags["name"]
-    return {
-        "type": "feature",
-        "id": str(feature_id),
-        "geometry": geometry_out,
-        "properties": properties,
-    }
+    # this module types its tile features as plain dicts, so the TypedDict the
+    # builders return has to come back down to one here
+    return cast(dict, feature(str(feature_id), geometry_out, properties))
 
 
 def load_rooftop_accessories(
@@ -560,7 +556,7 @@ def load_rooftop_accessories(
                 if buildings[index].contains(center):
                     solar_buildings.add(str(building_ids[index]))
                     break
-        feature = rooftop_feature(
+        accessory = rooftop_feature(
             feature_id,
             tags,
             geometry,
@@ -568,10 +564,10 @@ def load_rooftop_accessories(
             building_tags,
             tree,
         )
-        if feature is None:
+        if accessory is None:
             continue
         point = geometry if geometry.geom_type == "Point" else geometry.centroid
-        by_tile[coord_to_tile(point.x, point.y, TILE_ZOOM)].append(feature)
+        by_tile[coord_to_tile(point.x, point.y, TILE_ZOOM)].append(accessory)
     return dict(by_tile), solar_buildings
 
 
@@ -648,12 +644,7 @@ def sidewalk_polygons_by_tile(
         )
         clipped = clipped.simplify(0.000002, preserve_topology=True)
         by_tile[(tx, ty)] = [
-            {
-                "type": "feature",
-                "id": f"sidewalk/{tx}/{ty}",
-                "geometry": json.loads(shapely.to_geojson(clipped)),
-                "properties": {"cmtype": "sidewalk"},
-            }
+            cast(dict, feature(f"sidewalk/{tx}/{ty}", clipped, {"cmtype": "sidewalk"}))
         ]
     return by_tile
 

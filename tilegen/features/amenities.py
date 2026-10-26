@@ -3,14 +3,11 @@
 Part of ``tilegen/features``: the construction sites, playgrounds, monuments, transit stops and fountains.
 """
 
-import json
 import math
-
-import shapely
 
 from tiles import TileFeature
 
-from .common import _flatten, area_square_meters
+from .common import _flatten, area_square_meters, as_point, feature
 
 
 def is_construction(tags) -> bool:
@@ -36,12 +33,7 @@ def to_construction(feature_id, tags, s, tile_box) -> TileFeature | None:
     if centroid.within(tile_box):
         properties["crane"] = True
         properties["site_area"] = round(area_square_meters(s))
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 def is_playground(tags) -> bool:
@@ -56,27 +48,16 @@ def to_playground(feature_id, tags, s) -> TileFeature | None:
     if not is_playground(tags):
         return None
     size = 10.0
-    if s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
+    point = as_point(s)
+    if point is None or point.is_empty:
+        return None
+    if s.geom_type in ("Polygon", "MultiPolygon"):
         area = area_square_meters(s)
         size = max(6.0, min(18.0, 2.0 * math.sqrt(area / math.pi)))
-    else:
-        return None
-    if point.is_empty:
-        return None
     properties = {"cmtype": "playground", "size": round(size, 2)}
     if tags.get("name"):
         properties["name"] = tags["name"]
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": properties,
-    }
+    return feature(feature_id, point, properties)
 
 
 def monument_kind(tags) -> str | None:
@@ -101,27 +82,15 @@ def to_monument(feature_id, tags, s) -> TileFeature | None:
     kind = monument_kind(tags)
     if kind is None:
         return None
-    if s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
-    else:
-        return None
-    if point.is_empty:
+    point = as_point(s)
+    if point is None or point.is_empty:
         return None
     properties = {"cmtype": "monument", "kind": kind}
     if tags.get("memorial"):
         properties["memorial"] = tags["memorial"]
     if tags.get("name"):
         properties["name"] = tags["name"]
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": properties,
-    }
+    return feature(feature_id, point, properties)
 
 
 def transit_kind(tags) -> str | None:
@@ -144,15 +113,8 @@ def to_transit_stop(feature_id, tags, s) -> TileFeature | None:
     kind = transit_kind(tags)
     if kind is None:
         return None
-    if s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
-    else:
-        return None
-    if point.is_empty:
+    point = as_point(s)
+    if point is None or point.is_empty:
         return None
     properties = {"cmtype": "transit_stop", "stop": kind}
     if tags.get("name"):
@@ -161,12 +123,7 @@ def to_transit_stop(feature_id, tags, s) -> TileFeature | None:
         tags.get("shelter") == "yes" or tags.get("covered") == "yes"
     ):
         properties["shelter"] = True
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": properties,
-    }
+    return feature(feature_id, point, properties)
 
 
 def to_fountain(feature_id, tags, s) -> TileFeature | None:
@@ -176,26 +133,15 @@ def to_fountain(feature_id, tags, s) -> TileFeature | None:
     if tags.get("amenity") != "fountain":
         return None
     size = 2.4
-    if s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
+    point = as_point(s)
+    if point is None or point.is_empty:
+        return None
+    if s.geom_type in ("Polygon", "MultiPolygon"):
         area = area_square_meters(s)
         size = max(1.5, min(12.0, 2.0 * math.sqrt(area / math.pi)))
-    else:
-        return None
-    if point.is_empty:
-        return None
     properties = {
         "cmtype": "fountain",
         "size": round(size, 2),
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, point, properties)

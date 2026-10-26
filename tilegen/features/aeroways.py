@@ -3,14 +3,11 @@
 Part of ``tilegen/features``: the runways, taxiways, aprons and helipads.
 """
 
-import json
 import logging
-
-import shapely
 
 from tiles import TileFeature
 
-from .common import parse_length
+from .common import feature, parse_length
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +47,4 @@ def to_aeroway(feature_id, tags, s) -> TileFeature | None:
     else:
         return None
     properties = {"cmtype": "aeroway", "aeroway": kind, "width": width}
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)

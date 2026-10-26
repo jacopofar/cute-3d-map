@@ -28,6 +28,7 @@ from features import (
     WATER_NATURAL,
     WATERWAY_KINDS,
     RoadData,
+    feature,
     furniture_kind,
     is_bridge,
     is_cemetery,
@@ -267,14 +268,7 @@ def tile_to_geojson(
     raw: list = []
     for feature_id, tags, geometry in data:
         s = shapely.from_wkb(geometry)
-        raw.append(
-            {
-                "type": "feature",
-                "id": feature_id,
-                "geometry": json.loads(shapely.to_geojson(s)),
-                "properties": tags,
-            }
-        )
+        raw.append(feature(feature_id, s, tags))
         render.extend(
             _render_feature(
                 feature_id,
@@ -728,8 +722,8 @@ def _write_tile(
     if rooftop_here:
         render.extend(rooftop_here)
     if city is not None and city.directory is not None:
-        for feature in render:
-            model = feature.get("properties", {}).get("model")
+        for rendered in render:
+            model = rendered.get("properties", {}).get("model")
             if not isinstance(model, dict) or "file" not in model:
                 continue
             source = city.directory / model.pop("file")

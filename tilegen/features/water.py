@@ -3,14 +3,10 @@
 Part of ``tilegen/features``: the water areas and waterways.
 """
 
-import json
-
-import shapely
-
 from tiles import TileFeature
 
 from .buildings import vertical_level
-from .common import _flatten
+from .common import _flatten, feature
 
 # water areas: bodies of water mapped as polygons. `water` alone catches the
 # water=* areas that carry no natural=water.
@@ -69,9 +65,4 @@ def to_water(feature_id, tags, s, tile_box) -> TileFeature | None:
         # the frontend draws those faint.
         "layer": vertical_level(tags),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)

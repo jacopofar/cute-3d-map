@@ -3,11 +3,14 @@
 Part of ``tilegen/features``: the shared parsing and geometry helpers.
 """
 
+import json
 import math
 import re
 from math import atan2, cos, degrees, radians
 
 import shapely
+
+from tiles import TileFeature
 
 _NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
 
@@ -161,3 +164,31 @@ def _flatten(geometry, want: str):
 def transport_class(tags) -> str | None:
     """The highway/railway class a bridge or tunnel carries."""
     return tags.get("highway") or tags.get("railway")
+
+
+def feature(feature_id, geometry, properties: dict) -> TileFeature:
+    """An emitted tile feature: drop the None properties here rather than at
+    every builder, so "a missing tag is an absent key" holds everywhere."""
+    return {
+        "type": "feature",
+        "id": feature_id,
+        "geometry": json.loads(shapely.to_geojson(geometry)),
+        "properties": {
+            key: value for key, value in properties.items() if value is not None
+        },
+    }
+
+
+def as_point(geometry) -> shapely.Point | None:
+    """The point a point-only builder draws for a mapped geometry: a node is
+    itself, a way its midpoint and an area its centroid. None for anything else
+    (a collection, a bookmark), so the caller drops the feature rather than
+    inventing a position. An empty area still gets a centroid here, which is why
+    the callers keep their own `is_empty` guard."""
+    if geometry.geom_type == "Point":
+        return geometry
+    if geometry.geom_type == "LineString":
+        return geometry.interpolate(0.5, normalized=True)
+    if geometry.geom_type in ("Polygon", "MultiPolygon"):
+        return geometry.centroid
+    return None

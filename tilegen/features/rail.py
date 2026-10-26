@@ -3,13 +3,9 @@
 Part of ``tilegen/features``: the rail and tram ways, and their platforms.
 """
 
-import json
-
-import shapely
-
 from tiles import TileFeature
 
-from .common import _flatten, area_square_meters, parse_number
+from .common import _flatten, area_square_meters, feature, parse_number
 
 RAIL_KINDS = frozenset({"rail", "tram"})
 
@@ -50,12 +46,7 @@ def to_platform(feature_id, tags, s, tile_box) -> TileFeature | None:
         "ref": tags.get("ref"),
         "kind": tags.get("railway") or "platform",
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 def to_rail(feature_id, tags, s, tile_box) -> TileFeature | None:
@@ -79,9 +70,4 @@ def to_rail(feature_id, tags, s, tile_box) -> TileFeature | None:
         "kind": tags.get("railway"),
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)

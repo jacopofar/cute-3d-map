@@ -3,13 +3,11 @@
 Part of ``tilegen/features``: the walls, gates and fences.
 """
 
-import json
-
 import shapely
 
 from tiles import TileFeature
 
-from .common import _flatten, parse_length
+from .common import _flatten, feature, parse_length
 
 # barriers drawn as a line the frontend can build a fence band along. `fence` is
 # the core; a guard rail or a railing is the same shape with a metal color, so
@@ -58,12 +56,7 @@ def to_wall(feature_id, tags, s, tile_box) -> TileFeature | None:
         "wall": tags.get("wall") or barrier,
         "height": parse_length(tags.get("height")),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 def to_gate(
@@ -75,16 +68,15 @@ def to_gate(
     bearing = (gate_bearings or {}).get(feature_id)
     if bearing is None:
         return None
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {
+    return feature(
+        feature_id,
+        s,
+        {
             "cmtype": "gate",
             "bearing": round(bearing, 1),
             "width": 3.0,
         },
-    }
+    )
 
 
 def to_fence(feature_id, tags, s, tile_box) -> TileFeature | None:
@@ -111,9 +103,4 @@ def to_fence(feature_id, tags, s, tile_box) -> TileFeature | None:
         "barrier": barrier,
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)

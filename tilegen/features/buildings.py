@@ -3,16 +3,13 @@
 Part of ``tilegen/features``: the buildings, building parts and glass facades.
 """
 
-import json
 import logging
-
-import shapely
 
 from city import BuildingOverride
 from impute import impute
 from tiles import TileFeature
 
-from .common import parse_length, parse_level, parse_number
+from .common import feature, parse_length, parse_level, parse_number
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +133,4 @@ def to_building(
             "rotation": override.model.rotation,
             "offset": list(override.model.offset),
         }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)

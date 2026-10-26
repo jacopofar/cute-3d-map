@@ -3,15 +3,13 @@
 Part of ``tilegen/features``: the benches, street furniture and outdoor terraces.
 """
 
-import json
 import logging
 
-import shapely
 from shapely.geometry import Point
 
 from tiles import TileFeature
 
-from .common import COMPASS, line_bearing
+from .common import COMPASS, as_point, feature, line_bearing
 
 logger = logging.getLogger(__name__)
 
@@ -35,17 +33,13 @@ def to_bench(feature_id, tags, s) -> TileFeature | None:
     the midpoint of the line, with the facing taken along it; benches come in
     thousands, so the properties stay minimal (the frontend derives everything
     else)."""
-    if s.geom_type == "Point":
-        direction = bench_direction(tags)
-    elif s.geom_type == "LineString":
-        direction = bench_direction(tags)
-        if direction is None:
-            direction = line_bearing(s)
-        s = s.interpolate(0.5, normalized=True)
-    else:
+    if s.geom_type not in ("Point", "LineString"):
         # one stray Polygon bench (and anything odder) must not abort the tile
         logger.warning(f"non-point/line bench?? {feature_id} ({s.geom_type})")
         return None
+    direction = bench_direction(tags)
+    if direction is None and s.geom_type == "LineString":
+        direction = line_bearing(s)
     properties = {
         "cmtype": "bench",
         "direction": direction,
@@ -54,12 +48,7 @@ def to_bench(feature_id, tags, s) -> TileFeature | None:
         "colour": tags.get("colour"),
         "color": tags.get("color"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, as_point(s), properties)
 
 
 # small street furniture: one point per object, so the frontend can build a
@@ -127,27 +116,13 @@ def to_terrace(feature_id, tags, s, position=None) -> TileFeature | None:
     precomputed sidewalk point (see terrace_positions_from_parquet)."""
     if not is_terrace(tags):
         return None
-    if position is not None:
-        point = Point(position)
-    elif s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
-    else:
-        return None
-    if point.is_empty:
+    point = Point(position) if position is not None else as_point(s)
+    if point is None or point.is_empty:
         return None
     properties = {"cmtype": "terrace", "terrace": tags["amenity"]}
     if tags.get("name"):
         properties["name"] = tags["name"]
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": properties,
-    }
+    return feature(feature_id, point, properties)
 
 
 def to_furniture(feature_id, tags, s) -> TileFeature | None:
@@ -157,24 +132,13 @@ def to_furniture(feature_id, tags, s) -> TileFeature | None:
     kind = furniture_kind(tags)
     if kind is None:
         return None
-    angle = None
-    if s.geom_type == "Point":
-        point = s
-    elif s.geom_type == "LineString":
-        angle = line_bearing(s)
-        point = s.interpolate(0.5, normalized=True)
-    elif s.geom_type in ("Polygon", "MultiPolygon"):
-        point = s.centroid
-    else:
+    point = as_point(s)
+    if point is None:
         return None
+    angle = line_bearing(s) if s.geom_type == "LineString" else None
     if point.is_empty:
         return None
     properties = {"cmtype": "furniture", "furniture": kind}
     if angle is not None:
         properties["angle"] = round(angle, 4)
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(point)),
-        "properties": properties,
-    }
+    return feature(feature_id, point, properties)

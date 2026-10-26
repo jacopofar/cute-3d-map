@@ -3,13 +3,9 @@
 Part of ``tilegen/features``: the parks, park paths and cemeteries.
 """
 
-import json
-
-import shapely
-
 from tiles import TileFeature
 
-from .common import _flatten, area_square_meters, parse_length
+from .common import _flatten, area_square_meters, feature, parse_length
 
 # green areas: parks, woods, lawns and pitches. The frontend draws them with a
 # shader that has two styles, so each feature is classified into the style it
@@ -118,12 +114,7 @@ def to_park_path(feature_id, tags, s, green_union, tile_box) -> TileFeature | No
         "width": width,
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(line)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, line, properties)
 
 
 def is_cemetery(tags) -> bool:
@@ -144,12 +135,7 @@ def to_cemetery(feature_id, tags, s, tile_box) -> TileFeature | None:
         "cmtype": "cemetery",
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 # A running track is drawn as the athletics oval it carries: `sport=running` is
@@ -216,9 +202,4 @@ def to_green(feature_id, tags, s, tile_box) -> TileFeature | None:
         "surface": pitch_surface(tags),
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)

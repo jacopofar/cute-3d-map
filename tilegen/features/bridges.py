@@ -3,7 +3,6 @@
 Part of ``tilegen/features``: the bridges and tunnel portals.
 """
 
-import json
 import math
 
 import shapely
@@ -12,7 +11,7 @@ from shapely.geometry import Point
 from tiles import TileFeature
 
 from .buildings import vertical_level
-from .common import _flatten, transport_class
+from .common import _flatten, feature, transport_class
 
 
 # a bridge is a way carrying `bridge` (any value other than "no"): the common
@@ -112,12 +111,7 @@ def to_bridge(feature_id, tags, s, tile_box) -> TileFeature | None:
         "bridge": tags.get("bridge") or "deck",
         "name": tags.get("name"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(clipped)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 def portal_angle(lon0: float, lat0: float, lon1: float, lat1: float) -> float:
@@ -168,13 +162,7 @@ def to_tunnel(feature_id, tags, s, tile_box) -> list[TileFeature]:
         "class": transport,
         "name": tags.get("name"),
     }
-    properties = {k: v for k, v in portal.items() if v is not None}
     return [
-        {
-            "type": "feature",
-            "id": feature_id,
-            "geometry": json.loads(shapely.to_geojson(point)),
-            "properties": {**properties, "angle": round(angle, 4)},
-        }
+        feature(feature_id, point, {**portal, "angle": round(angle, 4)})
         for point, angle in tunnel_portals(s, tile_box)
     ]

@@ -3,19 +3,17 @@
 Part of ``tilegen/features``: the road data, crossings, signals and painted markings.
 """
 
-import json
 import logging
 import math
 import re
 from dataclasses import dataclass
 from math import atan2, cos, degrees, radians
 
-import shapely
 from shapely.geometry import LineString, Point
 
 from tiles import TileFeature
 
-from .common import parse_length
+from .common import feature, parse_length
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +25,7 @@ def to_stop_point(feature_id, tags, s, cmtype: str) -> TileFeature | None:
     if s.geom_type != "Point":
         logger.warning(f"non-point {cmtype}?? {feature_id} ({s.geom_type})")
         return None
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {"cmtype": cmtype},
-    }
+    return feature(feature_id, s, {"cmtype": cmtype})
 
 
 def to_traffic_signal(feature_id, tags, s) -> TileFeature | None:
@@ -199,12 +192,7 @@ def to_road_marking(
         "turn_lanes": road.turn_lanes,
         "turn_lanes_backward": road.turn_lanes_backward,
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)
 
 
 # Roads wide enough to carry painted lanes. Ramps and service ways are left out:
@@ -243,10 +231,9 @@ def to_lane(feature_id, tags, s, tile_box) -> TileFeature | None:
         # one lane has no divider to draw
         return None
     clipped = s.intersection(tile_box)
-    if clipped.is_empty:
-        return None
-    geometry = json.loads(shapely.to_geojson(clipped))
-    if geometry["type"] not in ("LineString", "MultiLineString"):
+    # a clip of a way can come back as a collection (a touch at the tile edge);
+    # the lane paint is offsets of a centreline, so only a line will do
+    if clipped.is_empty or clipped.geom_type not in ("LineString", "MultiLineString"):
         return None
     properties = {
         "cmtype": "lane",
@@ -255,12 +242,7 @@ def to_lane(feature_id, tags, s, tile_box) -> TileFeature | None:
         "oneway": tags.get("oneway") in ("yes", "true", "1", "-1"),
         "highway": tags.get("highway"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": geometry,
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, clipped, properties)
 
 
 def to_crosswalk(
@@ -280,9 +262,4 @@ def to_crosswalk(
         "crossing": tags.get("crossing"),
         "markings": tags.get("crossing:markings"),
     }
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)

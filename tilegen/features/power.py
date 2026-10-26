@@ -3,13 +3,11 @@
 Part of ``tilegen/features``: the power towers and overhead lines.
 """
 
-import json
-
 import shapely
 
 from tiles import TileFeature
 
-from .common import parse_length, parse_number
+from .common import feature, parse_length, parse_number
 
 POWER_LINE_KINDS = frozenset({"line", "minor_line"})
 
@@ -43,18 +41,17 @@ def to_power_tower(feature_id, tags, s) -> TileFeature | None:
     """Build a power-tower point feature."""
     if s.geom_type != "Point":
         return None
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {
+    return feature(
+        feature_id,
+        s,
+        {
             "cmtype": "power_tower",
             "height": parse_length(tags.get("height")) or 30.0,
             "name": tags.get("name"),
             "operator": tags.get("operator"),
             "ref": tags.get("ref"),
         },
-    }
+    )
 
 
 def to_power_line(feature_id, tags, s, tile_box) -> list[TileFeature]:
@@ -76,14 +73,5 @@ def to_power_line(feature_id, tags, s, tile_box) -> list[TileFeature]:
             "ref": tags.get("ref"),
             "operator": tags.get("operator"),
         }
-        features.append(
-            {
-                "type": "feature",
-                "id": feature_id,
-                "geometry": json.loads(shapely.to_geojson(part)),
-                "properties": {
-                    key: value for key, value in properties.items() if value is not None
-                },
-            }
-        )
+        features.append(feature(feature_id, part, properties))
     return features

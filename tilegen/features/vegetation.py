@@ -3,15 +3,12 @@
 Part of ``tilegen/features``: the trees and tree rows.
 """
 
-import json
 import logging
 import zlib
 
-import shapely
-
 from tiles import TileFeature
 
-from .common import parse_length
+from .common import feature, parse_length
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +60,7 @@ def to_tree(feature_id, tags, s) -> TileFeature | None:
         return None
     tree_type, size = tree_type_size(tags, zlib.crc32(str(feature_id).encode()))
     properties = {"cmtype": "tree", "type": tree_type, "size": size}
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)
 
 
 def to_tree_row(feature_id, tags, s) -> TileFeature | None:
@@ -80,9 +72,4 @@ def to_tree_row(feature_id, tags, s) -> TileFeature | None:
     # same values
     tree_type, size = tree_type_size(tags, zlib.crc32(str(feature_id).encode()))
     properties = {"cmtype": "tree_row", "type": tree_type, "size": size}
-    return {
-        "type": "feature",
-        "id": feature_id,
-        "geometry": json.loads(shapely.to_geojson(s)),
-        "properties": {k: v for k, v in properties.items() if v is not None},
-    }
+    return feature(feature_id, s, properties)
