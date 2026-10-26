@@ -50,6 +50,7 @@ STYLE: dict[str, str] = {
     "gate": "#a36b3f",
     "fence": "#7a756c",
     "rooftop": "#d08a45",
+    "lane": "#4a4a4a",
     "aeroway": "#a7a7a2",
     "bench": "#9a6d43",
     "traffic_signal": "#d24d4d",
@@ -86,11 +87,12 @@ DRAW_ORDER = {
     "playground": 23,
     "monument": 24,
     "rooftop": 25,
-    "crosswalk": 26,
-    "road_marking": 27,
-    "traffic_signal": 28,
-    "crossing": 29,
-    "tunnel": 30,
+    "lane": 26,
+    "crosswalk": 27,
+    "road_marking": 28,
+    "traffic_signal": 29,
+    "crossing": 30,
+    "tunnel": 31,
 }
 
 

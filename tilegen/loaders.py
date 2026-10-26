@@ -742,12 +742,11 @@ def load_road_data(input_parquet: Path) -> dict[int, RoadData]:
     bearing, width and lane tags. A spatial index over the drivable ways is
     enough: the nodes sit on the way geometry, so the nearest segment is the
     road."""
-    classes = ",".join(f"'{name}'" for name in ROAD_WIDTHS)
     rows = duckdb.execute(
         f"""
         select tags, ST_AsWKB(geometry)
         from read_parquet($input_path)
-        where tags['highway'] in ({classes})
+        where tags['highway'] in {_in_list(ROAD_WIDTHS)}
           and ST_GeometryType(geometry) = 'LINESTRING'
         """,
         {"input_path": str(input_parquet)},

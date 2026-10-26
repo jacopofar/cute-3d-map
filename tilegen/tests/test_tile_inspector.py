@@ -82,3 +82,12 @@ def test_load_features_reads_the_tile_range(tmp_path):
     features = tile_inspector.load_features(tmp_path, bbox)
     assert len(features) == 1
     assert features[0]["properties"]["cmtype"] == "water"
+
+
+def test_every_cmtype_has_a_style_and_a_draw_order():
+    """The inspector is the only place that sees every layer, so a new cmtype
+    that falls through to the default gray is a silent hole in it."""
+    from tiles import BY_CMTYPE
+
+    assert set(BY_CMTYPE) - set(tile_inspector.STYLE) == set()
+    assert set(tile_inspector.STYLE) <= set(tile_inspector.DRAW_ORDER)

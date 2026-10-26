@@ -514,10 +514,11 @@ def parquet_features_by_tile(
     return group_features_by_tile(rows)
 
 
-def _tile_extent(
+def _log_tile_extent(
     input_parquet: Path, borders_shape: shapely.Geometry | None
-) -> tuple[int, int, int, int]:
-    """The tile range covered by the parquet, optionally narrowed by a border."""
+) -> None:
+    """Log the tile range covered by the parquet, optionally narrowed by a
+    border. Only the log is used: the tile pass walks the rows, not the range."""
     bb = duckdb.execute(
         """
         with ext as (
@@ -543,7 +544,6 @@ def _tile_extent(
     min_x, max_y = coord_to_tile(minlon, minlat, TILE_ZOOM)
     max_x, min_y = coord_to_tile(maxlon, maxlat, TILE_ZOOM)
     logger.info(f"extent: {[min_x, min_y, max_x, max_y]}")
-    return min_x, min_y, max_x, max_y
 
 
 def _traffic_layers(
@@ -782,7 +782,7 @@ def parquet_to_tiles(
     distributions = building_distributions(input_parquet)
     terrace_positions = terrace_positions_from_parquet(input_parquet)
     level_report(input_parquet)
-    _tile_extent(input_parquet, borders_shape)
+    _log_tile_extent(input_parquet, borders_shape)
     traffic_by_tile = (
         _traffic_layers(
             input_parquet,
