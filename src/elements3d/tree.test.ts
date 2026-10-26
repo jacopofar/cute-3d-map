@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { epsg4326toEpsg3857 } from "../projection";
 import { canopyVariation, tree } from "./tree";
 
-// a spread of hashes, as generateHash produces them from tree ids
+// a spread of hashes, of the kind hashSeed produces from tree ids
 const HASHES = Array.from({ length: 200 }, (_, i) => (i * 2654435761) >>> 0);
 
 describe("canopyVariation", () => {

@@ -118,6 +118,10 @@ function ringArea(ring: Ring): number {
   return Math.abs(twice) / 2;
 }
 
+// A grid hash, not `random.ts`'s string hash: the row layout needs a value per
+// (row, column) pair, and it needs it to decorrelate across neighbouring cells
+// so the jitter reads as individual stones rather than a wave. Hashing a
+// formatted key through `hashSeed` would allocate a string per grave.
 function hash2(i: number, j: number, seed: number): number {
   let h =
     Math.imul(i | 0, 374761393) ^

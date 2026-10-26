@@ -4,15 +4,7 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
 import { applyVertexColor } from "./vertex_color";
-
-const generateHash = (s: string): number => {
-  let hash = 0;
-  for (const char of s) {
-    hash = (hash << 5) - hash + char.charCodeAt(0);
-    hash |= 0; // Constrain to 32bit integer
-  }
-  return Math.abs(hash);
-};
+import { hashSeed } from "./random";
 
 // medium greens: the darker end of the range used to come out black once the
 // vertex color was multiplied by the lighting and ACES tone mapping
@@ -43,7 +35,7 @@ export function tree(
   f: Geojson.Feature,
 ): THREE.BufferGeometry[] {
   if (f.geometry.type === "Point") {
-    const h = generateHash(`${f.id}`);
+    const h = hashSeed(`${f.id}`);
     const props = f.properties as { type?: string; size?: number } | null;
     // type/size come from the preprocessing; fall back to a hash for old data
     const treeType = props?.type ?? (h % 3 === 0 ? "conifer" : "broadleaf");

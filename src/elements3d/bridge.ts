@@ -3,6 +3,7 @@ import type Geojson from "geojson";
 
 import { toModelCoords } from "../projection";
 import { applyVertexColor } from "./vertex_color";
+import { hashSeed } from "./random";
 import {
   bridgeDeckHeight,
   bridgeDeckWidth,
@@ -54,11 +55,7 @@ function bridgeHeight(f: Geojson.Feature): number {
   // a deterministic few-centimetre offset per feature separates them without
   // reading as a height difference.
   const id = typeof f.id === "string" ? f.id : "";
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  }
-  return base + (hash % 5) * 0.01;
+  return base + (hashSeed(id) % 5) * 0.01;
 }
 
 function applyGeometry(
