@@ -37,7 +37,8 @@ decorative volumetric cloud layer.
   `main`; the default per-change e2e (~30-90 s). `--list` previews the selection.
 - `npm run test:e2e:smoke` — boot and permalink specs only.
 - `npm run test:e2e` — full Playwright suite (~5 min; the merge gate).
-- `npm run bench` — frame-time benchmark (slow, machine-dependent; see README).
+- `npm run bench` — frame-time benchmark (slow, machine-dependent; see
+  `docs/performance.md`).
 - `npm run bench:gpu` — the same app in headed Chrome on the real GPU (needs a
   display), panning/tilting/zooming (~80 s); writes
   `perf-results/latest-gpu.json`. Run it only for render/perf changes. It
@@ -57,6 +58,11 @@ CI (`.github/workflows/ci.yml`) runs `test:check`, the coverage floor, ruff,
 specs boot against the generated tiles, which are not in the repo.
 
 ## Architecture
+
+The human-facing documentation lives in `docs/` (`architecture.md` for the tile
+contract, `layers.md` per layer, `traffic.md`, `tilegen.md`,
+`performance.md`); this section is the terse module map and stays the reference
+for agents.
 
 - `src/main.ts` — `CoolMap` wraps the MapLibre map and adds the Three.js
   `CustomLayerInterface`, then wires the modules below together. It keeps the
